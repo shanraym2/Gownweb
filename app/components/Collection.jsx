@@ -2,34 +2,12 @@
 
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 import ProductCard from './ProductCard'
+import { GOWNS } from '../data/gowns'
 
 export default function Collection() {
   const { ref: headerRef, isVisible: headerVisible } = useIntersectionObserver({ threshold: 0.15 })
 
-  const products = [
-    {
-      id: 1,
-      name: 'The Isabella',
-      price: '₱65,000',
-      image: '/images/image1.png',
-      alt: 'Lace Detail Gown'
-    },
-    {
-      id: 2,
-      name: 'The Victoria',
-      price: '₱102,000',
-      image: '/images/image2.png',
-      alt: 'Royal Satin Gown'
-    },
-    {
-      id: 3,
-      name: 'The Sophia',
-      price: '₱80,000',
-      image: '/images/image1.png',
-      alt: 'Floral Garden Gown',
-      style: { filter: 'brightness(0.9)' }
-    }
-  ]
+  const products = GOWNS.slice(0, 3)
 
   return (
     <section id="collection" className="collection-section">
