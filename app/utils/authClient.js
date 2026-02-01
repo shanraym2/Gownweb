@@ -43,8 +43,8 @@ export function registerUser({ name, email, password }) {
 
   const updated = [...users, newUser]
   saveUsers(updated)
-  safeSetItem(CURRENT_USER_KEY, JSON.stringify({ id: newUser.id, name: newUser.name, email: newUser.email }))
-
+  const session = { id: newUser.id, name: newUser.name, email: newUser.email, role: 'customer' }
+  safeSetItem(CURRENT_USER_KEY, JSON.stringify(session))
   return { ok: true, user: newUser }
 }
 
@@ -58,11 +58,8 @@ export function loginUser({ email, password }) {
     return { ok: false, error: 'Invalid email or password.' }
   }
 
-  safeSetItem(
-    CURRENT_USER_KEY,
-    JSON.stringify({ id: match.id, name: match.name, email: match.email })
-  )
-
+  const session = { id: match.id, name: match.name, email: match.email, role: match.role || 'customer' }
+  safeSetItem(CURRENT_USER_KEY, JSON.stringify(session))
   return { ok: true, user: match }
 }
 
@@ -76,8 +73,20 @@ export function getCurrentUser() {
   }
 }
 
+export function setCurrentUserRole(role) {
+  const user = getCurrentUser()
+  if (!user) return
+  safeSetItem(CURRENT_USER_KEY, JSON.stringify({ ...user, role: role || 'customer' }))
+}
+
 export function logoutUser() {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(CURRENT_USER_KEY)
 }
 
+/** Clears all registered users and current session (this browser only). */
+export function resetAllUsers() {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(USERS_KEY)
+  window.localStorage.removeItem(CURRENT_USER_KEY)
+}

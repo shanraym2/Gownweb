@@ -1,126 +1,164 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import { loadCart, saveCart, setQuantity, removeItem, loadCartNote, saveCartNote } from '../utils/cartClient'
-import { GOWNS } from '../data/gowns'
+import { useGowns, getGownById } from '@/hooks/useGowns'
+import {
+  loadCart,
+  setQuantity,
+  removeItem,
+  loadCartNote,
+  saveCartNote,
+} from '../utils/cartClient'
 
 function parsePrice(priceStr) {
-  if (!priceStr) return 0
-  const s = String(priceStr).replace(/[₱,\s]/g, '')
-  return parseFloat(s) || 0
+  if (!priceStr || typeof priceStr !== 'string') return 0
+  const num = parseInt(priceStr.replace(/[^\d]/g, ''), 10)
+  return isNaN(num) ? 0 : num
 }
 
-function formatPeso(n) {
-  return `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+function formatPrice(num) {
+  return '₱' + Number(num).toLocaleString('en-PH')
 }
-
-const BRAND = 'JCE Bridal'
 
 export default function CartPage() {
-  const [items, setItems] = useState([])
+  const { gowns } = useGowns()
+  const [cartItems, setCartItems] = useState([])
   const [note, setNote] = useState('')
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    setItems(loadCart())
-    setNote(loadCartNote())
+    setMounted(true)
   }, [])
 
-  const detailedItems = useMemo(() => {
-    return items
-      .map((entry) => {
-        const gown = GOWNS.find((g) => g.id === entry.id)
+  useEffect(() => {
+    if (!mounted) return
+    const raw = loadCart()
+    const withGowns = raw
+      .map((item) => {
+        const gown = getGownById(gowns, item.id)
         if (!gown) return null
-        return { ...gown, qty: entry.qty }
+        const priceNum = parsePrice(gown.price)
+        return {
+          id: gown.id,
+          name: gown.name,
+          image: gown.image,
+          alt: gown.alt,
+          price: gown.price,
+          priceNum,
+          qty: item.qty,
+          subtotal: priceNum * item.qty,
+        }
       })
       .filter(Boolean)
-  }, [items])
+    setCartItems(withGowns)
+  }, [mounted, gowns])
 
-  const subtotal = useMemo(() => {
-    return detailedItems.reduce((sum, item) => sum + parsePrice(item.price) * item.qty, 0)
-  }, [detailedItems])
+  useEffect(() => {
+    if (!mounted) return
+    setNote(loadCartNote())
+  }, [mounted])
 
-  const handleQuantityChange = (id, delta) => {
-    const entry = items.find((e) => e.id === id)
-    if (!entry) return
-    const newQty = Math.max(1, entry.qty + delta)
-    setItems(setQuantity(id, newQty))
+  const handleNoteBlur = () => {
+    saveCartNote(note)
   }
 
-  const handleQuantityInput = (id, value) => {
-    const n = parseInt(value, 10)
-    if (isNaN(n) || n < 1) return
-    setItems(setQuantity(id, n))
+  const handleQtyChange = (gownId, newQty) => {
+    const q = Math.max(1, parseInt(String(newQty), 10) || 1)
+    setQuantity(gownId, q)
+    setCartItems((prev) =>
+      prev.map((item) =>
+        item.id === gownId ? { ...item, qty: q, subtotal: item.priceNum * q } : item
+      )
+    )
   }
 
-  const handleRemove = (id) => {
-    setItems(removeItem(id))
+  const handleRemove = (gownId) => {
+    removeItem(gownId)
+    setCartItems((prev) => prev.filter((item) => item.id !== gownId))
+  }
+
+  const subtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0)
+
+  if (!mounted) {
+    return (
+      <main className="gowns-page">
+        <Header />
+        <section className="gowns-header-spacer" />
+        <section className="cart-section">
+          <div className="container">
+            <p>Loading cart...</p>
+          </div>
+        </section>
+        <Footer />
+      </main>
+    )
   }
 
   return (
-    <main className="auth-page">
+    <main className="gowns-page">
       <Header />
       <section className="gowns-header-spacer" />
-
       <section className="cart-section">
         <div className="container">
-          <nav className="cart-breadcrumb" aria-label="Breadcrumb">
+          <nav className="cart-breadcrumb">
             <Link href="/">Home</Link>
-            <span className="cart-breadcrumb-sep">&gt;</span>
-            <span>Shopping Cart</span>
+            <span className="cart-breadcrumb-sep">/</span>
+            <span>Cart</span>
           </nav>
-          <h1 className="cart-title">SHOPPING CART</h1>
+          <h1 className="cart-title">Shopping Cart</h1>
 
-          {detailedItems.length === 0 ? (
+          {cartItems.length === 0 ? (
             <div className="cart-empty">
-              <p>You do not have any items in your cart yet.</p>
-              <Link href="/gowns" className="btn btn-cart-primary">
-                CONTINUE SHOPPING
+              <p>Your cart is empty.</p>
+              <Link href="/gowns" className="btn btn-primary">
+                Continue Shopping
               </Link>
             </div>
           ) : (
             <div className="cart-layout">
               <div className="cart-products-col">
-                <div className="cart-bar cart-bar-product">PRODUCT</div>
+                <div className="cart-bar" style={{ display: 'grid', gridTemplateColumns: '1fr 120px' }}>
+                  <span className="cart-bar-product">Product</span>
+                  <span className="cart-bar-subtotal">Subtotal</span>
+                </div>
                 <ul className="cart-item-list">
-                  {detailedItems.map((item) => (
+                  {cartItems.map((item) => (
                     <li key={item.id} className="cart-row">
                       <div className="cart-row-image">
-                        <img src={item.image} alt={item.alt ?? item.name} />
+                        <img src={item.image} alt={item.alt} />
                       </div>
                       <div className="cart-row-details">
-                        <p className="cart-row-title">
-                          {item.name} – {item.color}
-                        </p>
-                        <p className="cart-row-variant">{item.color}</p>
-                        <p className="cart-row-brand">{BRAND}</p>
-                        <p className="cart-row-price">{item.price}</p>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                          <h2 className="cart-row-title">{item.name}</h2>
+                          <p className="cart-row-price">{formatPrice(item.subtotal)}</p>
+                        </div>
+                        <p className="cart-row-variant">{item.price} each</p>
                         <div className="cart-row-qty">
                           <span className="cart-qty-label">Quantity</span>
                           <div className="cart-qty-controls">
                             <button
                               type="button"
                               className="cart-qty-btn"
-                              onClick={() => handleQuantityChange(item.id, -1)}
-                              aria-label="Decrease quantity"
+                              onClick={() => handleQtyChange(item.id, item.qty - 1)}
+                              aria-label="Decrease"
                             >
                               −
                             </button>
                             <input
                               type="number"
+                              className="cart-qty-input"
                               min={1}
                               value={item.qty}
-                              onChange={(e) => handleQuantityInput(item.id, e.target.value)}
-                              className="cart-qty-input"
-                              aria-label="Quantity"
+                              onChange={(e) => handleQtyChange(item.id, e.target.value)}
                             />
                             <button
                               type="button"
                               className="cart-qty-btn"
-                              onClick={() => handleQuantityChange(item.id, 1)}
-                              aria-label="Increase quantity"
+                              onClick={() => handleQtyChange(item.id, item.qty + 1)}
+                              aria-label="Increase"
                             >
                               +
                             </button>
@@ -132,42 +170,41 @@ export default function CartPage() {
                             className="cart-link cart-link-remove"
                             onClick={() => handleRemove(item.id)}
                           >
-                            REMOVE
+                            Remove
                           </button>
                         </div>
                       </div>
                     </li>
                   ))}
                 </ul>
-                <Link href="/gowns" className="btn btn-cart-primary">
-                  CONTINUE SHOPPING
-                </Link>
               </div>
-
               <div className="cart-summary-col">
-                <div className="cart-bar cart-bar-subtotal">SUBTOTAL</div>
-                <p className="cart-subtotal-amount">{formatPeso(subtotal)}</p>
+                <p className="cart-subtotal-amount">Subtotal: {formatPrice(subtotal)}</p>
+                <p className="cart-note-tag">Note</p>
                 <div className="cart-note-block">
-                  <span className="cart-note-tag">NOTE</span>
-                  <span className="cart-note-label">Additional comments</span>
+                  <label htmlFor="cart-note" className="cart-note-label">
+                    Order notes (optional)
+                  </label>
                   <textarea
+                    id="cart-note"
                     className="cart-note-textarea"
+                    placeholder="Special requests, delivery notes..."
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    onBlur={() => saveCartNote(note)}
-                    placeholder="Add any special requests or notes…"
-                    rows={4}
+                    onBlur={handleNoteBlur}
                   />
                 </div>
+                <Link href="/gowns" className="btn btn-outline" style={{ display: 'block', textAlign: 'center' }}>
+                  Continue Shopping
+                </Link>
                 <Link href="/checkout" className="btn btn-cart-primary btn-cart-checkout">
-                  PROCEED TO CHECKOUT
+                  Proceed to Checkout
                 </Link>
               </div>
             </div>
           )}
         </div>
       </section>
-
       <Footer />
     </main>
   )

@@ -2,12 +2,12 @@
 
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 import ProductCard from './ProductCard'
-import { GOWNS } from '../data/gowns'
+import { useGowns } from '@/hooks/useGowns'
 
 export default function Collection() {
   const { ref: headerRef, isVisible: headerVisible } = useIntersectionObserver({ threshold: 0.15 })
-
-  const products = GOWNS.slice(0, 3)
+  const { gowns } = useGowns()
+  const products = gowns.slice(0, 3)
 
   return (
     <section id="collection" className="collection-section">

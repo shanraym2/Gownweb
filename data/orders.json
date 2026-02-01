@@ -1,0 +1,44 @@
+[
+  {
+    "id": "1769960288276",
+    "contact": {
+      "email": "seanv833@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 1,
+        "name": "The Isabella",
+        "qty": 1,
+        "price": "₱65,000",
+        "subtotal": 65000
+      },
+      {
+        "id": 5,
+        "name": "The Aria",
+        "qty": 10,
+        "price": "₱88,000",
+        "subtotal": 880000
+      },
+      {
+        "id": 2,
+        "name": "The Victoria",
+        "qty": 1,
+        "price": "₱102,000",
+        "subtotal": 102000
+      }
+    ],
+    "note": "",
+    "subtotal": 1047000,
+    "createdAt": "2026-02-01T15:38:07.494Z"
+  }
+]

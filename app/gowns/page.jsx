@@ -1,106 +1,88 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import ProductCard from '../components/ProductCard'
-import { GOWNS } from '../data/gowns'
-
-const TYPE_OPTIONS = ['Dresses', 'Gowns', 'Suit']
-const COLOR_OPTIONS = ['Ivory', 'Blush', 'Floral', 'Champagne']
+import { useGowns } from '@/hooks/useGowns'
 
 export default function GownsPage() {
-  const [selectedTypes, setSelectedTypes] = useState([])
-  const [selectedColors, setSelectedColors] = useState([])
+  const { gowns, loading, error } = useGowns()
+  const [typeFilter, setTypeFilter] = useState('')
 
-  const toggleSelection = (value, current, setter) => {
-    if (current.includes(value)) {
-      setter(current.filter((item) => item !== value))
-    } else {
-      setter([...current, value])
-    }
-  }
-
-  const filteredGowns = useMemo(() => {
-    return GOWNS.filter((gown) => {
-      const typeMatch = selectedTypes.length === 0 || selectedTypes.includes(gown.type)
-      const colorMatch = selectedColors.length === 0 || selectedColors.includes(gown.color)
-      return typeMatch && colorMatch
-    })
-  }, [selectedTypes, selectedColors])
+  const types = useMemo(() => [...new Set(gowns.map((g) => g.type).filter(Boolean))].sort(), [gowns])
+  const filtered = useMemo(() => {
+    if (!typeFilter) return gowns
+    return gowns.filter((g) => g.type === typeFilter)
+  }, [gowns, typeFilter])
 
   return (
     <main className="gowns-page">
       <Header />
-
       <section className="gowns-header-spacer" />
-
       <section className="gowns-hero-simple">
         <div className="container">
           <div className="gowns-hero-inner">
-            <span className="subtitle">EVENING & FORMAL</span>
-            <h1>Evening & Formal Gowns</h1>
-            <p>
-              Browse every gown, dress and suit in our curated collection. Refine by type and color to
-              find the look that feels most like you.
-            </p>
+            <h1>Gowns &amp; Dresses</h1>
+            <p>Explore our collection of wedding gowns, dresses, and suits.</p>
           </div>
         </div>
       </section>
-
-      <section className="gowns-catalog-layout">
-        <div className="container gowns-layout">
+      <div className="container gowns-catalog-layout">
+        <div className="gowns-layout">
           <aside className="gowns-filters">
-            <div className="gowns-filters-header">
-              <span className="filters-label">Filters</span>
-              <span className="filters-count">{filteredGowns.length} items</span>
-            </div>
-
+            <div className="gowns-filters-header">Filters</div>
             <div className="filters-group">
-              <p className="filters-group-title">Type</p>
+              <div className="filters-group-title">Type</div>
               <div className="filters-options">
-                {TYPE_OPTIONS.map((type) => (
-                  <label key={type} className="filter-option">
+                <label className="filter-option">
+                  <input
+                    type="radio"
+                    name="type"
+                    checked={!typeFilter}
+                    onChange={() => setTypeFilter('')}
+                  />
+                  <span>All</span>
+                </label>
+                {types.map((t) => (
+                  <label key={t} className="filter-option">
                     <input
-                      type="checkbox"
-                      checked={selectedTypes.includes(type)}
-                      onChange={() => toggleSelection(type, selectedTypes, setSelectedTypes)}
+                      type="radio"
+                      name="type"
+                      checked={typeFilter === t}
+                      onChange={() => setTypeFilter(t)}
                     />
-                    <span>{type}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="filters-group">
-              <p className="filters-group-title">Color</p>
-              <div className="filters-options">
-                {COLOR_OPTIONS.map((color) => (
-                  <label key={color} className="filter-option">
-                    <input
-                      type="checkbox"
-                      checked={selectedColors.includes(color)}
-                      onChange={() => toggleSelection(color, selectedColors, setSelectedColors)}
-                    />
-                    <span>{color}</span>
+                    <span>{t}</span>
                   </label>
                 ))}
               </div>
             </div>
           </aside>
-
-          <div className="gowns-results">
-            <div className="gowns-results-grid">
-              {filteredGowns.map((gown, index) => (
-                <ProductCard key={gown.id} product={gown} delay={index * 0.05} />
-              ))}
-            </div>
+          <div className="gowns-results-grid">
+            {loading ? (
+              <p>Loading gowns…</p>
+            ) : error ? (
+              <p>{error}</p>
+            ) : (
+              filtered.map((gown) => (
+              <article key={gown.id} className="product-card">
+                <Link href={`/gowns/${gown.id}`} className="product-img-wrapper">
+                  <img src={gown.image} alt={gown.alt} style={gown.style} />
+                </Link>
+                <div className="product-info">
+                  <h3>{gown.name}</h3>
+                  <p className="price">{gown.price}</p>
+                  <Link href={`/gowns/${gown.id}`} className="btn btn-primary btn-buy">
+                    View Details
+                  </Link>
+                </div>
+              </article>
+            ))
+            )}
           </div>
         </div>
-      </section>
-
+      </div>
       <Footer />
     </main>
   )
 }
-

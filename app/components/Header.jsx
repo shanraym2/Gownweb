@@ -33,15 +33,6 @@ export default function Header() {
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
 
-  const handleSmoothScroll = (e) => {
-    e.preventDefault()
-    const href = e.currentTarget.getAttribute('href')
-    const target = document.querySelector(href)
-    if (target) {
-      target.scrollIntoView({ behavior: 'smooth' })
-    }
-  }
-
   const handleLogout = () => {
     logoutUser()
     setCurrentUser(null)
@@ -55,9 +46,10 @@ export default function Header() {
         <nav>
           <ul className="nav-links">
             <li><a href="/gowns">Gowns</a></li>
-            <li><a href="#catalog" onClick={handleSmoothScroll}>Catalog</a></li>
-            <li><a href="#collection" onClick={handleSmoothScroll}>Collection</a></li>
             <li><a href="/contact">Contact Us</a></li>
+            {currentUser?.role === 'admin' && (
+              <li><Link href="/admin">Admin</Link></li>
+            )}
             {currentUser ? (
               <li className="profile-menu">
                 <a href="/profile" className="profile-menu-trigger">Profile</a>
