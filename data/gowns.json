@@ -78,5 +78,38 @@
     "color": "Ivory",
     "silhouette": "Mermaid",
     "description": "An intricately beaded mermaid gown that hugs the figure before flaring into a soft, layered train."
+  },
+  {
+    "id": 8,
+    "name": "yellow",
+    "price": "₱999,999",
+    "image": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSSF6kgr5SCD6AzY8Y6AD2bqzwjaBMhgdU5fw&s",
+    "alt": "yellow",
+    "type": "Gowns",
+    "color": "",
+    "silhouette": "",
+    "description": "asas"
+  },
+  {
+    "id": 9,
+    "name": "pinkgownss",
+    "price": "₱17,262",
+    "image": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTKejoapXYPtlZjX2DuUwFlqoSIudJNChMRkg&s",
+    "alt": "pinkgown",
+    "type": "Gowns",
+    "color": "",
+    "silhouette": "",
+    "description": "AKO NA TO"
+  },
+  {
+    "id": 10,
+    "name": "gray",
+    "price": "₱202,122",
+    "image": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS6NaNR4hD66LMn3pOe74OwQ_r7VvMKWnztSg&s",
+    "alt": "gray",
+    "type": "Gowns",
+    "color": "",
+    "silhouette": "",
+    "description": "zxc"
   }
 ]

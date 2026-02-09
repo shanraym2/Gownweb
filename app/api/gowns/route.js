@@ -6,7 +6,7 @@ function getGownsPath() {
   return join(process.cwd(), 'data', 'gowns.json')
 }
 
-function loadGowns() {
+function loadGownsFromFile() {
   const path = getGownsPath()
   if (!existsSync(path)) return []
   try {
@@ -17,6 +17,6 @@ function loadGowns() {
 }
 
 export async function GET() {
-  const gowns = loadGowns()
-  return NextResponse.json(gowns)
+  const gowns = loadGownsFromFile()
+  return NextResponse.json(Array.isArray(gowns) ? gowns : [])
 }

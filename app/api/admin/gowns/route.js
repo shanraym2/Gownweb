@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { query } from '@/lib/db'
+import { rowToGown } from '@/lib/gowns'
 
 function getGownsPath() {
   return join(process.cwd(), 'data', 'gowns.json')
 }
 
-function loadGowns() {
+function loadGownsFromFile() {
   const path = getGownsPath()
   if (!existsSync(path)) return []
   try {
@@ -16,9 +18,18 @@ function loadGowns() {
   }
 }
 
-function saveGowns(gowns) {
+function saveGownsToFile(gowns) {
+  const dir = join(process.cwd(), 'data')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const path = getGownsPath()
   writeFileSync(path, JSON.stringify(gowns, null, 2), 'utf8')
+}
+
+function parsePriceAmount(priceStr) {
+  if (priceStr == null) return 0
+  const s = String(priceStr).replace(/[^\d.]/g, '')
+  const n = parseFloat(s)
+  return isNaN(n) ? 0 : n
 }
 
 function checkAuth(request) {
@@ -31,7 +42,7 @@ export async function GET(request) {
   if (!checkAuth(request)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
-  const gowns = loadGowns()
+  const gowns = loadGownsFromFile()
   return NextResponse.json({ ok: true, gowns })
 }
 
@@ -48,12 +59,16 @@ export async function POST(request) {
         { status: 400 }
       )
     }
-    const gowns = loadGowns()
+    const priceAmount = parsePriceAmount(price)
+    const priceDisplay = String(price).trim()
+    const styleJson = style && typeof style === 'object' ? JSON.stringify(style) : null
+
+    const gowns = loadGownsFromFile()
     const maxId = gowns.length ? Math.max(...gowns.map((g) => Number(g.id) || 0)) : 0
     const newGown = {
       id: maxId + 1,
       name: String(name).trim(),
-      price: String(price).trim(),
+      price: priceDisplay,
       image: String(image).trim(),
       alt: String(alt || name).trim(),
       type: String(type || 'Gowns').trim(),
@@ -63,7 +78,31 @@ export async function POST(request) {
       ...(style && typeof style === 'object' ? { style } : {}),
     }
     gowns.push(newGown)
-    saveGowns(gowns)
+    saveGownsToFile(gowns)
+
+    if (process.env.DATABASE_URL) {
+      try {
+        const result = await query(
+          `INSERT INTO gowns (name, price_amount, price_display, image, alt, type, color, silhouette, description, style)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            String(name).trim(),
+            priceAmount,
+            priceDisplay,
+            String(image).trim(),
+            String(alt || name).trim(),
+            String(type || 'Gowns').trim(),
+            String(color || '').trim(),
+            String(silhouette || '').trim(),
+            String(description || '').trim(),
+            styleJson,
+          ]
+        )
+        newGown.id = result?.insertId ?? newGown.id
+      } catch (err) {
+        console.error('DB admin gowns POST error:', err)
+      }
+    }
     return NextResponse.json({ ok: true, gown: newGown })
   } catch (err) {
     console.error('Admin gowns POST error:', err)
@@ -85,7 +124,11 @@ export async function PUT(request) {
         { status: 400 }
       )
     }
-    const gowns = loadGowns()
+    const priceAmount = parsePriceAmount(price)
+    const priceDisplay = String(price).trim()
+    const styleJson = style && typeof style === 'object' ? JSON.stringify(style) : null
+
+    const gowns = loadGownsFromFile()
     const index = gowns.findIndex((g) => Number(g.id) === gownId)
     if (index === -1) {
       return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
@@ -93,7 +136,7 @@ export async function PUT(request) {
     const updated = {
       ...gowns[index],
       name: String(name).trim(),
-      price: String(price).trim(),
+      price: priceDisplay,
       image: String(image).trim(),
       alt: String(alt || name).trim(),
       type: String(type || 'Gowns').trim(),
@@ -103,7 +146,31 @@ export async function PUT(request) {
       ...(style && typeof style === 'object' ? { style } : {}),
     }
     gowns[index] = updated
-    saveGowns(gowns)
+    saveGownsToFile(gowns)
+
+    if (process.env.DATABASE_URL) {
+      try {
+        await query(
+          `UPDATE gowns SET name = ?, price_amount = ?, price_display = ?, image = ?, alt = ?, type = ?, color = ?, silhouette = ?, description = ?, style = ?
+           WHERE id = ?`,
+          [
+            String(name).trim(),
+            priceAmount,
+            priceDisplay,
+            String(image).trim(),
+            String(alt || name).trim(),
+            String(type || 'Gowns').trim(),
+            String(color || '').trim(),
+            String(silhouette || '').trim(),
+            String(description || '').trim(),
+            styleJson,
+            gownId,
+          ]
+        )
+      } catch (err) {
+        console.error('DB admin gowns PUT error:', err)
+      }
+    }
     return NextResponse.json({ ok: true, gown: updated })
   } catch (err) {
     console.error('Admin gowns PUT error:', err)
@@ -122,12 +189,21 @@ export async function DELETE(request) {
     if (gownId == null) {
       return NextResponse.json({ ok: false, error: 'Id required' }, { status: 400 })
     }
-    const gowns = loadGowns()
+
+    const gowns = loadGownsFromFile()
     const filtered = gowns.filter((g) => Number(g.id) !== gownId)
     if (filtered.length === gowns.length) {
       return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
     }
-    saveGowns(filtered)
+    saveGownsToFile(filtered)
+
+    if (process.env.DATABASE_URL) {
+      try {
+        await query('DELETE FROM gowns WHERE id = ?', [gownId])
+      } catch (err) {
+        console.error('DB admin gowns DELETE error:', err)
+      }
+    }
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('Admin gowns DELETE error:', err)

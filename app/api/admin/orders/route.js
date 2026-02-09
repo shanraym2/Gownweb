@@ -6,7 +6,7 @@ function getOrdersPath() {
   return join(process.cwd(), 'data', 'orders.json')
 }
 
-function loadOrders() {
+function loadOrdersFromFile() {
   const path = getOrdersPath()
   if (!existsSync(path)) return []
   try {
@@ -22,6 +22,7 @@ export async function GET(request) {
   if (!adminSecret || secret !== adminSecret) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
-  const orders = loadOrders()
+
+  const orders = loadOrdersFromFile()
   return NextResponse.json({ ok: true, orders })
 }

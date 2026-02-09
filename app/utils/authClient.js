@@ -1,5 +1,7 @@
 'use client'
 
+import { clearAllCarts } from './cartClient'
+
 const USERS_KEY = 'jce_users'
 const CURRENT_USER_KEY = 'jce_current_user'
 
@@ -84,9 +86,10 @@ export function logoutUser() {
   window.localStorage.removeItem(CURRENT_USER_KEY)
 }
 
-/** Clears all registered users and current session (this browser only). */
+/** Clears all registered users, current session, and all carts (this browser only). */
 export function resetAllUsers() {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(USERS_KEY)
   window.localStorage.removeItem(CURRENT_USER_KEY)
+  clearAllCarts()
 }

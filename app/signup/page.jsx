@@ -5,9 +5,7 @@ import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import {
-  registerUser,
   getCurrentUser,
-  loadUsers,
   setCurrentUserRole,
 } from '../utils/authClient'
 
@@ -48,14 +46,6 @@ export default function SignupPage() {
     e.preventDefault()
     setError('')
     if (!validateForm()) return
-    const users = loadUsers()
-    const emailTaken = users.some(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase()
-    )
-    if (emailTaken) {
-      setError('An account with this email already exists. Please log in instead.')
-      return
-    }
     setIsSubmitting(true)
     try {
       const res = await fetch('/api/auth/send-otp', {
@@ -96,20 +86,41 @@ export default function SignupPage() {
         setError(verifyData.error || 'Invalid or expired OTP.')
         return
       }
-      const result = registerUser({
-        name: name.trim(),
-        email: email.trim(),
-        password,
+
+      // Register user in database
+      const registerRes = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+        }),
       })
-      if (!result.ok) {
-        setError(result.error || 'Unable to create account.')
+      const registerData = await registerRes.json()
+      if (!registerRes.ok || !registerData.ok) {
+        setError(registerData.error || 'Unable to create account.')
         return
       }
+
+      // Set current user session
+      const session = {
+        id: registerData.user.id,
+        name: registerData.user.name,
+        email: registerData.user.email,
+        role: registerData.user.role || 'customer',
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('jce_current_user', JSON.stringify(session))
+      }
+
+      // Get admin role if applicable
       const roleRes = await fetch(
         `/api/auth/role?email=${encodeURIComponent(email.trim())}`
       )
       const roleData = await roleRes.json()
       if (roleData.ok && roleData.role) setCurrentUserRole(roleData.role)
+
       router.push('/')
     } catch {
       setError('Something went wrong. Please try again.')

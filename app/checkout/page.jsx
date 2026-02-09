@@ -71,12 +71,31 @@ export default function CheckoutPage() {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setForm((prev) => ({ ...prev, [name]: value }))
+    
+    if (name === 'phone') {
+      // Only allow digits
+      const numericValue = value.replace(/\D/g, '')
+      setForm((prev) => ({ ...prev, [name]: numericValue }))
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value }))
+    }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (cartItems.length === 0) return
+
+    // Strict validation
+    if (!form.email.trim().toLowerCase().endsWith('@gmail.com')) {
+      alert('Please provide a valid Gmail address (ending in @gmail.com).')
+      return
+    }
+
+    if (!form.phone || form.phone.length < 7) {
+      alert('Please provide a valid phone number.')
+      return
+    }
+
     setSubmitting(true)
     try {
       const order = {

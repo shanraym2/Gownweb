@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import { loginUser, getCurrentUser, setCurrentUserRole } from '../utils/authClient'
+import { loginUser, getCurrentUser, setCurrentUserRole, loadUsers } from '../utils/authClient'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -26,6 +26,14 @@ export default function LoginPage() {
     setError('')
     if (!email || !password) {
       setError('Please enter your email and password.')
+      return
+    }
+    const users = loadUsers()
+    const match = users.find(
+      (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
+    )
+    if (!match) {
+      setError('No account found with this email. Please sign up first.')
       return
     }
     setIsSubmitting(true)

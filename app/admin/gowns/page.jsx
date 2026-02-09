@@ -59,10 +59,19 @@ export default function AdminGownsPage() {
     setFormError('')
   }
 
+  const handlePriceChange = (e) => {
+    const raw = e.target.value.replace(/[^\d]/g, '')
+    const formatted = raw ? Number(raw).toLocaleString('en-PH') : ''
+    setForm((prev) => ({ ...prev, price: '₱' + formatted }))
+    setFormError('')
+  }
+
   const handleEdit = (gown) => {
+    const raw = String(gown.price || '').replace(/[^\d]/g, '')
+    const formatted = raw ? Number(raw).toLocaleString('en-PH') : ''
     setForm({
       name: gown.name || '',
-      price: gown.price || '₱',
+      price: '₱' + formatted,
       image: gown.image || '/images/',
       alt: gown.alt || '',
       type: gown.type || 'Gowns',
@@ -147,7 +156,18 @@ export default function AdminGownsPage() {
           </div>
           <div className="admin-form-row">
             <label>Price</label>
-            <input name="price" value={form.price} onChange={handleChange} placeholder="₱65,000" required />
+            <input
+              name="price"
+              type="text"
+              inputMode="numeric"
+              value={form.price}
+              onChange={handlePriceChange}
+              onKeyDown={(e) => {
+                if (form.price === '₱' && (e.key === 'Backspace' || e.key === 'Delete')) e.preventDefault()
+              }}
+              placeholder="₱65,000"
+              required
+            />
           </div>
           <div className="admin-form-row">
             <label>Image (URL or path)</label>
