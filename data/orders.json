@@ -39,7 +39,8 @@
     ],
     "note": "",
     "subtotal": 1047000,
-    "createdAt": "2026-02-01T15:38:07.494Z"
+    "createdAt": "2026-02-01T15:38:07.494Z",
+    "status": "preparing"
   },
   {
     "id": "1769961703537",
@@ -67,7 +68,8 @@
     ],
     "note": "",
     "subtotal": 75000,
-    "createdAt": "2026-02-01T16:01:42.793Z"
+    "createdAt": "2026-02-01T16:01:42.793Z",
+    "status": "placed"
   },
   {
     "id": "1770488161246",
@@ -95,7 +97,8 @@
     ],
     "note": "",
     "subtotal": 129000,
-    "createdAt": "2026-02-07T18:16:00.886Z"
+    "createdAt": "2026-02-07T18:16:00.886Z",
+    "status": "placed"
   },
   {
     "id": "1770488747412",
@@ -123,7 +126,8 @@
     ],
     "note": "haleluya",
     "subtotal": 0,
-    "createdAt": "2026-02-07T18:25:46.794Z"
+    "createdAt": "2026-02-07T18:25:46.794Z",
+    "status": "placed"
   },
   {
     "id": "1770490229092",
@@ -151,7 +155,8 @@
     ],
     "note": "",
     "subtotal": 147232,
-    "createdAt": "2026-02-07T18:50:29.105Z"
+    "createdAt": "2026-02-07T18:50:29.105Z",
+    "status": "placed"
   },
   {
     "id": "1770490508309",
@@ -179,7 +184,8 @@
     ],
     "note": "daasdasd",
     "subtotal": 129000,
-    "createdAt": "2026-02-07T18:55:08.309Z"
+    "createdAt": "2026-02-07T18:55:08.309Z",
+    "status": "placed"
   },
   {
     "id": "1770490866203",
@@ -207,7 +213,8 @@
     ],
     "note": "",
     "subtotal": 1899923,
-    "createdAt": "2026-02-07T19:01:06.204Z"
+    "createdAt": "2026-02-07T19:01:06.204Z",
+    "status": "placed"
   },
   {
     "id": "1770491509873",
@@ -235,7 +242,8 @@
     ],
     "note": "",
     "subtotal": 17262,
-    "createdAt": "2026-02-07T19:11:49.873Z"
+    "createdAt": "2026-02-07T19:11:49.873Z",
+    "status": "placed"
   },
   {
     "id": "1770492633619",
@@ -270,7 +278,8 @@
     ],
     "note": "",
     "subtotal": 1017261,
-    "createdAt": "2026-02-07T19:30:33.619Z"
+    "createdAt": "2026-02-07T19:30:33.619Z",
+    "status": "placed"
   },
   {
     "id": "1770635313392",
@@ -305,6 +314,187 @@
     ],
     "note": "asd",
     "subtotal": 167000,
-    "createdAt": "2026-02-09T11:08:33.392Z"
+    "createdAt": "2026-02-09T11:08:33.392Z",
+    "status": "placed"
+  },
+  {
+    "id": "1773974060019",
+    "status": "placed",
+    "contact": {
+      "email": "seanv833@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 3,
+        "name": "The Sophia",
+        "qty": 1,
+        "price": "₱80,000",
+        "subtotal": 80000
+      }
+    ],
+    "note": "",
+    "subtotal": 80000,
+    "createdAt": "2026-03-20T02:34:20.019Z"
+  },
+  {
+    "id": "1773974777594",
+    "status": "placed",
+    "contact": {
+      "email": "seanv833@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 2,
+        "name": "The Victoria",
+        "qty": 1,
+        "price": "₱102,000",
+        "subtotal": 102000
+      }
+    ],
+    "note": "",
+    "subtotal": 102000,
+    "createdAt": "2026-03-20T02:46:17.594Z"
+  },
+  {
+    "id": "1773976166654",
+    "contact": {
+      "email": "seanv833@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 2,
+        "name": "The Victoria",
+        "qty": 1,
+        "price": "₱102,000",
+        "subtotal": 102000
+      }
+    ],
+    "note": "",
+    "subtotal": 102000,
+    "createdAt": "2026-03-20T03:09:26.654Z"
+  },
+  {
+    "id": "1773976195180",
+    "contact": {
+      "email": "seanvinluan404@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "bdo",
+    "items": [
+      {
+        "id": 3,
+        "name": "The Sophia",
+        "qty": 1,
+        "price": "₱80,000",
+        "subtotal": 80000
+      }
+    ],
+    "note": "",
+    "subtotal": 80000,
+    "createdAt": "2026-03-20T03:09:55.180Z",
+    "status": "cancelled"
+  },
+  {
+    "id": "1773979328677",
+    "status": "shipped",
+    "contact": {
+      "email": "rhaymseam@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 11,
+        "name": "Pink gown",
+        "qty": 1,
+        "price": "₱120,000",
+        "subtotal": 120000
+      }
+    ],
+    "note": "",
+    "subtotal": 120000,
+    "createdAt": "2026-03-20T04:02:08.677Z"
+  },
+  {
+    "id": "1774016678771",
+    "status": "shipped",
+    "contact": {
+      "email": "rhaymseam@gmail.com",
+      "firstName": "Eva",
+      "lastName": "vinluan",
+      "phone": "09772619570"
+    },
+    "delivery": {
+      "address": "4137 2nd st Santo Niño",
+      "city": "Parañaque City",
+      "province": "-None-",
+      "zip": ""
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 9,
+        "name": "pinkgownss",
+        "qty": 1,
+        "price": "₱17,262",
+        "subtotal": 17262
+      },
+      {
+        "id": 3,
+        "name": "The Sophia",
+        "qty": 1,
+        "price": "₱80,000",
+        "subtotal": 80000
+      }
+    ],
+    "note": "",
+    "subtotal": 97262,
+    "createdAt": "2026-03-20T14:24:38.771Z"
   }
 ]

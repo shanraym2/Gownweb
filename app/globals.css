@@ -582,6 +582,84 @@ header.scrolled .nav-links a {
     border-color: var(--color-header-accent);
 }
 
+.auth-password-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #e0d8cf;
+    padding: 0 4px 0 0;
+    background: #fff;
+}
+
+.auth-password-row:focus-within {
+    border-color: var(--color-header-accent);
+}
+
+.auth-password-row input {
+    flex: 1;
+    border: none;
+    margin: 0;
+}
+
+.auth-password-row input:focus {
+    border: none;
+    outline: none;
+}
+
+.auth-show-password {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: none;
+    border: none;
+    color: var(--color-text-light);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.auth-show-password:hover {
+    color: var(--color-header-accent);
+}
+
+.auth-password-rules {
+    list-style: none;
+    margin: 0 0 14px;
+    padding: 0;
+    font-size: 0.8rem;
+    color: var(--color-text-light);
+}
+
+.auth-password-rules li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.auth-password-rules li::before {
+    content: '○';
+    font-size: 0.65rem;
+    color: #c4bbb2;
+}
+
+.auth-password-rules li.auth-rule-met {
+    color: #2e7d32;
+}
+
+.auth-password-rules li.auth-rule-met::before {
+    content: '✓';
+    color: #2e7d32;
+}
+
+.auth-field-hint {
+    font-size: 0.75rem;
+    color: var(--color-text-light);
+    margin-top: 4px;
+    line-height: 1.35;
+}
+
 .auth-field textarea {
     padding: 10px 12px;
     border: 1px solid #e0d8cf;
@@ -1866,4 +1944,115 @@ footer {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+/* --- Customer: My orders --- */
+.my-orders-page {
+    max-width: 720px;
+}
+
+.my-orders-intro {
+    color: var(--color-text-light);
+    line-height: 1.5;
+    margin-bottom: 24px;
+}
+
+.my-orders-empty {
+    padding: 24px 0;
+}
+
+.my-orders-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.my-orders-card {
+    border: 1px solid var(--color-border, #e8e4e0);
+    border-radius: 12px;
+    padding: 18px 20px;
+    background: var(--color-bg, #fff);
+}
+
+.my-orders-card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.my-orders-date {
+    margin: 4px 0 0;
+    font-size: 0.9rem;
+    color: var(--color-text-light);
+}
+
+.my-orders-summary {
+    margin: 12px 0 4px;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.my-orders-card-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border, #eee);
+}
+
+.my-orders-total {
+    font-weight: 600;
+    font-size: 1.05rem;
+}
+
+.my-orders-payment {
+    color: var(--color-text-light);
+    font-size: 0.95rem;
+}
+
+.order-status-badge {
+    display: inline-block;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: var(--color-bg-alt, #f0ebe6);
+    color: var(--color-text);
+    text-transform: capitalize;
+}
+
+.order-status-placed {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.order-status-paid,
+.order-status-preparing,
+.order-status-shipped {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.order-status-delivered {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.order-status-cancelled {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.order-detail-hint {
+    color: var(--color-text-light);
+    line-height: 1.5;
+    margin-bottom: 16px;
 }

@@ -5,6 +5,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000 // 10 minutes
+const OTP_RESEND_COOLDOWN_MS = 30 * 1000 // 30 seconds
 
 function getStorePath() {
   return join(tmpdir(), 'jce-otps.json')
@@ -36,13 +37,26 @@ export async function POST(request) {
     }
 
     const cleanEmail = email.trim().toLowerCase()
+    const cleanPurpose = String(purpose || 'auth').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return NextResponse.json({ ok: false, error: 'Invalid email format' }, { status: 400 })
+    }
+    if (!['login', 'signup', 'auth', 'reset-password'].includes(cleanPurpose)) {
+      return NextResponse.json({ ok: false, error: 'Invalid OTP purpose' }, { status: 400 })
+    }
     const otp = generateOtp()
 
     const otps = loadOtps()
+    const prev = otps[cleanEmail]
+    if (prev && Date.now() - Number(prev.sentAt || 0) < OTP_RESEND_COOLDOWN_MS) {
+      return NextResponse.json({ ok: false, error: 'Please wait a few seconds before requesting another code.' }, { status: 429 })
+    }
     otps[cleanEmail] = {
       otp,
       expires: Date.now() + OTP_EXPIRY_MS,
-      purpose: purpose || 'auth',
+      purpose: cleanPurpose,
+      attempts: 0,
+      sentAt: Date.now(),
     }
     saveOtps(otps)
 

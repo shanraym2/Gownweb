@@ -56,6 +56,7 @@ export default function Header() {
                 <div className="profile-dropdown" role="menu">
                   <span className="profile-dropdown-label">Account</span>
                   <Link href="/profile" className="profile-dropdown-item">My Profile</Link>
+                  <Link href="/my-orders" className="profile-dropdown-item profile-dropdown-orders">My orders</Link>
                   <Link href="/cart" className="profile-dropdown-item profile-dropdown-cart">Cart</Link>
                 </div>
               </li>

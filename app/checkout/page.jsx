@@ -6,6 +6,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns, getGownById } from '@/hooks/useGowns'
 import { loadCart, loadCartNote, clearCart } from '../utils/cartClient'
+import { getCurrentUser } from '../utils/authClient'
 
 function parsePrice(priceStr) {
   if (!priceStr || typeof priceStr !== 'string') return 0
@@ -42,6 +43,15 @@ export default function CheckoutPage() {
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // If you're logged in, always associate the order to the logged-in account email.
+  // This ensures "/my-orders" shows the order under whichever account the customer is using.
+  useEffect(() => {
+    if (!mounted) return
+    const loggedIn = getCurrentUser()
+    if (!loggedIn?.email) return
+    setForm((prev) => ({ ...prev, email: loggedIn.email }))
+  }, [mounted])
 
   useEffect(() => {
     if (!mounted) return
@@ -86,7 +96,9 @@ export default function CheckoutPage() {
     if (cartItems.length === 0) return
 
     // Strict validation
-    if (!form.email.trim().toLowerCase().endsWith('@gmail.com')) {
+    const loggedIn = getCurrentUser()
+    const emailToUse = loggedIn?.email ? String(loggedIn.email).trim() : form.email.trim()
+    if (!emailToUse.toLowerCase().endsWith('@gmail.com')) {
       alert('Please provide a valid Gmail address (ending in @gmail.com).')
       return
     }
@@ -99,7 +111,12 @@ export default function CheckoutPage() {
     setSubmitting(true)
     try {
       const order = {
-        contact: { email: form.email, firstName: form.firstName, lastName: form.lastName, phone: form.phone },
+        contact: {
+          email: emailToUse,
+          firstName: form.firstName,
+          lastName: form.lastName,
+          phone: form.phone,
+        },
         delivery: { address: form.address, city: form.city, province: form.province, zip: form.zip },
         payment,
         items: cartItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, subtotal: i.subtotal })),
@@ -150,6 +167,9 @@ export default function CheckoutPage() {
           <div className="checkout-container">
             <h1>Thank you</h1>
             <p>Your order has been received. We will contact you for payment (GCash or BDO) and delivery details.</p>
+            <Link href="/my-orders" className="btn btn-outline" style={{ marginTop: 12 }}>
+              View my orders
+            </Link>
             <Link href="/gowns" className="btn btn-primary" style={{ marginTop: 20 }}>Continue Shopping</Link>
           </div>
         </section>

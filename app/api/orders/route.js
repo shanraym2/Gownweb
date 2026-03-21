@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { query, getConnection } from '@/lib/db'
+import { getConnection } from '@/lib/db'
 
 function getOrdersPath() {
   return join(process.cwd(), 'data', 'orders.json')
@@ -50,6 +50,7 @@ export async function POST(request) {
 
     const order = {
       id: orderId,
+      status: 'placed',
       contact: { email: contactEmail, firstName: contactFirstName, lastName: contactLastName, phone: contactPhone },
       delivery: { address: deliveryAddress, city: deliveryCity, province: deliveryProvince, zip: deliveryZip },
       payment: paymentMethod,

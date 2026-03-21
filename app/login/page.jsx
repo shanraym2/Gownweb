@@ -4,7 +4,13 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import { loginUser, getCurrentUser, setCurrentUserRole, loadUsers } from '../utils/authClient'
+import {
+  loginUser,
+  getCurrentUser,
+  setCurrentUserRole,
+  verifyLoginCredentials,
+  loadUsers,
+} from '../utils/authClient'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -15,6 +21,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [devMode, setDevMode] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     const user = getCurrentUser()
@@ -28,12 +35,14 @@ export default function LoginPage() {
       setError('Please enter your email and password.')
       return
     }
-    const users = loadUsers()
-    const match = users.find(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
-    )
-    if (!match) {
-      setError('No account found with this email. Please sign up first.')
+    const check = await verifyLoginCredentials({ email: email.trim(), password })
+    if (!check.ok) {
+      const users = loadUsers()
+      const exists = users.some(
+        (u) => String(u.email || '').trim().toLowerCase() === email.trim().toLowerCase()
+      )
+      if (exists) setError('Incorrect password.')
+      else setError(check.error || 'No account found with this email. Please sign up first.')
       return
     }
     setIsSubmitting(true)
@@ -69,14 +78,14 @@ export default function LoginPage() {
       const verifyRes = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), otp: otp.trim() }),
+        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'login' }),
       })
       const verifyData = await verifyRes.json()
       if (!verifyRes.ok || !verifyData.ok) {
         setError(verifyData.error || 'Invalid or expired OTP.')
         return
       }
-      const result = loginUser({ email: email.trim(), password })
+      const result = await loginUser({ email: email.trim(), password })
       if (!result.ok) {
         setError(result.error || 'Invalid email or password.')
         return
@@ -128,15 +137,29 @@ export default function LoginPage() {
                 </div>
                 <div className="auth-field">
                   <label htmlFor="password">Password</label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Your password"
-                  />
+                  <div className="auth-password-row">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Your password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-show-password"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                 </div>
                 {error && <p className="auth-error">{error}</p>}
+                <p className="auth-switch" style={{ marginTop: 10 }}>
+                  Forgot your password? <a href="/forgot-password">Reset it</a>
+                </p>
                 <button
                   type="submit"
                   className="btn btn-primary auth-submit"

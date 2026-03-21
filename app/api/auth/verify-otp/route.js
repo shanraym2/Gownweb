@@ -23,13 +23,14 @@ function saveOtps(otps) {
 
 export async function POST(request) {
   try {
-    const { email, otp } = await request.json()
+    const { email, otp, purpose } = await request.json()
     if (!email || !otp) {
       return NextResponse.json({ ok: false, error: 'Email and OTP are required' }, { status: 400 })
     }
 
     const cleanEmail = email.trim().toLowerCase()
     const otpStr = String(otp).trim()
+    const cleanPurpose = String(purpose || '').trim().toLowerCase()
 
     const otps = loadOtps()
     const record = otps[cleanEmail]
@@ -44,7 +45,19 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'OTP has expired. Please request a new one.' }, { status: 400 })
     }
 
+    if (cleanPurpose && record.purpose && record.purpose !== cleanPurpose) {
+      return NextResponse.json({ ok: false, error: 'OTP purpose mismatch. Please request a new code.' }, { status: 400 })
+    }
+
     if (record.otp !== otpStr) {
+      const nextAttempts = Number(record.attempts || 0) + 1
+      if (nextAttempts >= 5) {
+        delete otps[cleanEmail]
+        saveOtps(otps)
+        return NextResponse.json({ ok: false, error: 'Too many invalid attempts. Request a new OTP.' }, { status: 429 })
+      }
+      otps[cleanEmail] = { ...record, attempts: nextAttempts }
+      saveOtps(otps)
       return NextResponse.json({ ok: false, error: 'Invalid OTP' }, { status: 400 })
     }
 

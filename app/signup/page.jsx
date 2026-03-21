@@ -5,9 +5,12 @@ import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import {
+  registerUser,
   getCurrentUser,
+  loadUsers,
   setCurrentUserRole,
 } from '../utils/authClient'
+import { isRealName, getPasswordRuleChecks, passwordMeetsRules } from '../utils/authValidation'
 
 export default function SignupPage() {
   const router = useRouter()
@@ -20,19 +23,29 @@ export default function SignupPage() {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [devMode, setDevMode] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   useEffect(() => {
     const user = getCurrentUser()
     if (user) router.replace('/')
   }, [router])
 
+  const pwdChecks = getPasswordRuleChecks(password)
+
   const validateForm = () => {
     if (!name || !email || !password || !confirmPassword) {
       setError('Please fill in all fields.')
       return false
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.')
+    if (!isRealName(name)) {
+      setError(
+        'Use your real name: letters only, spaces between words. Hyphens and apostrophes are OK (e.g. O\'Brien). No numbers or symbols.'
+      )
+      return false
+    }
+    if (!passwordMeetsRules(password)) {
+      setError('Password must meet all requirements below.')
       return false
     }
     if (password !== confirmPassword) {
@@ -46,6 +59,14 @@ export default function SignupPage() {
     e.preventDefault()
     setError('')
     if (!validateForm()) return
+    const users = loadUsers()
+    const emailTaken = users.some(
+      (u) => u.email.toLowerCase() === email.trim().toLowerCase()
+    )
+    if (emailTaken) {
+      setError('An account with this email already exists. Please log in instead.')
+      return
+    }
     setIsSubmitting(true)
     try {
       const res = await fetch('/api/auth/send-otp', {
@@ -79,48 +100,27 @@ export default function SignupPage() {
       const verifyRes = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), otp: otp.trim() }),
+        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'signup' }),
       })
       const verifyData = await verifyRes.json()
       if (!verifyRes.ok || !verifyData.ok) {
         setError(verifyData.error || 'Invalid or expired OTP.')
         return
       }
-
-      // Register user in database
-      const registerRes = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim(),
-          password,
-        }),
+      const result = await registerUser({
+        name: name.trim(),
+        email: email.trim(),
+        password,
       })
-      const registerData = await registerRes.json()
-      if (!registerRes.ok || !registerData.ok) {
-        setError(registerData.error || 'Unable to create account.')
+      if (!result.ok) {
+        setError(result.error || 'Unable to create account.')
         return
       }
-
-      // Set current user session
-      const session = {
-        id: registerData.user.id,
-        name: registerData.user.name,
-        email: registerData.user.email,
-        role: registerData.user.role || 'customer',
-      }
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('jce_current_user', JSON.stringify(session))
-      }
-
-      // Get admin role if applicable
       const roleRes = await fetch(
         `/api/auth/role?email=${encodeURIComponent(email.trim())}`
       )
       const roleData = await roleRes.json()
       if (roleData.ok && roleData.role) setCurrentUserRole(roleData.role)
-
       router.push('/')
     } catch {
       setError('Something went wrong. Please try again.')
@@ -157,10 +157,14 @@ export default function SignupPage() {
                   <input
                     id="name"
                     type="text"
+                    autoComplete="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Your name"
+                    placeholder="e.g. Maria Santos"
                   />
+                  <p className="auth-field-hint">
+                    Letters only. Spaces, hyphens, and apostrophes are allowed (e.g. Ana-Maria, O&apos;Brien). No numbers or symbols.
+                  </p>
                 </div>
                 <div className="auth-field">
                   <label htmlFor="email">Email</label>
@@ -174,23 +178,56 @@ export default function SignupPage() {
                 </div>
                 <div className="auth-field">
                   <label htmlFor="password">Password</label>
-                  <input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                  />
+                  <div className="auth-password-row">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Create a password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-show-password"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  <ul className="auth-password-rules" aria-live="polite">
+                    <li className={pwdChecks.length ? 'auth-rule-met' : ''}>
+                      At least 8 characters
+                    </li>
+                    <li className={pwdChecks.letter ? 'auth-rule-met' : ''}>
+                      At least one letter
+                    </li>
+                    <li className={pwdChecks.number ? 'auth-rule-met' : ''}>
+                      At least one number
+                    </li>
+                  </ul>
                 </div>
                 <div className="auth-field">
                   <label htmlFor="confirmPassword">Confirm password</label>
-                  <input
-                    id="confirmPassword"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Confirm your password"
-                  />
+                  <div className="auth-password-row">
+                    <input
+                      id="confirmPassword"
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Confirm your password"
+                    />
+                    <button
+                      type="button"
+                      className="auth-show-password"
+                      onClick={() => setShowConfirmPassword((v) => !v)}
+                      aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showConfirmPassword ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                 </div>
                 {error && <p className="auth-error">{error}</p>}
                 <button

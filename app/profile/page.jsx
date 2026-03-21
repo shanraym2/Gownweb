@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
@@ -62,6 +63,14 @@ export default function ProfilePage() {
               <label>Email</label>
               <p>{user.email}</p>
             </div>
+
+            <Link
+              href="/my-orders"
+              className="btn btn-primary auth-submit"
+              style={{ textAlign: 'center', textDecoration: 'none' }}
+            >
+              My orders
+            </Link>
 
             <button type="button" className="btn btn-outline auth-submit" onClick={handleLogout}>
               Logout
