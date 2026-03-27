@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getCurrentUser, logoutUser } from '../utils/authClient'
@@ -8,13 +8,13 @@ import { getCurrentUser, logoutUser } from '../utils/authClient'
 export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
+  const [isMobileOpen, setIsMobileOpen] = useState(false)
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
   const router = useRouter()
+  const profileRef = useRef(null)
 
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 50)
-    }
-
+    const handleScroll = () => setIsScrolled(window.scrollY > 50)
     window.addEventListener('scroll', handleScroll)
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
@@ -33,43 +33,130 @@ export default function Header() {
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (profileRef.current && !profileRef.current.contains(event.target)) {
+        setIsProfileOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   const handleLogout = () => {
     logoutUser()
     setCurrentUser(null)
+    setIsProfileOpen(false)
+    setIsMobileOpen(false)
     router.push('/')
   }
+
+  const toggleMobileMenu = () => setIsMobileOpen(!isMobileOpen)
+  const toggleProfileMenu = () => setIsProfileOpen(!isProfileOpen)
 
   return (
     <header className={isScrolled ? 'scrolled' : ''}>
       <div className="nav-container">
-        <a href="/" className="logo">JCE Bridal.</a>
-        <nav>
+        <Link href="/" className="logo" aria-label="Go to homepage">
+          JCE Bridal.
+        </Link>
+
+        <button
+          className="nav-mobile-toggle"
+          aria-label="Toggle navigation menu"
+          aria-expanded={isMobileOpen}
+          onClick={toggleMobileMenu}
+        >
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+
+        <nav className={isMobileOpen ? 'open' : ''} aria-label="Main navigation">
           <ul className="nav-links">
-            <li><a href="/gowns">Gowns</a></li>
-            <li><a href="/contact">Contact Us</a></li>
+            <li>
+              <Link href="/gowns" onClick={() => setIsMobileOpen(false)}>
+                Gowns
+              </Link>
+            </li>
+
+            <li>
+              <Link href="/contact" onClick={() => setIsMobileOpen(false)}>
+                Contact Us
+              </Link>
+            </li>
+
+            <li className="cart-nav">
+              <Link href="/cart" onClick={() => setIsMobileOpen(false)}>
+                Cart
+              </Link>
+            </li>
+
             {currentUser?.role === 'admin' && (
-              <li><Link href="/admin">Admin</Link></li>
+              <li>
+                <Link href="/admin" onClick={() => setIsMobileOpen(false)}>
+                  Admin Dashboard
+                </Link>
+              </li>
             )}
+
             {currentUser ? (
-              <li className="profile-menu">
-                <a href="/profile" className="profile-menu-trigger">Profile</a>
-                <div className="profile-dropdown" role="menu">
-                  <span className="profile-dropdown-label">Account</span>
-                  <Link href="/profile" className="profile-dropdown-item">My Profile</Link>
-                  <Link href="/my-orders" className="profile-dropdown-item profile-dropdown-orders">My orders</Link>
-                  <Link href="/cart" className="profile-dropdown-item profile-dropdown-cart">Cart</Link>
-                </div>
+              <li className="profile-menu" ref={profileRef}>
+                <button
+                  className="profile-menu-trigger nav-link-style"
+                  aria-haspopup="true"
+                  aria-expanded={isProfileOpen}
+                  onClick={toggleProfileMenu}
+                >
+                  Account
+                </button>
+
+                {isProfileOpen && (
+                  <div className="profile-dropdown" role="menu">
+                    <span className="profile-dropdown-label">
+                      Signed in as {currentUser.name}
+                    </span>
+
+                    <Link
+                      href="/profile"
+                      className="profile-dropdown-item"
+                      onClick={() => {
+                        setIsProfileOpen(false)
+                        setIsMobileOpen(false)
+                      }}
+                    >
+                      My Profile
+                    </Link>
+
+                    <Link
+                      href="/my-orders"
+                      className="profile-dropdown-item"
+                      onClick={() => {
+                        setIsProfileOpen(false)
+                        setIsMobileOpen(false)
+                      }}
+                    >
+                      My Orders
+                    </Link>
+
+                    <button
+                      className="logout-nav"
+                      onClick={handleLogout}
+                    >
+                      Logout
+                    </button>
+                  </div>
+                )}
               </li>
             ) : (
-              <li><a href="/login">Login</a></li>
+              <li>
+                <Link href="/login" onClick={() => setIsMobileOpen(false)}>
+                  Login
+                </Link>
+              </li>
             )}
           </ul>
         </nav>
-        <div className="nav-mobile-toggle">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
       </div>
     </header>
   )
