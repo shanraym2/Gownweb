@@ -118,11 +118,6 @@ export default function CheckoutPage() {
         ? value.replace(/\D/g, '')
         : value
 
-    // Limit phone to 11 digits
-    if (name === 'phone') {
-      val = val.slice(0, 11)
-    }
-
     setForm((prev) => ({ ...prev, [name]: val }))
     setErrors((prev) => ({ ...prev, [name]: validateField(name, val) }))
   }
@@ -246,10 +241,9 @@ export default function CheckoutPage() {
           <h1 className="cart-title">Checkout</h1>
           <form onSubmit={handleSubmit} className="checkout-layout">
 
-            {/* FORM COLUMN */}
+
             <div className="checkout-form-col">
 
-              {/* Contact */}
               <div className="checkout-block">
                 <h2 className="checkout-heading">Contact</h2>
                 <div className="checkout-row">
@@ -302,7 +296,6 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Delivery */}
               <div className="checkout-block">
                 <h2 className="checkout-heading">Delivery address</h2>
                 <div className="checkout-field">
@@ -353,7 +346,6 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Payment */}
               <div className="checkout-block">
                 <h2 className="checkout-heading">Payment</h2>
                 <div className="checkout-payment-options">
@@ -367,7 +359,6 @@ export default function CheckoutPage() {
               </div>
             </div>
 
-            {/* SUMMARY COLUMN */}
             <div className="checkout-summary-col">
               <h2 className="checkout-summary-title">Order summary</h2>
               <ul className="checkout-line-items">
