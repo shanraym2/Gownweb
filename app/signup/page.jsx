@@ -20,11 +20,19 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [otp, setOtp] = useState('')
   const [step, setStep] = useState(1)
-  const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [devMode, setDevMode] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
+  const [errors, setErrors] = useState({
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    otp: '',
+    general: '',
+  })
 
   useEffect(() => {
     const user = getCurrentUser()
@@ -33,56 +41,98 @@ export default function SignupPage() {
 
   const pwdChecks = getPasswordRuleChecks(password)
 
-  const validateForm = () => {
-    if (!name || !email || !password || !confirmPassword) {
-      setError('Please fill in all fields.')
-      return false
-    }
-    if (!isRealName(name)) {
-      setError(
-        'Use your real name: letters only, spaces between words. Hyphens and apostrophes are OK (e.g. O\'Brien). No numbers or symbols.'
-      )
-      return false
-    }
-    if (!passwordMeetsRules(password)) {
-      setError('Password must meet all requirements below.')
-      return false
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.')
-      return false
-    }
-    return true
+  const validateName = (value) => {
+    if (!value) return 'Please enter your name.'
+    if (!isRealName(value))
+      return "Use your real name: letters only, spaces between words. Hyphens and apostrophes are OK (e.g. O'Brien). No numbers or symbols."
+    return ''
+  }
+
+  const validateEmail = (value) => {
+    if (!value) return 'Please enter your email.'
+    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!regex.test(value)) return 'Enter a valid email address.'
+    return ''
+  }
+
+  const validatePassword = (value) => {
+    if (!value) return 'Please create a password.'
+    if (!passwordMeetsRules(value))
+      return 'Password must meet all requirements below.'
+    return ''
+  }
+
+  const validateConfirmPassword = (value) => {
+    if (!value) return 'Please confirm your password.'
+    if (value !== password) return 'Passwords do not match.'
+    return ''
+  }
+
+  const validateOtp = (value) => {
+    if (!value) return 'Please enter the 6-digit code from your email.'
+    if (value.length !== 6) return 'OTP must be 6 digits.'
+    return ''
   }
 
   const handleSendOtp = async (e) => {
     e.preventDefault()
-    setError('')
-    if (!validateForm()) return
+    setErrors((prev) => ({ ...prev, general: '' }))
+
+    const nameError = validateName(name)
+    const emailError = validateEmail(email)
+    const passwordError = validatePassword(password)
+    const confirmPasswordError = validateConfirmPassword(confirmPassword)
+
+    if (nameError || emailError || passwordError || confirmPasswordError) {
+      setErrors((prev) => ({
+        ...prev,
+        name: nameError,
+        email: emailError,
+        password: passwordError,
+        confirmPassword: confirmPasswordError,
+      }))
+      return
+    }
+
     const users = loadUsers()
     const emailTaken = users.some(
       (u) => u.email.toLowerCase() === email.trim().toLowerCase()
     )
+
     if (emailTaken) {
-      setError('An account with this email already exists. Please log in instead.')
+      setErrors((prev) => ({
+        ...prev,
+        general: 'An account with this email already exists. Please log in instead.',
+      }))
       return
     }
+
     setIsSubmitting(true)
+
     try {
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), purpose: 'signup' }),
       })
+
       const data = await res.json()
+
       if (!res.ok || !data.ok) {
-        setError(data.error || 'Failed to send OTP.')
+        setErrors((prev) => ({
+          ...prev,
+          general: data.error || 'Failed to send OTP.',
+        }))
         return
       }
+
       setDevMode(!!data.devMode)
       setStep(2)
     } catch {
-      setError('Failed to send OTP. Please try again.')
+      setErrors((prev) => ({
+        ...prev,
+        general: 'Failed to send OTP. Please try again.',
+      }))
     } finally {
       setIsSubmitting(false)
     }
@@ -90,40 +140,61 @@ export default function SignupPage() {
 
   const handleVerifyAndRegister = async (e) => {
     e.preventDefault()
-    setError('')
-    if (!otp || otp.length !== 6) {
-      setError('Please enter the 6-digit code from your email.')
+    setErrors((prev) => ({ ...prev, general: '' }))
+
+    const otpError = validateOtp(otp)
+
+    if (otpError) {
+      setErrors((prev) => ({ ...prev, otp: otpError }))
       return
     }
+
     setIsSubmitting(true)
+
     try {
       const verifyRes = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'signup' }),
       })
+
       const verifyData = await verifyRes.json()
+
       if (!verifyRes.ok || !verifyData.ok) {
-        setError(verifyData.error || 'Invalid or expired OTP.')
+        setErrors((prev) => ({
+          ...prev,
+          general: verifyData.error || 'Invalid or expired OTP.',
+        }))
         return
       }
+
       const result = await registerUser({
         name: name.trim(),
         email: email.trim(),
         password,
       })
+
       if (!result.ok) {
-        setError(result.error || 'Unable to create account.')
+        setErrors((prev) => ({
+          ...prev,
+          general: result.error || 'Unable to create account.',
+        }))
         return
       }
+
       const roleRes = await fetch(
         `/api/auth/role?email=${encodeURIComponent(email.trim())}`
       )
       const roleData = await roleRes.json()
+
       if (roleData.ok && roleData.role) setCurrentUserRole(roleData.role)
+
       router.push('/')
     } catch {
-      setError('Something went wrong. Please try again.')
+      setErrors((prev) => ({
+        ...prev,
+        general: 'Something went wrong. Please try again.',
+      }))
     } finally {
       setIsSubmitting(false)
     }
@@ -132,7 +203,14 @@ export default function SignupPage() {
   const handleBack = () => {
     setStep(1)
     setOtp('')
-    setError('')
+    setErrors({
+      name: '',
+      email: '',
+      password: '',
+      confirmPassword: '',
+      otp: '',
+      general: '',
+    })
   }
 
   return (
@@ -159,12 +237,21 @@ export default function SignupPage() {
                     type="text"
                     autoComplete="name"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setName(value)
+                      setErrors((prev) => ({
+                        ...prev,
+                        name: validateName(value),
+                        general: '',
+                      }))
+                    }}
                     placeholder="e.g. Maria Santos"
                   />
                   <p className="auth-field-hint">
                     Letters only. Spaces, hyphens, and apostrophes are allowed (e.g. Ana-Maria, O&apos;Brien). No numbers or symbols.
                   </p>
+                  {errors.name && <p className="auth-error">{errors.name}</p>}
                 </div>
                 <div className="auth-field">
                   <label htmlFor="email">Email</label>
@@ -172,9 +259,18 @@ export default function SignupPage() {
                     id="email"
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setEmail(value)
+                      setErrors((prev) => ({
+                        ...prev,
+                        email: validateEmail(value),
+                        general: '',
+                      }))
+                    }}
                     placeholder="you@example.com"
                   />
+                  {errors.email && <p className="auth-error">{errors.email}</p>}
                 </div>
                 <div className="auth-field">
                   <label htmlFor="password">Password</label>
@@ -184,7 +280,16 @@ export default function SignupPage() {
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={password}
-                      onChange={(e) => setPassword(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        setPassword(value)
+                        setErrors((prev) => ({
+                          ...prev,
+                          password: validatePassword(value),
+                          confirmPassword: validateConfirmPassword(confirmPassword),
+                          general: '',
+                        }))
+                      }}
                       placeholder="Create a password"
                     />
                     <button
@@ -207,6 +312,7 @@ export default function SignupPage() {
                       At least one number
                     </li>
                   </ul>
+                  {errors.password && <p className="auth-error">{errors.password}</p>}
                 </div>
                 <div className="auth-field">
                   <label htmlFor="confirmPassword">Confirm password</label>
@@ -216,7 +322,15 @@ export default function SignupPage() {
                       type={showConfirmPassword ? 'text' : 'password'}
                       autoComplete="new-password"
                       value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        setConfirmPassword(value)
+                        setErrors((prev) => ({
+                          ...prev,
+                          confirmPassword: validateConfirmPassword(value),
+                          general: '',
+                        }))
+                      }}
                       placeholder="Confirm your password"
                     />
                     <button
@@ -228,8 +342,11 @@ export default function SignupPage() {
                       {showConfirmPassword ? 'Hide' : 'Show'}
                     </button>
                   </div>
+                  {errors.confirmPassword && (
+                    <p className="auth-error">{errors.confirmPassword}</p>
+                  )}
                 </div>
-                {error && <p className="auth-error">{error}</p>}
+                {errors.general && <p className="auth-error">{errors.general}</p>}
                 <button
                   type="submit"
                   className="btn btn-primary auth-submit"
@@ -263,12 +380,21 @@ export default function SignupPage() {
                     inputMode="numeric"
                     maxLength={6}
                     value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, '')
+                      setOtp(value)
+                      setErrors((prev) => ({
+                        ...prev,
+                        otp: validateOtp(value),
+                        general: '',
+                      }))
+                    }}
                     placeholder="000000"
                     className="auth-otp-input"
                   />
                 </div>
-                {error && <p className="auth-error">{error}</p>}
+                {errors.otp && <p className="auth-error">{errors.otp}</p>}
+                {errors.general && <p className="auth-error">{errors.general}</p>}
                 <button
                   type="submit"
                   className="btn btn-primary auth-submit"
