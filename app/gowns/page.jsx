@@ -18,7 +18,7 @@ export default function GownsPage() {
 
   return (
     <main className="gowns-page">
-      <Header />
+      <Header solid />
       <section className="gowns-header-spacer" />
       <section className="gowns-hero-simple">
         <div className="container">

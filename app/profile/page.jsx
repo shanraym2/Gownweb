@@ -43,7 +43,7 @@ export default function ProfilePage() {
 
   return (
     <main className="auth-page">
-      <Header />
+      <Header solid />
       <section className="gowns-header-spacer" />
 
       <section className="auth-section">

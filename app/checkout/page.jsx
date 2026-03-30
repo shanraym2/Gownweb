@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns, getGownById } from '@/hooks/useGowns'
-import { loadCart, loadCartNote, clearCart } from '../utils/cartClient'
+import { loadCart, loadCartNote, removeItem } from '../utils/cartClient'
 import { getCurrentUser } from '../utils/authClient'
 
 function parsePrice(priceStr) {
@@ -21,12 +22,11 @@ function formatPrice(num) {
 const DEFAULT_GOWN_IMAGE =
   'https://images.unsplash.com/photo-1600180758895-02b4fdc936f4?auto=format&fit=crop&w=150&q=80'
 
-const GCASH_LOGO =
-  'https://logodix.com/logo/2206206.png'
-const BDO_LOGO =
-  'https://cdn.brandfetch.io/idcWXsRcl7/theme/dark/logo.svg?c=1dxbfHSJFAPEGdCLU4o5B'
+const GCASH_LOGO = 'https://logodix.com/logo/2206206.png'
+const BDO_LOGO = 'https://cdn.brandfetch.io/idcWXsRcl7/theme/dark/logo.svg?c=1dxbfHSJFAPEGdCLU4o5B'
 
 export default function CheckoutPage() {
+  const searchParams = useSearchParams()
   const { gowns } = useGowns()
   const [cartItems, setCartItems] = useState([])
   const [note, setNote] = useState('')
@@ -36,14 +36,8 @@ export default function CheckoutPage() {
   const [orderDone, setOrderDone] = useState(false)
   const [shippingFee] = useState(200)
   const [form, setForm] = useState({
-    email: '',
-    firstName: '',
-    lastName: '',
-    phone: '',
-    address: '',
-    city: '',
-    province: '',
-    zip: '',
+    email: '', firstName: '', lastName: '', phone: '',
+    address: '', city: '', province: '', zip: '',
   })
   const [errors, setErrors] = useState({})
 
@@ -57,9 +51,17 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (!mounted) return
+
+    const itemsParam = searchParams.get('items')
+    const selectedIds = itemsParam
+      ? new Set(itemsParam.split(',').map(s => s.trim()).filter(Boolean))
+      : null 
+
     const raw = loadCart()
     const withGowns = raw
       .map((item) => {
+        if (selectedIds && !selectedIds.has(String(item.id))) return null
+
         const gown = getGownById(gowns, item.id)
         if (!gown) return null
         const priceNum = parsePrice(gown.price)
@@ -75,9 +77,10 @@ export default function CheckoutPage() {
         }
       })
       .filter(Boolean)
+
     setCartItems(withGowns)
     setNote(loadCartNote())
-  }, [mounted, gowns])
+  }, [mounted, gowns, searchParams])
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0)
   const taxes = Math.round(subtotal * 0.12)
@@ -85,10 +88,7 @@ export default function CheckoutPage() {
 
   const validateField = (name, value) => {
     switch (name) {
-      case 'firstName':
-      case 'lastName':
-      case 'city':
-      case 'province':
+      case 'firstName': case 'lastName': case 'city': case 'province':
         if (!value.trim()) return 'Required'
         if (!/^[a-zA-Z\s.'-]+$/.test(value)) return 'Invalid characters'
         return ''
@@ -100,24 +100,19 @@ export default function CheckoutPage() {
         return ''
       case 'phone':
         if (!value) return 'Required'
-        if (!/^\d{7,11}$/.test(value)) return 'Phone must be 7-11 digits'
+        if (!/^\d{7,11}$/.test(value)) return 'Phone must be 7–11 digits'
         return ''
       case 'zip':
         if (!value) return 'Required'
-        if (!/^\d{4,6}$/.test(value)) return 'ZIP must be 4-6 digits'
+        if (!/^\d{4,6}$/.test(value)) return 'ZIP must be 4–6 digits'
         return ''
-      default:
-        return ''
+      default: return ''
     }
   }
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    let val =
-      name === 'phone' || name === 'zip'
-        ? value.replace(/\D/g, '')
-        : value
-
+    const val = name === 'phone' || name === 'zip' ? value.replace(/\D/g, '') : value
     setForm((prev) => ({ ...prev, [name]: val }))
     setErrors((prev) => ({ ...prev, [name]: validateField(name, val) }))
   }
@@ -131,34 +126,16 @@ export default function CheckoutPage() {
       const err = validateField(key, form[key])
       if (err) newErrors[key] = err
     })
-    if (Object.keys(newErrors).length) {
-      setErrors(newErrors)
-      return
-    }
+    if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
     setSubmitting(true)
     try {
       const order = {
         contact: { ...form },
-        delivery: {
-          address: form.address,
-          city: form.city,
-          province: form.province,
-          zip: form.zip,
-        },
+        delivery: { address: form.address, city: form.city, province: form.province, zip: form.zip },
         payment,
-        items: cartItems.map((i) => ({
-          id: i.id,
-          name: i.name,
-          qty: i.qty,
-          price: i.price,
-          subtotal: i.subtotal,
-        })),
-        note,
-        subtotal,
-        shippingFee,
-        taxes,
-        total,
+        items: cartItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, subtotal: i.subtotal })),
+        note, subtotal, shippingFee, taxes, total,
         createdAt: new Date().toISOString(),
       }
       const res = await fetch('/api/orders', {
@@ -167,9 +144,14 @@ export default function CheckoutPage() {
         body: JSON.stringify(order),
       })
       if (res.ok) {
-        clearCart()
+
+        cartItems.forEach(item => {
+          removeItem(item.id)
+        })
+
         setOrderDone(true)
-      } else {
+      }
+      else {
         const data = await res.json().catch(() => ({}))
         alert(data.error || 'Could not place order. Try again.')
       }
@@ -183,115 +165,68 @@ export default function CheckoutPage() {
   const showError = (field) =>
     errors[field] ? <div className="form-error">{errors[field]}</div> : null
 
-  if (!mounted)
-    return (
-      <main className="gowns-page">
-        <Header />
-        <Footer />
-      </main>
-    )
+  if (!mounted) return (
+    <main className="gowns-page"><Header solid /><Footer /></main>
+  )
 
-  if (orderDone)
-    return (
-      <main className="gowns-page">
-        <Header />
-        <section className="gowns-header-spacer" />
-        <section className="checkout-section">
-          <div className="checkout-container">
-            <h1>Thank you</h1>
-            <p>
-              Your order has been received. We will contact you for payment
-              (GCash or BDO) and delivery details.
-            </p>
-            <Link href="/my-orders" className="btn btn-outline mt-3">
-              View my orders
-            </Link>
-            <Link href="/gowns" className="btn btn-primary mt-3">
-              Continue Shopping
-            </Link>
-          </div>
-        </section>
-        <Footer />
-      </main>
-    )
+  if (orderDone) return (
+    <main className="gowns-page">
+      <Header solid />
+      <section className="gowns-header-spacer" />
+      <section className="checkout-section">
+        <div className="checkout-container">
+          <h1>Thank you</h1>
+          <p>Your order has been received. We will contact you for payment (GCash or BDO) and delivery details.</p>
+          <Link href="/my-orders" className="btn btn-outline mt-3">View my orders</Link>
+          <Link href="/gowns" className="btn btn-primary mt-3">Continue Shopping</Link>
+        </div>
+      </section>
+      <Footer />
+    </main>
+  )
 
-  if (!cartItems.length)
-    return (
-      <main className="gowns-page">
-        <Header />
-        <section className="gowns-header-spacer" />
-        <section className="checkout-section">
-          <div className="checkout-container">
-            <p className="checkout-empty">Your cart is empty.</p>
-            <Link href="/gowns" className="btn btn-primary">
-              Continue Shopping
-            </Link>
-          </div>
-        </section>
-        <Footer />
-      </main>
-    )
+  if (!cartItems.length) return (
+    <main className="gowns-page">
+      <Header solid />
+      <section className="gowns-header-spacer" />
+      <section className="checkout-section">
+        <div className="checkout-container">
+          <p className="checkout-empty">No items selected for checkout.</p>
+          <Link href="/cart" className="btn btn-primary">Back to Cart</Link>
+        </div>
+      </section>
+      <Footer />
+    </main>
+  )
 
   return (
     <main className="gowns-page">
-      <Header />
+      <Header solid />
       <section className="gowns-header-spacer" />
       <section className="checkout-section">
         <div className="checkout-container">
           <h1 className="cart-title">Checkout</h1>
           <form onSubmit={handleSubmit} className="checkout-layout">
 
-
             <div className="checkout-form-col">
-
               <div className="checkout-block">
                 <h2 className="checkout-heading">Contact</h2>
                 <div className="checkout-row">
                   <div className="checkout-field">
-                    <input 
-                      type="text" 
-                      name="firstName" 
-                      placeholder="First name" 
-                      value={form.firstName} 
-                      onChange={handleChange} 
-                      className={errors.firstName ? 'input-error' : ''}
-                    />
+                    <input type="text" name="firstName" placeholder="First name" value={form.firstName} onChange={handleChange} className={errors.firstName ? 'input-error' : ''} />
                     {showError('firstName')}
                   </div>
                   <div className="checkout-field">
-                    <input 
-                      type="text" 
-                      name="lastName" 
-                      placeholder="Last name" 
-                      value={form.lastName} 
-                      onChange={handleChange} 
-                      className={errors.lastName ? 'input-error' : ''}
-                    />
+                    <input type="text" name="lastName" placeholder="Last name" value={form.lastName} onChange={handleChange} className={errors.lastName ? 'input-error' : ''} />
                     {showError('lastName')}
                   </div>
                 </div>
                 <div className="checkout-field">
-                  <input 
-                    type="email" 
-                    name="email" 
-                    placeholder="Email" 
-                    value={form.email} 
-                    onChange={handleChange} 
-                    className={errors.email ? 'input-error' : ''}
-                  />
+                  <input type="email" name="email" placeholder="Email" value={form.email} onChange={handleChange} className={errors.email ? 'input-error' : ''} />
                   {showError('email')}
                 </div>
                 <div className="checkout-field">
-                  <input 
-                    type="tel" 
-                    name="phone" 
-                    placeholder="Phone" 
-                    value={form.phone} 
-                    onChange={handleChange} 
-                    className={errors.phone ? 'input-error' : ''}
-                    maxLength={11}
-
-                  />
+                  <input type="tel" name="phone" placeholder="Phone" value={form.phone} onChange={handleChange} className={errors.phone ? 'input-error' : ''} maxLength={11} />
                   {showError('phone')}
                 </div>
               </div>
@@ -299,49 +234,21 @@ export default function CheckoutPage() {
               <div className="checkout-block">
                 <h2 className="checkout-heading">Delivery address</h2>
                 <div className="checkout-field">
-                  <input 
-                    type="text" 
-                    name="address" 
-                    placeholder="Street / Barangay" 
-                    value={form.address} 
-                    onChange={handleChange} 
-                    className={errors.address ? 'input-error' : ''}
-                  />
+                  <input type="text" name="address" placeholder="Street / Barangay" value={form.address} onChange={handleChange} className={errors.address ? 'input-error' : ''} />
                   {showError('address')}
                 </div>
                 <div className="checkout-row">
                   <div className="checkout-field">
-                    <input 
-                      type="text" 
-                      name="city" 
-                      placeholder="City" 
-                      value={form.city} 
-                      onChange={handleChange} 
-                      className={errors.city ? 'input-error' : ''}
-                    />
+                    <input type="text" name="city" placeholder="City" value={form.city} onChange={handleChange} className={errors.city ? 'input-error' : ''} />
                     {showError('city')}
                   </div>
                   <div className="checkout-field">
-                    <input 
-                      type="text" 
-                      name="province" 
-                      placeholder="Province" 
-                      value={form.province} 
-                      onChange={handleChange} 
-                      className={errors.province ? 'input-error' : ''}
-                    />
+                    <input type="text" name="province" placeholder="Province" value={form.province} onChange={handleChange} className={errors.province ? 'input-error' : ''} />
                     {showError('province')}
                   </div>
                 </div>
                 <div className="checkout-field">
-                  <input 
-                    type="text" 
-                    name="zip" 
-                    placeholder="ZIP / Postal code" 
-                    value={form.zip} 
-                    onChange={handleChange} 
-                    className={errors.zip ? 'input-error' : ''}
-                  />
+                  <input type="text" name="zip" placeholder="ZIP / Postal code" value={form.zip} onChange={handleChange} className={errors.zip ? 'input-error' : ''} />
                   {showError('zip')}
                 </div>
               </div>
@@ -349,10 +256,10 @@ export default function CheckoutPage() {
               <div className="checkout-block">
                 <h2 className="checkout-heading">Payment</h2>
                 <div className="checkout-payment-options">
-                  <button type="button" className={`checkout-payment-btn ${payment==='gcash'?'active':''}`} onClick={() => setPayment('gcash')}>
+                  <button type="button" className={`checkout-payment-btn ${payment === 'gcash' ? 'active' : ''}`} onClick={() => setPayment('gcash')}>
                     <img src={GCASH_LOGO} alt="GCash" className="checkout-payment-logo" /> GCash
                   </button>
-                  <button type="button" className={`checkout-payment-btn ${payment==='bdo'?'active':''}`} onClick={() => setPayment('bdo')}>
+                  <button type="button" className={`checkout-payment-btn ${payment === 'bdo' ? 'active' : ''}`} onClick={() => setPayment('bdo')}>
                     <img src={BDO_LOGO} alt="BDO" className="checkout-payment-logo" /> BDO
                   </button>
                 </div>
@@ -361,6 +268,7 @@ export default function CheckoutPage() {
 
             <div className="checkout-summary-col">
               <h2 className="checkout-summary-title">Order summary</h2>
+
               <ul className="checkout-line-items">
                 {cartItems.map((item) => (
                   <li key={item.id} className="checkout-line-item">
@@ -378,8 +286,8 @@ export default function CheckoutPage() {
               </ul>
 
               <div className="checkout-totals">
-                <div className="checkout-total-row"><span>Subtotal</span><span className="checkout-total-final">{formatPrice(subtotal)}</span></div>
-                <div className="checkout-total-row"><span>Shipping</span><span className="checkout-shipping-placeholder">{formatPrice(shippingFee)}</span></div>
+                <div className="checkout-total-row"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
+                <div className="checkout-total-row"><span>Shipping</span><span>{formatPrice(shippingFee)}</span></div>
                 <div className="checkout-total-row"><span>Taxes (12%)</span><span>{formatPrice(taxes)}</span></div>
                 <div className="checkout-total-row grand-total"><span>Total</span><span className="checkout-total-final">{formatPrice(total)}</span></div>
               </div>
@@ -393,8 +301,6 @@ export default function CheckoutPage() {
         </div>
       </section>
       <Footer />
-
-
     </main>
   )
 }
