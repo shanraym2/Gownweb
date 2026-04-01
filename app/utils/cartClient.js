@@ -24,7 +24,6 @@ function getCurrentUserEmail() {
   }
 }
 
-/** Returns the storage key for the current user's cart (per-account) */
 function getCartKey() {
   const email = getCurrentUserEmail()
   return email ? `${CART_PREFIX}${email}` : `${CART_PREFIX}guest`

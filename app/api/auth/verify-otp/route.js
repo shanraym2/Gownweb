@@ -3,6 +3,15 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
+const MAX_ATTEMPTS = 5
+
+/**
+ * Must match the key scheme in send-otp/route.js
+ */
+function storeKey(email, purpose) {
+  return `${email}::${purpose}`
+}
+
 function getStorePath() {
   return join(tmpdir(), 'jce-otps.json')
 }
@@ -24,45 +33,76 @@ function saveOtps(otps) {
 export async function POST(request) {
   try {
     const { email, otp, purpose } = await request.json()
+
     if (!email || !otp) {
-      return NextResponse.json({ ok: false, error: 'Email and OTP are required' }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: 'Email and OTP are required' },
+        { status: 400 }
+      )
     }
 
     const cleanEmail = email.trim().toLowerCase()
     const otpStr = String(otp).trim()
     const cleanPurpose = String(purpose || '').trim().toLowerCase()
 
+    if (!cleanPurpose || !['login', 'signup', 'auth', 'reset-password'].includes(cleanPurpose)) {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid or missing OTP purpose.' },
+        { status: 400 }
+      )
+    }
+
+    const key = storeKey(cleanEmail, cleanPurpose)
     const otps = loadOtps()
-    const record = otps[cleanEmail]
+    const record = otps[key]
 
+    // No record at all
     if (!record) {
-      return NextResponse.json({ ok: false, error: 'Invalid or expired OTP' }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: 'No verification code found. Please request a new one.' },
+        { status: 400 }
+      )
     }
 
+    // Expired
     if (Date.now() > record.expires) {
-      delete otps[cleanEmail]
+      delete otps[key]
       saveOtps(otps)
-      return NextResponse.json({ ok: false, error: 'OTP has expired. Please request a new one.' }, { status: 400 })
+      return NextResponse.json(
+        { ok: false, error: 'Your code has expired. Please request a new one.' },
+        { status: 400 }
+      )
     }
 
-    if (cleanPurpose && record.purpose && record.purpose !== cleanPurpose) {
-      return NextResponse.json({ ok: false, error: 'OTP purpose mismatch. Please request a new code.' }, { status: 400 })
-    }
-
+    // Wrong code
     if (record.otp !== otpStr) {
       const nextAttempts = Number(record.attempts || 0) + 1
-      if (nextAttempts >= 5) {
-        delete otps[cleanEmail]
+      const attemptsLeft = MAX_ATTEMPTS - nextAttempts
+
+      if (nextAttempts >= MAX_ATTEMPTS) {
+        delete otps[key]
         saveOtps(otps)
-        return NextResponse.json({ ok: false, error: 'Too many invalid attempts. Request a new OTP.' }, { status: 429 })
+        return NextResponse.json(
+          { ok: false, error: 'Too many incorrect attempts. Please request a new code.' },
+          { status: 429 }
+        )
       }
-      otps[cleanEmail] = { ...record, attempts: nextAttempts }
+
+      otps[key] = { ...record, attempts: nextAttempts }
       saveOtps(otps)
-      return NextResponse.json({ ok: false, error: 'Invalid OTP' }, { status: 400 })
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Incorrect code. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`,
+          attemptsLeft,
+        },
+        { status: 400 }
+      )
     }
 
-    // OTP verified - remove it so it can't be reused
-    delete otps[cleanEmail]
+    // ✅ Correct — consume the OTP so it can't be reused
+    delete otps[key]
     saveOtps(otps)
 
     return NextResponse.json({ ok: true, message: 'OTP verified' })
