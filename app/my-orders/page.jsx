@@ -101,7 +101,7 @@ export default function MyOrdersPage() {
   if (!user) {
     return (
       <main className="gowns-page">
-        <Header />
+        <Header  solid/>
         <section className="gowns-header-spacer" />
         <section className="checkout-section">
           <div className="checkout-container">
@@ -190,7 +190,6 @@ export default function MyOrdersPage() {
                           return (
                             <li key={`${o.id}-${idx}`} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                               {gown?.image ? (
-                                // Images are taken from the gown catalog so you can visually confirm your purchase.
                                 <img
                                   src={gown.image}
                                   alt={gown.alt || item.name || 'Gown'}

@@ -1,0 +1,375 @@
+/* ============================================================
+   JCE BRIDAL — CONTACT PAGE
+   Tokens: Cormorant Garamond + Jost · ivory / charcoal / gold / rose
+   ============================================================ */
+
+/* ── Page shell ── */
+.contact-page {
+  min-height: 100svh;
+  background: var(--ivory);
+  font-family: var(--font-sans);
+}
+
+.contact-header-spacer {
+  height: 80px; /* matches fixed header height */
+}
+
+/* ── Two-column section ── */
+.contact-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: calc(100svh - 80px);
+}
+
+/* ============================================================
+   LEFT COLUMN — brand copy + contact details
+   ============================================================ */
+.contact-left {
+  background: var(--charcoal);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+/* Grain texture (matches hero) */
+.contact-left::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+/* Giant decorative numeral / glyph behind copy */
+.contact-left::after {
+  content: 'JCE';
+  position: absolute;
+  bottom: -2rem;
+  right: -1rem;
+  font-family: var(--font-serif);
+  font-weight: 300;
+  font-size: 11rem;
+  line-height: 1;
+  color: rgba(201,169,110,0.05);
+  pointer-events: none;
+  user-select: none;
+  letter-spacing: -0.04em;
+}
+
+.contact-left-inner {
+  position: relative;
+  z-index: 1;
+  padding: clamp(3rem, 7vw, 6rem) clamp(2rem, 6vw, 5rem);
+}
+
+/* Eyebrow */
+.contact-eyebrow {
+  display: inline-block;
+  font-weight: 300;
+  font-size: 0.68rem;
+  letter-spacing: 0.38em;
+  color: var(--gold);
+  margin-bottom: 1.4rem;
+  position: relative;
+  padding-left: 2.2rem;
+  text-transform: uppercase;
+}
+.contact-eyebrow::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1.5rem;
+  height: 1px;
+  background: var(--gold);
+}
+
+/* Heading */
+.contact-heading {
+  font-family: var(--font-serif);
+  font-weight: 300;
+  font-size: clamp(2.6rem, 4.5vw, 4rem);
+  line-height: 1.1;
+  color: var(--ivory);
+  margin-bottom: 1.4rem;
+}
+.contact-heading em {
+  font-style: italic;
+  color: var(--blush);
+}
+
+/* Intro paragraph */
+.contact-intro {
+  font-size: 0.92rem;
+  font-weight: 300;
+  line-height: 1.8;
+  color: rgba(250,247,244,0.6);
+  max-width: 380px;
+  margin-bottom: 2.8rem;
+}
+
+/* Details list */
+.contact-details {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+}
+
+.contact-detail-item {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.contact-detail-icon {
+  flex-shrink: 0;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid rgba(201,169,110,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold);
+  margin-top: 0.1rem;
+}
+
+.contact-detail-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 300;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 0.3rem;
+}
+
+.contact-detail-value {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 300;
+  line-height: 1.6;
+  color: rgba(250,247,244,0.78);
+  white-space: pre-line;
+}
+
+.contact-detail-link {
+  text-decoration: none;
+  transition: color 0.25s ease;
+}
+.contact-detail-link:hover {
+  color: var(--blush);
+}
+
+/* ============================================================
+   RIGHT COLUMN — form
+   ============================================================ */
+.contact-right {
+  background: var(--ivory);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(3rem, 6vw, 5rem) clamp(1.5rem, 5vw, 4.5rem);
+}
+
+.contact-card {
+  width: 100%;
+  max-width: 480px;
+}
+
+.contact-form-lead {
+  font-family: var(--font-serif);
+  font-weight: 300;
+  font-size: 1.5rem;
+  color: var(--charcoal);
+  margin-bottom: 2rem;
+  padding-bottom: 1.2rem;
+  border-bottom: 1px solid rgba(44,36,32,0.1);
+}
+
+/* Side-by-side name + email on wider screens */
+.contact-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.2rem;
+}
+
+/* ── Fields ── */
+.contact-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1.4rem;
+}
+
+.contact-field label {
+  font-size: 0.68rem;
+  font-weight: 300;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: rgba(44,36,32,0.55);
+}
+
+.contact-field input,
+.contact-field textarea {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 300;
+  color: var(--charcoal);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(44,36,32,0.2);
+  padding: 0.6rem 0;
+  outline: none;
+  transition: border-color 0.25s ease;
+  resize: none;
+  width: 100%;
+}
+
+.contact-field input::placeholder,
+.contact-field textarea::placeholder {
+  color: rgba(44,36,32,0.28);
+}
+
+.contact-field input:focus,
+.contact-field textarea:focus {
+  border-bottom-color: var(--gold);
+}
+
+/* Error state */
+.contact-field.has-error input,
+.contact-field.has-error textarea {
+  border-bottom-color: var(--rose);
+}
+
+.field-error {
+  font-size: 0.72rem;
+  color: var(--rose);
+  letter-spacing: 0.02em;
+  margin-top: -0.1rem;
+}
+
+/* ── Submit button ── */
+.btn-contact-submit {
+  margin-top: 0.6rem;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 300;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+
+  padding: 1rem 2rem;
+  background: var(--charcoal);
+  color: var(--ivory);
+  border: 1px solid var(--charcoal);
+  cursor: pointer;
+  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.btn-contact-submit:hover:not(:disabled) {
+  background: transparent;
+  color: var(--charcoal);
+}
+
+.btn-contact-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Spinner */
+.btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid rgba(250,247,244,0.35);
+  border-top-color: var(--ivory);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Ghost button (reset after sent) ── */
+.btn-contact-ghost {
+  margin-top: 1.6rem;
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 300;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: rgba(44,36,32,0.5);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.25s ease;
+}
+.btn-contact-ghost:hover { color: var(--charcoal); }
+
+/* ── Success state ── */
+.contact-success {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.contact-success-icon {
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid rgba(44,36,32,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold);
+  margin-bottom: 1.6rem;
+}
+
+.contact-success-title {
+  font-family: var(--font-serif);
+  font-weight: 300;
+  font-size: 2rem;
+  color: var(--charcoal);
+  margin-bottom: 0.8rem;
+}
+
+.contact-success-body {
+  font-size: 0.9rem;
+  font-weight: 300;
+  line-height: 1.8;
+  color: rgba(44,36,32,0.62);
+  max-width: 340px;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 860px) {
+  .contact-section {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .contact-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .contact-left::after { font-size: 7rem; }
+}
+
+@media (max-width: 480px) {
+  .contact-right {
+    padding: 2.5rem 1.5rem;
+  }
+}

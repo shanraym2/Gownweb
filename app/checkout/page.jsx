@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns, getGownById } from '@/hooks/useGowns'
-import { loadCart, loadCartNote, clearCart } from '../utils/cartClient'
+import { loadCart, loadCartNote, removeItem } from '../utils/cartClient'
 import { getCurrentUser } from '../utils/authClient'
 
 function parsePrice(priceStr) {
@@ -18,10 +19,14 @@ function formatPrice(num) {
   return '₱' + Number(num).toLocaleString('en-PH')
 }
 
-const GCASH_LOGO = 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/GCash_Logo.svg/120px-GCash_Logo.svg.png'
-const BDO_LOGO = 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/BDO_Unibank_%282015%29.svg/120px-BDO_Unibank_%282015%29.svg.png'
+const DEFAULT_GOWN_IMAGE =
+  'https://images.unsplash.com/photo-1600180758895-02b4fdc936f4?auto=format&fit=crop&w=150&q=80'
+
+const GCASH_LOGO = 'https://logodix.com/logo/2206206.png'
+const BDO_LOGO = 'https://cdn.brandfetch.io/idcWXsRcl7/theme/dark/logo.svg?c=1dxbfHSJFAPEGdCLU4o5B'
 
 export default function CheckoutPage() {
+  const searchParams = useSearchParams()
   const { gowns } = useGowns()
   const [cartItems, setCartItems] = useState([])
   const [note, setNote] = useState('')
@@ -29,43 +34,42 @@ export default function CheckoutPage() {
   const [payment, setPayment] = useState('gcash')
   const [submitting, setSubmitting] = useState(false)
   const [orderDone, setOrderDone] = useState(false)
+  const [shippingFee] = useState(200)
   const [form, setForm] = useState({
-    email: '',
-    firstName: '',
-    lastName: '',
-    phone: '',
-    address: '',
-    city: '',
-    province: '',
-    zip: '',
+    email: '', firstName: '', lastName: '', phone: '',
+    address: '', city: '', province: '', zip: '',
   })
+  const [errors, setErrors] = useState({})
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  useEffect(() => setMounted(true), [])
 
-  // If you're logged in, always associate the order to the logged-in account email.
-  // This ensures "/my-orders" shows the order under whichever account the customer is using.
   useEffect(() => {
     if (!mounted) return
     const loggedIn = getCurrentUser()
-    if (!loggedIn?.email) return
-    setForm((prev) => ({ ...prev, email: loggedIn.email }))
+    if (loggedIn?.email) setForm((prev) => ({ ...prev, email: loggedIn.email }))
   }, [mounted])
 
   useEffect(() => {
     if (!mounted) return
+
+    const itemsParam = searchParams.get('items')
+    const selectedIds = itemsParam
+      ? new Set(itemsParam.split(',').map(s => s.trim()).filter(Boolean))
+      : null 
+
     const raw = loadCart()
     const withGowns = raw
       .map((item) => {
+        if (selectedIds && !selectedIds.has(String(item.id))) return null
+
         const gown = getGownById(gowns, item.id)
         if (!gown) return null
         const priceNum = parsePrice(gown.price)
         return {
           id: gown.id,
           name: gown.name,
-          image: gown.image,
-          alt: gown.alt,
+          image: gown.image || DEFAULT_GOWN_IMAGE,
+          alt: gown.alt || gown.name,
           price: gown.price,
           priceNum,
           qty: item.qty,
@@ -73,55 +77,65 @@ export default function CheckoutPage() {
         }
       })
       .filter(Boolean)
+
     setCartItems(withGowns)
     setNote(loadCartNote())
-  }, [mounted, gowns])
+  }, [mounted, gowns, searchParams])
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.subtotal, 0)
+  const taxes = Math.round(subtotal * 0.12)
+  const total = subtotal + shippingFee + taxes
+
+  const validateField = (name, value) => {
+    switch (name) {
+      case 'firstName': case 'lastName': case 'city': case 'province':
+        if (!value.trim()) return 'Required'
+        if (!/^[a-zA-Z\s.'-]+$/.test(value)) return 'Invalid characters'
+        return ''
+      case 'address':
+        return value.trim() ? '' : 'Required'
+      case 'email':
+        if (!value.trim()) return 'Required'
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Invalid email'
+        return ''
+      case 'phone':
+        if (!value) return 'Required'
+        if (!/^\d{7,11}$/.test(value)) return 'Phone must be 7–11 digits'
+        return ''
+      case 'zip':
+        if (!value) return 'Required'
+        if (!/^\d{4,6}$/.test(value)) return 'ZIP must be 4–6 digits'
+        return ''
+      default: return ''
+    }
+  }
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    
-    if (name === 'phone') {
-      // Only allow digits
-      const numericValue = value.replace(/\D/g, '')
-      setForm((prev) => ({ ...prev, [name]: numericValue }))
-    } else {
-      setForm((prev) => ({ ...prev, [name]: value }))
-    }
+    const val = name === 'phone' || name === 'zip' ? value.replace(/\D/g, '') : value
+    setForm((prev) => ({ ...prev, [name]: val }))
+    setErrors((prev) => ({ ...prev, [name]: validateField(name, val) }))
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (cartItems.length === 0) return
+    if (!cartItems.length) return
 
-    // Strict validation
-    const loggedIn = getCurrentUser()
-    const emailToUse = loggedIn?.email ? String(loggedIn.email).trim() : form.email.trim()
-    if (!emailToUse.toLowerCase().endsWith('@gmail.com')) {
-      alert('Please provide a valid Gmail address (ending in @gmail.com).')
-      return
-    }
-
-    if (!form.phone || form.phone.length < 7) {
-      alert('Please provide a valid phone number.')
-      return
-    }
+    const newErrors = {}
+    Object.keys(form).forEach((key) => {
+      const err = validateField(key, form[key])
+      if (err) newErrors[key] = err
+    })
+    if (Object.keys(newErrors).length) { setErrors(newErrors); return }
 
     setSubmitting(true)
     try {
       const order = {
-        contact: {
-          email: emailToUse,
-          firstName: form.firstName,
-          lastName: form.lastName,
-          phone: form.phone,
-        },
+        contact: { ...form },
         delivery: { address: form.address, city: form.city, province: form.province, zip: form.zip },
         payment,
         items: cartItems.map((i) => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, subtotal: i.subtotal })),
-        note,
-        subtotal,
+        note, subtotal, shippingFee, taxes, total,
         createdAt: new Date().toISOString(),
       }
       const res = await fetch('/api/orders', {
@@ -130,9 +144,14 @@ export default function CheckoutPage() {
         body: JSON.stringify(order),
       })
       if (res.ok) {
-        clearCart()
+
+        cartItems.forEach(item => {
+          removeItem(item.id)
+        })
+
         setOrderDone(true)
-      } else {
+      }
+      else {
         const data = await res.json().catch(() => ({}))
         alert(data.error || 'Could not place order. Try again.')
       }
@@ -143,176 +162,105 @@ export default function CheckoutPage() {
     }
   }
 
-  if (!mounted) {
-    return (
-      <main className="gowns-page">
-        <Header />
-        <section className="gowns-header-spacer" />
-        <section className="checkout-section">
-          <div className="checkout-container">
-            <p>Loading...</p>
-          </div>
-        </section>
-        <Footer />
-      </main>
-    )
-  }
+  const showError = (field) =>
+    errors[field] ? <div className="form-error">{errors[field]}</div> : null
 
-  if (orderDone) {
-    return (
-      <main className="gowns-page">
-        <Header />
-        <section className="gowns-header-spacer" />
-        <section className="checkout-section">
-          <div className="checkout-container">
-            <h1>Thank you</h1>
-            <p>Your order has been received. We will contact you for payment (GCash or BDO) and delivery details.</p>
-            <Link href="/my-orders" className="btn btn-outline" style={{ marginTop: 12 }}>
-              View my orders
-            </Link>
-            <Link href="/gowns" className="btn btn-primary" style={{ marginTop: 20 }}>Continue Shopping</Link>
-          </div>
-        </section>
-        <Footer />
-      </main>
-    )
-  }
+  if (!mounted) return (
+    <main className="gowns-page"><Header solid /><Footer /></main>
+  )
 
-  if (cartItems.length === 0) {
-    return (
-      <main className="gowns-page">
-        <Header />
-        <section className="gowns-header-spacer" />
-        <section className="checkout-section">
-          <div className="checkout-container">
-            <p className="checkout-empty">Your cart is empty.</p>
-            <Link href="/gowns" className="btn btn-primary">Continue Shopping</Link>
-          </div>
-        </section>
-        <Footer />
-      </main>
-    )
-  }
+  if (orderDone) return (
+    <main className="gowns-page">
+      <Header solid />
+      <section className="gowns-header-spacer" />
+      <section className="checkout-section">
+        <div className="checkout-container">
+          <h1>Thank you</h1>
+          <p>Your order has been received. We will contact you for payment (GCash or BDO) and delivery details.</p>
+          <Link href="/my-orders" className="btn btn-outline mt-3">View my orders</Link>
+          <Link href="/gowns" className="btn btn-primary mt-3">Continue Shopping</Link>
+        </div>
+      </section>
+      <Footer />
+    </main>
+  )
+
+  if (!cartItems.length) return (
+    <main className="gowns-page">
+      <Header solid />
+      <section className="gowns-header-spacer" />
+      <section className="checkout-section">
+        <div className="checkout-container">
+          <p className="checkout-empty">No items selected for checkout.</p>
+          <Link href="/cart" className="btn btn-primary">Back to Cart</Link>
+        </div>
+      </section>
+      <Footer />
+    </main>
+  )
 
   return (
     <main className="gowns-page">
-      <Header />
+      <Header solid />
       <section className="gowns-header-spacer" />
       <section className="checkout-section">
         <div className="checkout-container">
           <h1 className="cart-title">Checkout</h1>
           <form onSubmit={handleSubmit} className="checkout-layout">
+
             <div className="checkout-form-col">
               <div className="checkout-block">
                 <h2 className="checkout-heading">Contact</h2>
                 <div className="checkout-row">
                   <div className="checkout-field">
-                    <input
-                      type="text"
-                      name="firstName"
-                      placeholder="First name"
-                      value={form.firstName}
-                      onChange={handleChange}
-                      required
-                    />
+                    <input type="text" name="firstName" placeholder="First name" value={form.firstName} onChange={handleChange} className={errors.firstName ? 'input-error' : ''} />
+                    {showError('firstName')}
                   </div>
                   <div className="checkout-field">
-                    <input
-                      type="text"
-                      name="lastName"
-                      placeholder="Last name"
-                      value={form.lastName}
-                      onChange={handleChange}
-                      required
-                    />
+                    <input type="text" name="lastName" placeholder="Last name" value={form.lastName} onChange={handleChange} className={errors.lastName ? 'input-error' : ''} />
+                    {showError('lastName')}
                   </div>
                 </div>
                 <div className="checkout-field">
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="Email"
-                    value={form.email}
-                    onChange={handleChange}
-                    required
-                  />
+                  <input type="email" name="email" placeholder="Email" value={form.email} onChange={handleChange} className={errors.email ? 'input-error' : ''} />
+                  {showError('email')}
                 </div>
                 <div className="checkout-field">
-                  <input
-                    type="tel"
-                    name="phone"
-                    placeholder="Phone"
-                    value={form.phone}
-                    onChange={handleChange}
-                  />
+                  <input type="tel" name="phone" placeholder="Phone" value={form.phone} onChange={handleChange} className={errors.phone ? 'input-error' : ''} maxLength={11} />
+                  {showError('phone')}
                 </div>
               </div>
 
               <div className="checkout-block">
                 <h2 className="checkout-heading">Delivery address</h2>
                 <div className="checkout-field">
-                  <input
-                    type="text"
-                    name="address"
-                    placeholder="Address"
-                    value={form.address}
-                    onChange={handleChange}
-                    required
-                  />
+                  <input type="text" name="address" placeholder="Street / Barangay" value={form.address} onChange={handleChange} className={errors.address ? 'input-error' : ''} />
+                  {showError('address')}
                 </div>
                 <div className="checkout-row">
                   <div className="checkout-field">
-                    <input
-                      type="text"
-                      name="city"
-                      placeholder="City"
-                      value={form.city}
-                      onChange={handleChange}
-                      required
-                    />
+                    <input type="text" name="city" placeholder="City" value={form.city} onChange={handleChange} className={errors.city ? 'input-error' : ''} />
+                    {showError('city')}
                   </div>
                   <div className="checkout-field">
-                    <input
-                      type="text"
-                      name="province"
-                      placeholder="Province"
-                      value={form.province}
-                      onChange={handleChange}
-                    />
+                    <input type="text" name="province" placeholder="Province" value={form.province} onChange={handleChange} className={errors.province ? 'input-error' : ''} />
+                    {showError('province')}
                   </div>
                 </div>
                 <div className="checkout-field">
-                  <input
-                    type="text"
-                    name="zip"
-                    placeholder="ZIP / Postal code"
-                    value={form.zip}
-                    onChange={handleChange}
-                  />
+                  <input type="text" name="zip" placeholder="ZIP / Postal code" value={form.zip} onChange={handleChange} className={errors.zip ? 'input-error' : ''} />
+                  {showError('zip')}
                 </div>
               </div>
 
               <div className="checkout-block">
                 <h2 className="checkout-heading">Payment</h2>
-                <p style={{ fontSize: '0.9rem', color: 'var(--color-text-light)', marginBottom: 12 }}>
-                  GCash or BDO bank transfer only.
-                </p>
                 <div className="checkout-payment-options">
-                  <button
-                    type="button"
-                    className={`checkout-payment-btn ${payment === 'gcash' ? 'active' : ''}`}
-                    onClick={() => setPayment('gcash')}
-                  >
-                    <img src={GCASH_LOGO} alt="GCash" className="checkout-payment-logo" />
-                    <span>GCash</span>
+                  <button type="button" className={`checkout-payment-btn ${payment === 'gcash' ? 'active' : ''}`} onClick={() => setPayment('gcash')}>
+                    <img src={GCASH_LOGO} alt="GCash" className="checkout-payment-logo" /> GCash
                   </button>
-                  <button
-                    type="button"
-                    className={`checkout-payment-btn ${payment === 'bdo' ? 'active' : ''}`}
-                    onClick={() => setPayment('bdo')}
-                  >
-                    <img src={BDO_LOGO} alt="BDO" className="checkout-payment-logo" />
-                    <span>BDO Bank Transfer</span>
+                  <button type="button" className={`checkout-payment-btn ${payment === 'bdo' ? 'active' : ''}`} onClick={() => setPayment('bdo')}>
+                    <img src={BDO_LOGO} alt="BDO" className="checkout-payment-logo" /> BDO
                   </button>
                 </div>
               </div>
@@ -320,6 +268,7 @@ export default function CheckoutPage() {
 
             <div className="checkout-summary-col">
               <h2 className="checkout-summary-title">Order summary</h2>
+
               <ul className="checkout-line-items">
                 {cartItems.map((item) => (
                   <li key={item.id} className="checkout-line-item">
@@ -335,20 +284,19 @@ export default function CheckoutPage() {
                   </li>
                 ))}
               </ul>
+
               <div className="checkout-totals">
-                <div className="checkout-total-row">
-                  <span>Subtotal</span>
-                  <span className="checkout-total-final">{formatPrice(subtotal)}</span>
-                </div>
+                <div className="checkout-total-row"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
+                <div className="checkout-total-row"><span>Shipping</span><span>{formatPrice(shippingFee)}</span></div>
+                <div className="checkout-total-row"><span>Taxes (12%)</span><span>{formatPrice(taxes)}</span></div>
+                <div className="checkout-total-row grand-total"><span>Total</span><span className="checkout-total-final">{formatPrice(total)}</span></div>
               </div>
-              <button
-                type="submit"
-                className="btn btn-primary btn-checkout-submit"
-                disabled={submitting}
-              >
+
+              <button type="submit" className="btn btn-primary btn-checkout-submit" disabled={submitting}>
                 {submitting ? 'Placing order…' : 'Place order'}
               </button>
             </div>
+
           </form>
         </div>
       </section>
