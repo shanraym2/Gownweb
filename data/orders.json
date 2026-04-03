@@ -69,7 +69,7 @@
     "note": "",
     "subtotal": 75000,
     "createdAt": "2026-02-01T16:01:42.793Z",
-    "status": "placed"
+    "status": "shipped"
   },
   {
     "id": "1770488161246",
@@ -528,7 +528,7 @@
   },
   {
     "id": "1774604641624",
-    "status": "placed",
+    "status": "shipped",
     "contact": {
       "email": "kayacocho@yahoo.com",
       "firstName": "fxxxxxxxxxx",
@@ -612,5 +612,48 @@
     "note": "",
     "subtotal": 80000,
     "createdAt": "2026-03-30T10:28:42.454Z"
+  },
+  {
+    "id": "1775210837165",
+    "status": "placed",
+    "contact": {
+      "email": "kayacocho@yahoo.com",
+      "firstName": "asaa",
+      "lastName": "AY",
+      "phone": "09502353665"
+    },
+    "delivery": {
+      "address": "173 E. Qiogue st.",
+      "city": "Pateros",
+      "province": "NCR FOURTH DISTRICT",
+      "zip": "1620"
+    },
+    "payment": "bdo",
+    "items": [
+      {
+        "id": 1,
+        "name": "The Isabella",
+        "qty": 1,
+        "price": "₱65,000",
+        "subtotal": 65000
+      },
+      {
+        "id": 6,
+        "name": "The Elena",
+        "qty": 1,
+        "price": "₱95,000",
+        "subtotal": 95000
+      },
+      {
+        "id": 3,
+        "name": "The Sophia",
+        "qty": 1,
+        "price": "₱80,000",
+        "subtotal": 80000
+      }
+    ],
+    "note": "",
+    "subtotal": 240000,
+    "createdAt": "2026-04-03T10:07:17.165Z"
   }
 ]
