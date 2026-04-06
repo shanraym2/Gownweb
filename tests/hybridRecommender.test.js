@@ -13,8 +13,9 @@ import {
   trackEvent,
   computeWeights,
   WEIGHT_PROFILES,
-} from '../app/utils/recommender/hybridRecommender'
-import { invalidateRulesCache } from '../app/utils/recommender/apriori'
+} from '@/utils/recommender/hybridRecommender'
+import { invalidateRulesCache } from '@/utils/recommender/apriori'
+import { loadInteractions } from '@/utils/recommender/knnCollaborative'
 import {
   installStorageMocks,
   clearStorageMocks,
@@ -254,7 +255,6 @@ describe('getHybridRecommendations — fallback', () => {
 describe('trackEvent', () => {
   it('records interaction in localStorage', () => {
     trackEvent('user_test', 1, 'view')
-    const { loadInteractions } = require('../utils/recommender/knnCollaborative')
     const data = loadInteractions()
     expect(data['user_test']).toBeDefined()
     expect(data['user_test']['1']).toBeGreaterThan(0)

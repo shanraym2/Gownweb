@@ -381,7 +381,6 @@ export default function RecommendationPanel({
       <style>{PANEL_STYLES}</style>
       <div className="container">
 
-        {/* ── Header ── */}
         <div className="rp-header">
           <div className="rp-header-left">
             <span className="rp-overline">FitMatcher · AI Recommendations</span>
@@ -407,7 +406,6 @@ export default function RecommendationPanel({
           )}
         </div>
 
-        {/* ── Engine info panel ── */}
         {infoOpen && meta && (
           <div className="rp-engine-info">
             <div>

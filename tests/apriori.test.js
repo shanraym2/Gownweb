@@ -16,7 +16,7 @@ import {
   getAprioriScores,
   getAprioriStats,
   invalidateRulesCache,
-} from '../app/utils/recommender/apriori'
+} from '@/utils/recommender/apriori'
 import {
   installStorageMocks,
   clearStorageMocks,

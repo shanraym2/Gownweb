@@ -4,6 +4,11 @@
 import { defineConfig } from 'vitest/config'
 import path from 'path'
 
+// Your Next.js source files live inside app/
+// Tests live at the root in tests/
+// So `../utils/recommender/foo` from tests/ resolves to app/utils/recommender/foo
+const APP = path.resolve(__dirname, 'app')
+
 export default defineConfig({
   test: {
     environment: 'node',
@@ -12,18 +17,26 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
-      include: ['utils/recommender/**', 'hooks/useRecommendations.js'],
+      include: [
+        'app/utils/recommender/**',
+        'app/hooks/useRecommendations.js',
+      ],
       thresholds: {
-        lines:     80,
-        functions: 80,
-        branches:  75,
+        lines:      80,
+        functions:  80,
+        branches:   75,
         statements: 80,
       },
     },
   },
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, '.'),
-    },
+    alias: [
+      // `@/foo` → app/foo  (matches your Next.js tsconfig paths)
+      { find: '@', replacement: APP },
+      // `../utils/foo` from tests/ → app/utils/foo
+      { find: /^\.\.\/utils\/(.*)/, replacement: `${APP}/utils/$1` },
+      // `../hooks/foo` from tests/ → app/hooks/foo
+      { find: /^\.\.\/hooks\/(.*)/, replacement: `${APP}/hooks/$1` },
+    ],
   },
 })

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest'
-import { buildContentIndex, getContentScores } from '../app/utils/recommender/contentBased'
+import { buildContentIndex, getContentScores } from '@/utils/recommender/contentBased'
 import { TEST_GOWNS } from './fixtures'
 
 // ── Setup ──────────────────────────────────────────────────────────────────

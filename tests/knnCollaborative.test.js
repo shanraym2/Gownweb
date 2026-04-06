@@ -16,13 +16,13 @@ import {
   getUserVector,
   getInteractionUserCount,
   EVENT_WEIGHTS,
-} from '../app/utils/recommender/knnCollaborative'
+} from '@/utils/recommender/knnCollaborative'
 import {
   installStorageMocks,
   clearStorageMocks,
   seedInteractions,
 } from './storageMock'
-import { TEST_INTERACTIONS } from './fixtures'
+import { TEST_INTERACTIONS, TEST_GOWNS } from './fixtures'
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 
