@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import { getCurrentUser, logoutUser, updateUser, resetUserPassword } from '../utils/authClient'
+import { getCurrentUser, logoutUser, updateUser, resetUserPassword, loadUsers } from '../utils/authClient'
 import { getPasswordRuleChecks, passwordMeetsRules } from '../utils/authValidation'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -19,6 +19,14 @@ function loadProfileExtra() {
 
 function saveProfileExtra(data) {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(data))
+}
+
+// SHA-256 — must match authClient's hashPassword exactly
+async function hashPassword(pw) {
+  if (!window.crypto?.subtle) return String(pw || '')
+  const data   = new TextEncoder().encode(String(pw || ''))
+  const digest = await window.crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 // ─── Avatar ──────────────────────────────────────────────────────────────────
@@ -123,6 +131,22 @@ function ChangePasswordModal({ email, onClose }) {
   const handleResetPassword = async (e) => {
     e.preventDefault(); setError('')
     if (!canSubmit) return
+
+    // ── Guard: reject if new password is the same as current ──
+    try {
+      const users      = loadUsers()
+      const storedUser = users.find(u => u.email?.toLowerCase() === email?.toLowerCase())
+      if (storedUser?.passwordHash) {
+        const newHash = await hashPassword(newPassword)
+        if (newHash === storedUser.passwordHash) {
+          setError('New password must be different from your current password.')
+          return
+        }
+      }
+    } catch {
+      // If we can't check, proceed — better to allow than to block
+    }
+
     setSubmitting(true)
     try {
       const result = await resetUserPassword({ email, password: newPassword })
@@ -206,7 +230,7 @@ function ChangePasswordModal({ email, onClose }) {
                   className="modal-field-input"
                   type={showPwd ? 'text' : 'password'}
                   value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
+                  onChange={(e) => { setNewPassword(e.target.value); setError('') }}
                   placeholder="Create a new password"
                   autoComplete="new-password" autoFocus
                 />
@@ -228,7 +252,7 @@ function ChangePasswordModal({ email, onClose }) {
                   className="modal-field-input"
                   type={showConfirm ? 'text' : 'password'}
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setError('') }}
                   placeholder="Confirm your new password"
                   autoComplete="new-password"
                 />

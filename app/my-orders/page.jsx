@@ -7,7 +7,6 @@ import Footer from '../components/Footer'
 import { getCurrentUser } from '../utils/authClient'
 import { useGowns, getGownById } from '@/hooks/useGowns'
 
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function formatPrice(num) {
   return '₱' + Number(num || 0).toLocaleString('en-PH')
@@ -34,7 +33,6 @@ function formatContactLine(contact) {
   return name || contact?.email || '—'
 }
 
-// ─── constants ───────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG = {
   placed:    { label: 'Placed',    progress: 20,  badgeClass: 'mo-badge-placed',    cancelled: false },
@@ -61,8 +59,6 @@ const FILTERS = [
   { id: 'delivered', label: 'Delivered' },
   { id: 'cancelled', label: 'Cancelled' },
 ]
-
-// ─── sub-components ──────────────────────────────────────────────────────────
 
 function ProgressBar({ status }) {
   const cfg       = STATUS_CONFIG[status] || STATUS_CONFIG.placed
@@ -100,7 +96,6 @@ function OrderCard({ order, gowns }) {
   return (
     <li className="mo-card">
 
-      {/* Head */}
       <div className="mo-card-head">
         <div>
           <p className="mo-order-id">Order #{order.id}</p>
@@ -110,10 +105,8 @@ function OrderCard({ order, gowns }) {
         <span className={`mo-badge ${cfg.badgeClass}`}>{cfg.label}</span>
       </div>
 
-      {/* Progress */}
       <ProgressBar status={status} />
 
-      {/* Collapsible */}
       {expanded && (
         <>
           <div className="mo-info-row">
@@ -159,7 +152,6 @@ function OrderCard({ order, gowns }) {
         </>
       )}
 
-      {/* Footer */}
       <div className="mo-card-foot">
         <p className="mo-foot-detail">
           {Array.isArray(order.items) ? order.items.length : 0} item(s)
@@ -179,7 +171,6 @@ function OrderCard({ order, gowns }) {
   )
 }
 
-// ─── page ────────────────────────────────────────────────────────────────────
 
 export default function MyOrdersPage() {
   const [user,    setUser]    = useState(null)
@@ -225,7 +216,6 @@ export default function MyOrdersPage() {
     ? orders
     : orders.filter(o => normalizeStatus(o.status) === filter)
 
-  // ── Not logged in ─────────────────────────────────────────────────────────
   if (!user) return (
     <main className="gowns-page">
       <Header solid />
@@ -259,7 +249,6 @@ export default function MyOrdersPage() {
             Purchases placed with <strong>{user.email}</strong> appear here.
           </p>
 
-          {/* Filters */}
           <div className="mo-filter-row">
             {FILTERS.map(f => (
               <button
@@ -272,7 +261,6 @@ export default function MyOrdersPage() {
             ))}
           </div>
 
-          {/* States */}
           {loading && <p className="mo-loading">Loading your orders…</p>}
           {error   && <p className="auth-error">{error}</p>}
 

@@ -557,7 +557,7 @@
   },
   {
     "id": "1774866421428",
-    "status": "placed",
+    "status": "paid",
     "contact": {
       "email": "kayacocho@yahoo.com",
       "firstName": "Karina",
@@ -655,5 +655,92 @@
     "note": "",
     "subtotal": 240000,
     "createdAt": "2026-04-03T10:07:17.165Z"
+  },
+  {
+    "id": "1775223255002",
+    "status": "paid",
+    "contact": {
+      "email": "ayacochokarina@gmail.com",
+      "firstName": "Karina",
+      "lastName": "Ayacocho",
+      "phone": "09502353665"
+    },
+    "delivery": {
+      "address": "173 E. Qiogue st.",
+      "city": "Pateros",
+      "province": "NCR FOURTH DISTRICT",
+      "zip": "1620"
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 1,
+        "name": "The Isabella",
+        "qty": 1,
+        "price": "₱65,000",
+        "subtotal": 65000
+      }
+    ],
+    "note": "",
+    "subtotal": 65000,
+    "createdAt": "2026-04-03T13:34:15.003Z"
+  },
+  {
+    "id": "1775223655042",
+    "status": "delivered",
+    "contact": {
+      "email": "kayacocho@yahoo.com",
+      "firstName": "Karina",
+      "lastName": "AY",
+      "phone": "09502353665"
+    },
+    "delivery": {
+      "address": "173 E. Qiogue st.",
+      "city": "Pateros",
+      "province": "NCR FOURTH DISTRICT",
+      "zip": "1620"
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 9,
+        "name": "pinkgownss",
+        "qty": 1,
+        "price": "₱17,262",
+        "subtotal": 17262
+      }
+    ],
+    "note": "",
+    "subtotal": 17262,
+    "createdAt": "2026-04-03T13:40:55.042Z"
+  },
+  {
+    "id": "1775223743298",
+    "status": "placed",
+    "contact": {
+      "email": "kayacocho@yahoo.com",
+      "firstName": "Karina",
+      "lastName": "AY",
+      "phone": "09502353665"
+    },
+    "delivery": {
+      "address": "173 E. Qiogue st.",
+      "city": "Pateros",
+      "province": "NCR FOURTH DISTRICT",
+      "zip": "1620"
+    },
+    "payment": "gcash",
+    "items": [
+      {
+        "id": 11,
+        "name": "Pink gown",
+        "qty": 1,
+        "price": "₱120,000",
+        "subtotal": 120000
+      }
+    ],
+    "note": "",
+    "subtotal": 120000,
+    "createdAt": "2026-04-03T13:42:23.298Z"
   }
 ]

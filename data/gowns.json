@@ -8,7 +8,33 @@
     "type": "Gowns",
     "color": "Ivory",
     "silhouette": "A-line",
-    "description": "A romantic lace gown with a softly structured bodice and flowing skirt, designed for effortless movement down the aisle."
+    "description": "A romantic lace gown with a softly structured bodice and flowing skirt, designed for effortless movement down the aisle.",
+    "sizeStock": [
+      {
+        "size": "XS",
+        "stock": 2
+      },
+      {
+        "size": "S",
+        "stock": 2
+      },
+      {
+        "size": "M",
+        "stock": 2
+      },
+      {
+        "size": "L",
+        "stock": 2
+      },
+      {
+        "size": "XL",
+        "stock": 2
+      },
+      {
+        "size": "2XL",
+        "stock": 2
+      }
+    ]
   },
   {
     "id": 2,
@@ -19,7 +45,33 @@
     "type": "Gowns",
     "color": "Blush",
     "silhouette": "Ballgown",
-    "description": "A modern ball gown in liquid satin, featuring a clean neckline and dramatic train for a royal-inspired entrance."
+    "description": "A modern ball gown in liquid satin, featuring a clean neckline and dramatic train for a royal-inspired entrance.",
+    "sizeStock": [
+      {
+        "size": "XS",
+        "stock": 2
+      },
+      {
+        "size": "S",
+        "stock": 2
+      },
+      {
+        "size": "M",
+        "stock": 2
+      },
+      {
+        "size": "L",
+        "stock": 2
+      },
+      {
+        "size": "XL",
+        "stock": 2
+      },
+      {
+        "size": "2XL",
+        "stock": 2
+      }
+    ]
   },
   {
     "id": 3,
@@ -122,5 +174,16 @@
     "color": "",
     "silhouette": "",
     "description": ""
+  },
+  {
+    "id": 12,
+    "name": "The lake",
+    "price": "₱10,000",
+    "image": "https://tse4.mm.bing.net/th/id/OIP.R1PdUy1n2Jtsp3CLB4HlcwHaJE?rs=1&pid=ImgDetMain&o=7&rm=3",
+    "alt": "white evening dress",
+    "type": "Gowns",
+    "color": "Ivory",
+    "silhouette": "A-Line",
+    "description": "a beautiful white evening dress for weddings"
   }
 ]

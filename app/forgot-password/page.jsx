@@ -109,8 +109,6 @@ export default function ForgotPasswordPage() {
 
     setIsSubmitting(true)
     try {
-      // Optional: avoid resetting to the same password (only if password check is supported).
-      // Since the reset page doesn't know the old password, we skip old-password checks.
       const result = await resetUserPassword({ email: email.trim(), password: newPassword })
       if (!result.ok) {
         setError(result.error || 'Unable to reset password.')
