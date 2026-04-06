@@ -25,7 +25,7 @@ function parseUrl(url) {
   const u = new URL(url)
   return {
     host: u.hostname,
-    port: u.port || 3306,
+    port: u.port || 3307,
     user: u.username,
     password: u.password,
     database: u.pathname?.slice(1) || 'gownweb',
@@ -36,7 +36,7 @@ async function main() {
   const url = loadEnv()
   if (!url) {
     console.error('DATABASE_URL not found. Add it to .env.local:')
-    console.error('  DATABASE_URL=mysql://root:password@localhost:3306/gownweb')
+    console.error('  DATABASE_URL=mysql://root:password@localhost:3307/gownweb')
     process.exit(1)
   }
 

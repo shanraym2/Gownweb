@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:setup": "node database/setup-local.js"
+    "db:setup": "node database/setup-local.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
   },
   "keywords": [
     "bridal",
@@ -17,14 +21,18 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "chart.js": "^4.5.1",
     "mysql2": "^3.16.2",
     "next": "^14.0.0",
     "nodemailer": "^7.0.13",
     "react": "^18.2.0",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^8.0.0",
-    "eslint-config-next": "^14.0.0"
+    "eslint-config-next": "^14.0.0",
+    "vitest": "^4.1.2"
   }
 }

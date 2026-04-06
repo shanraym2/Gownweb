@@ -6,12 +6,16 @@ import { useRouter } from 'next/navigation'
 import { getCurrentUser, logoutUser } from '../utils/authClient'
 
 export default function Header({ solid = false }) {
-  const [isScrolled, setIsScrolled] = useState(false)
-  const [currentUser, setCurrentUser] = useState(null)
-  const [isMobileOpen, setIsMobileOpen] = useState(false)
+  const [isScrolled,    setIsScrolled   ] = useState(false)
+  const [currentUser,   setCurrentUser  ] = useState(null)
+  const [isMobileOpen,  setIsMobileOpen ] = useState(false)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
-  const router = useRouter()
+  const [isSearchOpen,  setIsSearchOpen ] = useState(false)
+  const [searchQuery,   setSearchQuery  ] = useState('')
+  const router     = useRouter()
   const profileRef = useRef(null)
+  const searchRef  = useRef(null)
+  const searchInputRef = useRef(null)
 
   useEffect(() => {
     if (solid) return
@@ -33,6 +37,7 @@ export default function Header({ solid = false }) {
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (profileRef.current && !profileRef.current.contains(e.target)) setIsProfileOpen(false)
+      if (searchRef.current  && !searchRef.current.contains(e.target))  closeSearch()
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -42,6 +47,36 @@ export default function Header({ solid = false }) {
     document.body.style.overflow = isMobileOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [isMobileOpen])
+
+  // Focus input when search opens
+  useEffect(() => {
+    if (isSearchOpen) setTimeout(() => searchInputRef.current?.focus(), 50)
+  }, [isSearchOpen])
+
+  // Close search on Escape
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') closeSearch() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  function openSearch() {
+    setIsSearchOpen(true)
+    setIsProfileOpen(false)
+  }
+
+  function closeSearch() {
+    setIsSearchOpen(false)
+    setSearchQuery('')
+  }
+
+  function handleSearchSubmit(e) {
+    e.preventDefault()
+    const q = searchQuery.trim()
+    if (!q) return
+    closeSearch()
+    router.push(`/gowns?search=${encodeURIComponent(q)}`)
+  }
 
   const handleLogout = () => {
     logoutUser()
@@ -55,6 +90,97 @@ export default function Header({ solid = false }) {
 
   return (
     <>
+      <style>{`
+        /* ── Search overlay ── */
+        .search-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,.45);
+          z-index: 200;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          padding-top: 100px;
+          animation: fadeIn .18s ease;
+        }
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+        .search-box {
+          background: #fff;
+          border-radius: 16px;
+          width: 100%;
+          max-width: 560px;
+          margin: 0 20px;
+          box-shadow: 0 24px 64px rgba(0,0,0,.18);
+          overflow: hidden;
+          animation: slideDown .2s ease;
+        }
+        @keyframes slideDown { from{transform:translateY(-12px);opacity:0} to{transform:none;opacity:1} }
+
+        .search-form {
+          display: flex;
+          align-items: center;
+          gap: 0;
+        }
+
+        .search-icon-inner {
+          padding: 0 16px;
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+          color: #aaa;
+        }
+        .search-icon-inner svg {
+          width: 20px; height: 20px;
+          stroke: currentColor; fill: none;
+          stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+        }
+
+        .search-input {
+          flex: 1;
+          border: none;
+          outline: none;
+          font-size: 1.05rem;
+          padding: 18px 0;
+          background: transparent;
+          font-family: inherit;
+          color: #111;
+        }
+        .search-input::placeholder { color: #bbb; }
+
+        .search-submit {
+          background: #111;
+          color: #fff;
+          border: none;
+          padding: 12px 20px;
+          margin: 8px 10px 8px 0;
+          border-radius: 10px;
+          font-size: .85rem;
+          font-weight: 600;
+          cursor: pointer;
+          font-family: inherit;
+          transition: background .15s;
+          white-space: nowrap;
+        }
+        .search-submit:hover { background: #333; }
+
+        .search-hint {
+          padding: 10px 16px 14px;
+          font-size: .78rem;
+          color: #bbb;
+          border-top: 1px solid #f4f4f4;
+        }
+        .search-hint kbd {
+          display: inline-block;
+          padding: 1px 6px;
+          background: #f0f0f0;
+          border-radius: 4px;
+          font-size: .72rem;
+          color: #888;
+          font-family: inherit;
+        }
+      `}</style>
+
       <header className={`hdr${isActive ? ' scrolled' : ''}`}>
         <div className="hdr-inner">
 
@@ -85,7 +211,8 @@ export default function Header({ solid = false }) {
 
           <div className="hdr-actions">
 
-            <button className="hdr-icon-btn" aria-label="Search">
+            {/* ── Search button ── */}
+            <button className="hdr-icon-btn" aria-label="Search" onClick={openSearch}>
               <img src="/images/search_logo.svg" alt="" aria-hidden="true" />
             </button>
 
@@ -130,6 +257,33 @@ export default function Header({ solid = false }) {
         </div>
       </header>
 
+      {/* ── Search overlay ── */}
+      {isSearchOpen && (
+        <div className="search-overlay" onClick={e => { if (e.target === e.currentTarget) closeSearch() }}>
+          <div className="search-box" ref={searchRef}>
+            <form className="search-form" onSubmit={handleSearchSubmit}>
+              <span className="search-icon-inner" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </span>
+              <input
+                ref={searchInputRef}
+                className="search-input"
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search gowns…"
+                autoComplete="off"
+              />
+              <button type="submit" className="search-submit">Search</button>
+            </form>
+            <div className="search-hint">
+              Press <kbd>Enter</kbd> to search · <kbd>Esc</kbd> to close
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mobile drawer ── */}
       <div className={`mobile-drawer${isMobileOpen ? ' open' : ''}`}>
         <div className="mobile-backdrop" onClick={() => setIsMobileOpen(false)} />
         <div className="mobile-panel">
@@ -153,6 +307,35 @@ export default function Header({ solid = false }) {
           <Link href="/about" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
           <Link href="/contact" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Contact</Link>
           <Link href="/cart" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Cart</Link>
+
+          {/* ── Mobile search ── */}
+          <form
+            onSubmit={e => { e.preventDefault(); const q = searchQuery.trim(); if (!q) return; setIsMobileOpen(false); closeSearch(); router.push(`/gowns?search=${encodeURIComponent(q)}`) }}
+            style={{ display:'flex', gap:8, margin:'12px 0' }}
+          >
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search gowns…"
+              autoComplete="off"
+              style={{
+                flex:1, padding:'10px 14px', borderRadius:10,
+                border:'1.5px solid #e0e0e0', fontSize:'.9rem',
+                fontFamily:'inherit', outline:'none',
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                padding:'10px 16px', borderRadius:10, border:'none',
+                background:'#111', color:'#fff', fontWeight:600,
+                fontSize:'.85rem', fontFamily:'inherit', cursor:'pointer',
+              }}
+            >
+              Go
+            </button>
+          </form>
 
           {currentUser?.role === 'admin' && (
             <Link href="/admin" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Admin Dashboard</Link>

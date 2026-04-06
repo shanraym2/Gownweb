@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import HeroSplash from './HeroSplash'
+import { getCurrentUser } from '../utils/authClient'
 
 const slides = [
   {
@@ -24,10 +24,36 @@ const slides = [
   },
 ]
 
+function HeroGreeting() {
+  const [greeting, setGreeting] = useState(null)
+
+  useEffect(() => {
+    const user = getCurrentUser()
+    const hour = new Date().getHours()
+    const timeGreeting =
+      hour < 12 ? 'Good morning' :
+      hour < 17 ? 'Good afternoon' :
+                  'Good evening'
+
+    setGreeting(
+      user?.name
+        ? `${timeGreeting}, ${user.name}`
+        : timeGreeting
+    )
+  }, [])
+
+  if (!greeting) return null
+
+  return (
+    <p className="hero-greeting" aria-live="polite">
+      {greeting}
+    </p>
+  )
+}
+
 export default function Hero() {
-  const [splashDone, setSplashDone]         = useState(false)
-  const [current, setCurrent]               = useState(0)
-  const [transitioning, setTransitioning]   = useState(false)
+  const [current, setCurrent]             = useState(0)
+  const [transitioning, setTransitioning] = useState(false)
   const [contentVisible, setContentVisible] = useState(true)
   const timerRef   = useRef(null)
   const currentRef = useRef(current)
@@ -67,27 +93,23 @@ export default function Hero() {
   }, [navigate, startAutoplay])
 
   useEffect(() => {
-    if (!splashDone) return
     startAutoplay()
     return clearAutoplay
-  }, [splashDone, startAutoplay])
+  }, [startAutoplay])
 
   useEffect(() => {
-    if (!splashDone) return
     const handleKey = (e) => {
       if (e.key === 'ArrowRight') next()
       if (e.key === 'ArrowLeft') prev()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [splashDone, next, prev])
+  }, [next, prev])
 
   const slide = slides[current]
 
   return (
     <section className="hero" aria-label="Featured collection slideshow">
-
-      <HeroSplash onDismissed={() => setSplashDone(true)} />
 
       {slides.map((s, i) => (
         <div
@@ -101,6 +123,7 @@ export default function Hero() {
 
       <div className="hero-content">
         <div className={`hero-card ${contentVisible ? 'hero-card--shown' : 'hero-card--hidden'}`}>
+          <HeroGreeting />
           <span className="hero-subtitle">{slide.subtitle}</span>
           <h1 className="hero-heading">{slide.heading}</h1>
           <p className="hero-body">{slide.body}</p>

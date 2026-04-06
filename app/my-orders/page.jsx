@@ -1,234 +1,292 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { getCurrentUser } from '../utils/authClient'
 import { useGowns, getGownById } from '@/hooks/useGowns'
 
+
 function formatPrice(num) {
   return '₱' + Number(num || 0).toLocaleString('en-PH')
 }
 
-const ORDER_STATUS_LABELS = {
-  placed: 'Placed',
-  paid: 'Paid',
-  preparing: 'Preparing',
-  shipped: 'Shipped',
-  delivered: 'Delivered',
-  cancelled: 'Cancelled',
-}
-
-function normalizeStatus(status) {
-  const v = String(status || '').toLowerCase()
-  return Object.keys(ORDER_STATUS_LABELS).includes(v) ? v : 'placed'
+function formatDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('en-PH', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
 }
 
 function formatDeliveryLine(delivery) {
   if (!delivery) return '—'
-  const parts = [delivery.address, delivery.city, delivery.province].filter(Boolean)
-  let line = parts.join(', ')
-  if (delivery.zip) line += ` ${delivery.zip}`
-  return line || '—'
+  return (
+    [delivery.address, delivery.city, delivery.province].filter(Boolean).join(', ') +
+    (delivery.zip ? ` ${delivery.zip}` : '') || '—'
+  )
 }
 
 function formatContactLine(contact) {
-  const first = contact?.firstName || ''
-  const last = contact?.lastName || ''
-  const name = `${first} ${last}`.trim()
-  const email = contact?.email || ''
-  return name || email || '—'
+  const name = `${contact?.firstName || ''} ${contact?.lastName || ''}`.trim()
+  return name || contact?.email || '—'
 }
 
+
+const STATUS_CONFIG = {
+  placed:    { label: 'Placed',    progress: 20,  badgeClass: 'mo-badge-placed',    cancelled: false },
+  paid:      { label: 'Paid',      progress: 40,  badgeClass: 'mo-badge-paid',      cancelled: false },
+  preparing: { label: 'Preparing', progress: 60,  badgeClass: 'mo-badge-preparing', cancelled: false },
+  shipped:   { label: 'Shipped',   progress: 80,  badgeClass: 'mo-badge-shipped',   cancelled: false },
+  delivered: { label: 'Delivered', progress: 100, badgeClass: 'mo-badge-delivered', cancelled: false },
+  cancelled: { label: 'Cancelled', progress: 20,  badgeClass: 'mo-badge-cancelled', cancelled: true  },
+}
+
+const STEPS = ['Placed', 'Paid', 'Preparing', 'Shipped', 'Delivered']
+
+function normalizeStatus(status) {
+  const v = String(status || '').toLowerCase()
+  return STATUS_CONFIG[v] ? v : 'placed'
+}
+
+const FILTERS = [
+  { id: 'all',       label: 'All' },
+  { id: 'placed',    label: 'Placed' },
+  { id: 'paid',      label: 'Paid' },
+  { id: 'preparing', label: 'Preparing' },
+  { id: 'shipped',   label: 'Shipped' },
+  { id: 'delivered', label: 'Delivered' },
+  { id: 'cancelled', label: 'Cancelled' },
+]
+
+function ProgressBar({ status }) {
+  const cfg       = STATUS_CONFIG[status] || STATUS_CONFIG.placed
+  const stepIdx   = STEPS.findIndex(s => s.toLowerCase() === status)
+  const isCancelled = cfg.cancelled
+
+  return (
+    <div className="mo-progress">
+      <div className="mo-progress-track">
+        <div
+          className={`mo-progress-fill${isCancelled ? ' cancelled' : ''}`}
+          style={{ width: `${cfg.progress}%` }}
+        />
+      </div>
+      <div className="mo-progress-steps">
+        {STEPS.map((step, i) => {
+          const done         = !isCancelled && i < stepIdx
+          const active       = !isCancelled && i === stepIdx
+          const cancelledStop = isCancelled && i === 0
+          let cls = 'mo-progress-step'
+          if (done || cancelledStop) cls += cancelledStop ? ' cancelled-stop' : ' done'
+          else if (active) cls += ' active'
+          return <span key={step} className={cls}>{step}</span>
+        })}
+      </div>
+    </div>
+  )
+}
+
+function OrderCard({ order, gowns }) {
+  const [expanded, setExpanded] = useState(false)
+  const status    = normalizeStatus(order.status)
+  const cfg       = STATUS_CONFIG[status]
+
+  return (
+    <li className="mo-card">
+
+      <div className="mo-card-head">
+        <div>
+          <p className="mo-order-id">Order #{order.id}</p>
+          <p className="mo-order-date">{formatDate(order.createdAt)}</p>
+          <p className="mo-order-contact">{formatContactLine(order.contact)}</p>
+        </div>
+        <span className={`mo-badge ${cfg.badgeClass}`}>{cfg.label}</span>
+      </div>
+
+      <ProgressBar status={status} />
+
+      {expanded && (
+        <>
+          <div className="mo-info-row">
+            <div>
+              <span className="mo-info-label">Delivery address</span>
+              <p className="mo-info-value">{formatDeliveryLine(order.delivery)}</p>
+            </div>
+            <div>
+              <span className="mo-info-label">Payment method</span>
+              <p className="mo-info-value">{order.payment || '—'}</p>
+            </div>
+            {order.note && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <span className="mo-info-label">Note</span>
+                <p className="mo-info-value">{order.note}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mo-items">
+            {Array.isArray(order.items) && order.items.length > 0
+              ? order.items.map((item, idx) => {
+                  const gown = getGownById(gowns, item.id)
+                  return (
+                    <div key={`${order.id}-${idx}`} className="mo-item">
+                      {gown?.image
+                        ? <img src={gown.image} alt={gown.alt || item.name || 'Gown'} className="mo-item-img" />
+                        : <div className="mo-item-img-placeholder" />
+                      }
+                      <div className="mo-item-info">
+                        <p className="mo-item-name">{item.name || 'Gown'}</p>
+                        <p className="mo-item-meta">
+                          Qty: {item.qty}{item.price ? ` · Unit: ${item.price}` : ''}
+                        </p>
+                        <p className="mo-item-sub">{formatPrice(item.subtotal)}</p>
+                      </div>
+                    </div>
+                  )
+                })
+              : <p className="mo-no-items">No items on record.</p>
+            }
+          </div>
+        </>
+      )}
+
+      <div className="mo-card-foot">
+        <p className="mo-foot-detail">
+          {Array.isArray(order.items) ? order.items.length : 0} item(s)
+          {order.payment ? ` · ${order.payment}` : ''}
+          {cfg.cancelled ? ' · Cancelled' : ''}
+        </p>
+        <div className="mo-foot-right">
+          <button className="mo-expand-btn" onClick={() => setExpanded(v => !v)}>
+            {expanded ? 'Hide details ▲' : 'Show details ▼'}
+          </button>
+          <span className={`mo-foot-total${cfg.cancelled ? ' cancelled' : ''}`}>
+            {formatPrice(order.total ?? order.subtotal)}
+          </span>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+
 export default function MyOrdersPage() {
-  const [user, setUser] = useState(null)
-  const [orders, setOrders] = useState([])
+  const [user,    setUser]    = useState(null)
+  const [orders,  setOrders]  = useState([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error,   setError]   = useState('')
+  const [filter,  setFilter]  = useState('all')
   const { gowns } = useGowns()
 
-  useEffect(() => {
-    const u = getCurrentUser()
-    if (!u) {
-      setUser(null)
-      setLoading(false)
-      return
-    }
-    setUser(u)
-  }, [])
+  useEffect(() => { setUser(getCurrentUser() || null) }, [])
 
-  useEffect(() => {
-    if (!user?.email) return
-
-    let cancelled = false
-    let isFirst = true
-
-    const fetchOrders = async () => {
-      try {
-        const res = await fetch('/api/my-orders', {
-          headers: { 'X-Customer-Email': user.email },
-        })
-        const data = await res.json().catch(() => ({}))
-        if (cancelled) return
-        if (!res.ok || !data.ok) {
-          setError(data.error || 'Could not load your orders.')
-          setOrders([])
-          return
-        }
+  const fetchOrders = useCallback(async (signal) => {
+    try {
+      const res  = await fetch('/api/my-orders', {
+        headers: { 'X-Customer-Email': user.email },
+        signal,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) {
+        setError(data.error || 'Could not load your orders.')
+        setOrders([])
+      } else {
         setOrders(data.orders || [])
-      } catch {
-        if (!cancelled) setError('Could not load your orders.')
-      } finally {
-        if (!cancelled) {
-          if (isFirst) setLoading(false)
-          isFirst = false
-        }
+        setError('')
       }
-    }
-
-    setLoading(true)
-    setError('')
-    fetchOrders()
-    const interval = setInterval(fetchOrders, 5000)
-
-    return () => {
-      cancelled = true
-      clearInterval(interval)
+    } catch (err) {
+      if (err.name !== 'AbortError') setError('Could not load your orders.')
+    } finally {
+      setLoading(false)
     }
   }, [user?.email])
 
-  if (!user) {
-    return (
-      <main className="gowns-page">
-        <Header  solid/>
-        <section className="gowns-header-spacer" />
-        <section className="checkout-section">
-          <div className="checkout-container">
-            <h1 className="cart-title">My orders</h1>
-            <p className="order-detail-hint">
-              Please log in to see your orders.
-            </p>
-            <Link href="/login" className="btn btn-primary">
-              Log in
-            </Link>
-          </div>
-        </section>
-        <Footer />
-      </main>
-    )
-  }
+  useEffect(() => {
+    if (!user?.email) return
+    setLoading(true)
+    const controller = new AbortController()
+    fetchOrders(controller.signal)
+    const interval = setInterval(() => fetchOrders(controller.signal), 5000)
+    return () => { controller.abort(); clearInterval(interval) }
+  }, [fetchOrders, user?.email])
+
+  const filtered = filter === 'all'
+    ? orders
+    : orders.filter(o => normalizeStatus(o.status) === filter)
+
+  if (!user) return (
+    <main className="gowns-page">
+      <Header solid />
+      <section className="gowns-header-spacer" />
+      <section className="checkout-section">
+        <div className="checkout-container">
+          <h1 className="mo-page-title">My orders</h1>
+          <p className="mo-unauthenticated">Please log in to view your orders.</p>
+          <Link href="/login" className="btn btn-primary">Log in</Link>
+        </div>
+      </section>
+      <Footer />
+    </main>
+  )
 
   return (
     <main className="gowns-page">
-      <Header />
+      <Header solid />
       <section className="gowns-header-spacer" />
       <section className="checkout-section">
-        <div className="checkout-container my-orders-page">
-          <h1 className="cart-title">My orders</h1>
-          <p className="my-orders-intro">
-            Purchases placed with <strong>{user.email}</strong> at checkout appear here.
+        <div className="checkout-container mo-page">
+
+          <div className="mo-header-row">
+            <h1 className="mo-page-title">My orders</h1>
+            <span className="mo-order-count">
+              {filtered.length} {filtered.length === 1 ? 'order' : 'orders'}
+            </span>
+          </div>
+
+          <p className="mo-email-hint">
+            Purchases placed with <strong>{user.email}</strong> appear here.
           </p>
 
-          {loading && <p>Loading your orders…</p>}
-          {error && <p className="auth-error">{error}</p>}
+          <div className="mo-filter-row">
+            {FILTERS.map(f => (
+              <button
+                key={f.id}
+                className={`mo-filter-btn${filter === f.id ? ' active' : ''}`}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-          {!loading && !error && orders.length === 0 && (
-            <div className="my-orders-empty">
-              <p>You have no orders yet.</p>
-              <Link href="/gowns" className="btn btn-primary" style={{ marginTop: 16 }}>
-                Browse gowns
-              </Link>
+          {loading && <p className="mo-loading">Loading your orders…</p>}
+          {error   && <p className="auth-error">{error}</p>}
+
+          {!loading && !error && filtered.length === 0 && (
+            <div className="mo-empty">
+              <p>
+                {filter === 'all'
+                  ? "You haven't placed any orders yet."
+                  : `No ${filter} orders found.`}
+              </p>
+              {filter === 'all' && (
+                <Link href="/gowns" className="btn btn-primary">Browse gowns</Link>
+              )}
             </div>
           )}
 
-          {!loading && !error && orders.length > 0 && (
-            <ul className="my-orders-list">
-              {orders.map((o) => (
-                <li key={o.id} className="my-orders-card">
-                  <div className="my-orders-card-top">
-                    <div>
-                      <strong>Order #{o.id}</strong>
-                      <p className="my-orders-date">
-                        {o.createdAt ? new Date(o.createdAt).toLocaleString() : '—'}
-                      </p>
-                      <p className="my-orders-summary" style={{ marginTop: 6 }}>
-                        Contact: {formatContactLine(o.contact)}
-                      </p>
-                    </div>
-                    {(() => {
-                      const status = normalizeStatus(o.status)
-                      return (
-                        <span className={`order-status-badge order-status-${status}`}>
-                          {ORDER_STATUS_LABELS[status] || status}
-                        </span>
-                      )
-                    })()}
-                  </div>
-                  <div style={{ marginTop: 12 }}>
-                    <p className="my-orders-payment" style={{ margin: '6px 0' }}>
-                      Delivery: {formatDeliveryLine(o.delivery)}
-                    </p>
-                    <p className="my-orders-payment" style={{ margin: '6px 0' }}>
-                      Payment: {o.payment || '—'}
-                    </p>
-                    {o.note ? (
-                      <p className="my-orders-payment" style={{ margin: '6px 0' }}>
-                        Note: {o.note}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div style={{ marginTop: 16 }}>
-                    <h3 className="checkout-heading" style={{ margin: '0 0 12px', fontSize: '1.1rem' }}>
-                      Items
-                    </h3>
-                    {Array.isArray(o.items) && o.items.length > 0 ? (
-                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {o.items.map((item, idx) => {
-                          const gown = getGownById(gowns, item.id)
-                          return (
-                            <li key={`${o.id}-${idx}`} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                              {gown?.image ? (
-                                <img
-                                  src={gown.image}
-                                  alt={gown.alt || item.name || 'Gown'}
-                                  style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', background: '#f0ebe5' }}
-                                />
-                              ) : (
-                                <div style={{ width: 64, height: 64, borderRadius: 10, background: '#f0ebe5' }} />
-                              )}
-                              <div style={{ flex: 1 }}>
-                                <strong>{item.name || 'Gown'}</strong>
-                                <p style={{ margin: '4px 0', color: 'var(--color-text-light)' }}>
-                                  Qty: {item.qty} {item.price ? `· Unit: ${item.price}` : ''}
-                                </p>
-                                <p style={{ margin: '6px 0 0', fontWeight: 600 }}>
-                                  Subtotal: {formatPrice(item.subtotal)}
-                                </p>
-                              </div>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    ) : (
-                      <p className="my-orders-payment" style={{ margin: 0 }}>
-                        No items found.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="my-orders-card-bottom">
-                    <span className="my-orders-total">{formatPrice(o.subtotal)}</span>
-                    <span className="my-orders-payment">Status: {ORDER_STATUS_LABELS[normalizeStatus(o.status)]}</span>
-                  </div>
-                </li>
+          {!loading && !error && filtered.length > 0 && (
+            <ul className="mo-list">
+              {filtered.map(o => (
+                <OrderCard key={o.id} order={o} gowns={gowns} />
               ))}
             </ul>
           )}
 
-          <p style={{ marginTop: 28 }}>
-            <Link href="/profile">← Profile</Link>
+          <p className="mo-back-link">
+            <Link href="/profile">← Back to profile</Link>
           </p>
         </div>
       </section>
@@ -236,4 +294,3 @@ export default function MyOrdersPage() {
     </main>
   )
 }
-
