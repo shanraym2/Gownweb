@@ -365,7 +365,7 @@ export default function RecommendationPanel({
   meta = null,
   loading = false,
   title = 'Recommended for You',
-  showMethodBadges = false,
+  showMethodBadges = true,
   showEngineInfo = true,
 }) {
   const { useState: _useState } = require('react')
