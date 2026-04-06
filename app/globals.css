@@ -8,6 +8,7 @@
 @import url("Contact.css");
 @import url("gowns.css");
 @import url("checkout-orders.css");
+@import url("recommender.css");
 :root {
     --color-bg: #FFFBFF; /* Very light off-white background */
     --color-text: #2C2C2C;

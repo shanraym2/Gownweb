@@ -26,20 +26,20 @@ import {
   trackEvent,
   computeWeights,
   WEIGHT_PROFILES,
-} from '@/utils/recommender/hybridRecommender'
+} from '@/app/utils/recommender/hybridRecommender'
 import {
   recordInteraction,
   loadInteractions,
   saveInteractions,
   getInteractionUserCount,
-} from '@/utils/recommender/knnCollaborative'
+} from '@/app/utils/recommender/knnCollaborative'
 import {
   recordBasket,
   loadBaskets,
   getRules,
   getAprioriStats,
   invalidateRulesCache,
-} from '@/utils/recommender/apriori'
+} from '@/app/utils/recommender/apriori'
 
 // ── Synthetic user profiles ────────────────────────────────────────────────
 
