@@ -122,7 +122,7 @@ function AuthToast({ onClose }) {
 
 export default function GownDetailPage() {
   const params = useParams()
-  const id     = params?.id ? Number(params.id) : null
+  const id = params?.id ?? null
   const { gowns, loading, error } = useGowns()
   const gown = id != null ? getGownById(gowns, id) : null
 

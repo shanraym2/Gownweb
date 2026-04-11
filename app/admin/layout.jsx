@@ -32,8 +32,19 @@ export default function AdminLayout({ children }) {
   const [checking,       setChecking      ] = useState(true)
   const [refreshingRole, setRefreshingRole] = useState(false)
   const [roleError,      setRoleError     ] = useState('')
+  const [sidebarOpen,    setSidebarOpen   ] = useState(false)
 
   useEffect(() => { setUser(getCurrentUser()); setChecking(false) }, [])
+
+  // Close sidebar on route change
+  useEffect(() => { setSidebarOpen(false) }, [pathname])
+
+  // Prevent body scroll when sidebar is open on mobile
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.body.style.overflow = sidebarOpen ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [sidebarOpen])
 
   const handleSecretSubmit = (e) => {
     e.preventDefault()
@@ -46,8 +57,7 @@ export default function AdminLayout({ children }) {
   const handleRefreshRole = async () => {
     const u = getCurrentUser()
     if (!u?.email) { setRoleError('You are not logged in.'); return }
-    setRefreshingRole(true)
-    setRoleError('')
+    setRefreshingRole(true); setRoleError('')
     try {
       const res  = await fetch(`/api/auth/role?email=${encodeURIComponent(u.email)}`)
       const data = await res.json()
@@ -92,11 +102,7 @@ export default function AdminLayout({ children }) {
               Signed in as <strong>{user.email}</strong>
               <span className="adm-role-pill">{user.role || 'no role'}</span>
             </div>
-            <button
-              onClick={handleRefreshRole}
-              disabled={refreshingRole}
-              className="adm-access-btn-primary"
-            >
+            <button onClick={handleRefreshRole} disabled={refreshingRole} className="adm-access-btn-primary">
               {refreshingRole ? 'Checking…' : 'Re-check admin access'}
             </button>
             {roleError && <p className="adm-role-error">{roleError}</p>}
@@ -112,60 +118,104 @@ export default function AdminLayout({ children }) {
   const hasSecret = getAdminSecret()
 
   return (
-    <div className="adm-layout">
-      <aside className="adm-sidebar">
-        <div className="adm-sidebar-brand">
-          <Link href="/admin">
-            <div className="adm-brand-name">JCE Bridal</div>
-            <div className="adm-brand-sub">Admin panel</div>
-          </Link>
-        </div>
+    <>
+      <div className="adm-layout">
 
-        <nav className="adm-nav">
-          {NAV_LINKS.map(({ href, label, exact }) => {
-            const active = exact ? pathname === href : pathname.startsWith(href)
-            return (
-              <Link key={href} href={href} className={`adm-nav-link${active ? ' active' : ''}`}>
-                <span className="adm-nav-dot" />
-                {label}
-              </Link>
-            )
-          })}
-        </nav>
-
-        <div className="adm-sidebar-footer">
-          <Link href="/" className="adm-footer-btn">← Back to site</Link>
+        {/* ── Mobile top bar ── */}
+        <div className="adm-topnav">
           <button
-            className="adm-footer-btn"
-            onClick={() => { sessionStorage.removeItem(ADMIN_SECRET_KEY); window.location.reload() }}
+            className="adm-hamburger"
+            onClick={() => setSidebarOpen(v => !v)}
+            aria-label="Toggle menu"
           >
-            Clear session
+            {sidebarOpen ? (
+              // X icon
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            ) : (
+              // Hamburger icon
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="3" y1="6"  x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            )}
           </button>
+          <div className="adm-topnav-brand">JCE Bridal · Admin</div>
+          <Link href="/" className="adm-topnav-back">← Site</Link>
         </div>
-      </aside>
 
-      <main className="adm-main">
-        {!hasSecret ? (
-          <div className="adm-secret-gate">
-            <h1 className="adm-secret-title">Enter admin secret</h1>
-            <p className="adm-secret-hint">
-              Set <code>ADMIN_SECRET</code> in your <code>.env.local</code> file.
-            </p>
-            <form onSubmit={handleSecretSubmit} className="adm-secret-form">
-              <input
-                type="password"
-                value={secret}
-                onChange={e => setSecret(e.target.value)}
-                placeholder="Admin secret"
-                autoComplete="off"
-                className="adm-input"
-              />
-              {secretError && <p className="adm-error-msg">{secretError}</p>}
-              <button type="submit" className="adm-btn">Continue</button>
-            </form>
+        {/* ── Backdrop ── */}
+        {sidebarOpen && (
+          <div
+            className="adm-sidebar-backdrop"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* ── Sidebar ── */}
+        <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
+          <div className="adm-sidebar-brand">
+            <Link href="/admin" onClick={() => setSidebarOpen(false)}>
+              <div className="adm-brand-name">JCE Bridal</div>
+              <div className="adm-brand-sub">Admin panel</div>
+            </Link>
           </div>
-        ) : children}
-      </main>
-    </div>
+
+          <nav className="adm-nav">
+            {NAV_LINKS.map(({ href, label, exact }) => {
+              const active = exact ? pathname === href : pathname.startsWith(href)
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`adm-nav-link${active ? ' active' : ''}`}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <span className="adm-nav-dot" />
+                  {label}
+                </Link>
+              )
+            })}
+          </nav>
+
+          <div className="adm-sidebar-footer">
+            <Link href="/" className="adm-footer-btn">← Back to site</Link>
+            <button
+              className="adm-footer-btn"
+              onClick={() => { sessionStorage.removeItem(ADMIN_SECRET_KEY); window.location.reload() }}
+            >
+              Clear session
+            </button>
+          </div>
+        </aside>
+
+        {/* ── Main ── */}
+        <main className="adm-main">
+          {!hasSecret ? (
+            <div className="adm-secret-gate">
+              <h1 className="adm-secret-title">Enter admin secret</h1>
+              <p className="adm-secret-hint">
+                Set <code>ADMIN_SECRET</code> in your <code>.env.local</code> file.
+              </p>
+              <form onSubmit={handleSecretSubmit} className="adm-secret-form">
+                <input
+                  type="password"
+                  value={secret}
+                  onChange={e => setSecret(e.target.value)}
+                  placeholder="Admin secret"
+                  autoComplete="off"
+                  className="adm-input"
+                />
+                {secretError && <p className="adm-error-msg">{secretError}</p>}
+                <button type="submit" className="adm-btn">Continue</button>
+              </form>
+            </div>
+          ) : children}
+        </main>
+      </div>
+    </>
   )
 }
+

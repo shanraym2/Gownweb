@@ -4,212 +4,198 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import {
-  loginUser,
-  getCurrentUser,
-  setCurrentUserRole,
-  verifyLoginCredentials,
-  loadUsers,
-} from '../utils/authClient'
+import { getCurrentUser, setCurrentUserRole } from '../utils/authClient'
 
-const RESEND_COOLDOWN = 30 // seconds
+const RESEND_COOLDOWN = 30
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [otp, setOtp] = useState('')
-  const [step, setStep] = useState(1)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [devMode, setDevMode] = useState(false)
-  const [showPassword, setShowPassword] = useState(false)
 
-  // Resend countdown
+  const [email,        setEmail       ] = useState('')
+  const [password,     setPassword    ] = useState('')
+  const [otp,          setOtp         ] = useState('')
+  const [step,         setStep        ] = useState(1)   // 1=credentials, 2=otp
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [devMode,      setDevMode     ] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
   const cooldownRef = useRef(null)
 
   const [errors, setErrors] = useState({
-    email: '',
-    password: '',
-    otp: '',
-    general: '',
+    email: '', password: '', otp: '', general: '',
   })
 
+  // Redirect if already logged in
   useEffect(() => {
-    const user = getCurrentUser()
-    if (user) router.replace('/')
+    if (getCurrentUser()) router.replace('/')
   }, [router])
 
-  // Tick the resend cooldown down every second
+  // Countdown timer
   useEffect(() => {
     if (resendCooldown <= 0) return
     cooldownRef.current = setInterval(() => {
-      setResendCooldown((s) => {
-        if (s <= 1) {
-          clearInterval(cooldownRef.current)
-          return 0
-        }
+      setResendCooldown(s => {
+        if (s <= 1) { clearInterval(cooldownRef.current); return 0 }
         return s - 1
       })
     }, 1000)
     return () => clearInterval(cooldownRef.current)
   }, [resendCooldown])
 
-  const validateEmail = (value) => {
-    if (!value) return 'Please enter your email.'
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Enter a valid email address.'
-    return ''
-  }
+  const clearErrors = () => setErrors({ email: '', password: '', otp: '', general: '' })
 
-  const validatePassword = (value) => {
-    if (!value) return 'Please enter your password.'
-    if (value.length < 6) return 'Password must be at least 6 characters.'
-    return ''
-  }
+  const validateEmail    = v => !v ? 'Please enter your email.'    : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? 'Enter a valid email address.' : ''
+  const validatePassword = v => !v ? 'Please enter your password.' : v.length < 6 ? 'Password must be at least 6 characters.' : ''
+  const validateOtp      = v => !v ? 'Please enter the 6-digit code.' : v.length !== 6 ? 'Code must be exactly 6 digits.' : ''
 
-  const validateOtp = (value) => {
-    if (!value) return 'Please enter the 6-digit code.'
-    if (value.length !== 6) return 'Code must be exactly 6 digits.'
-    return ''
-  }
+  // ── Step 1: verify credentials then check device trust ──────────────────
+  const handleSendOtp = async e => {
+    e.preventDefault()
+    clearErrors()
 
-  const sendOtp = useCallback(async () => {
+    const emailErr = validateEmail(email)
+    const passErr  = validatePassword(password)
+    if (emailErr || passErr) {
+      setErrors(p => ({ ...p, email: emailErr, password: passErr }))
+      return
+    }
+
     setIsSubmitting(true)
-    setErrors((prev) => ({ ...prev, general: '' }))
-
     try {
-      const res = await fetch('/api/auth/send-otp', {
-        method: 'POST',
+      // 1. Verify credentials against DB
+      const loginRes  = await fetch('/api/auth/login', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), purpose: 'login' }),
+        body:    JSON.stringify({ email: email.trim(), password }),
       })
+      const loginData = await loginRes.json()
 
+      if (!loginRes.ok || !loginData.ok) {
+        setErrors(p => ({ ...p, general: loginData.error || 'Invalid email or password.' }))
+        return
+      }
+
+      // 2. Check if this device is already trusted (skip OTP)
+      const trustRes  = await fetch('/api/auth/check-trust', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim() }),
+      })
+      const trustData = await trustRes.json()
+
+      if (trustData.trusted) {
+        // Device is trusted — log in directly, no OTP needed
+        finishLogin(loginData.user)
+        return
+      }
+
+      // 3. Send OTP
+      const otpRes  = await fetch('/api/auth/send-otp', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim(), purpose: 'login' }),
+      })
+      const otpData = await otpRes.json()
+
+      if (!otpRes.ok || !otpData.ok) {
+        setErrors(p => ({ ...p, general: otpData.error || 'Failed to send code.' }))
+        return
+      }
+
+      setDevMode(!!otpData.devMode)
+      setResendCooldown(RESEND_COOLDOWN)
+      setStep(2)
+    } catch {
+      setErrors(p => ({ ...p, general: 'Something went wrong. Please try again.' }))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // ── Step 2: verify OTP ───────────────────────────────────────────────────
+  const handleVerifyOtp = async e => {
+    e.preventDefault()
+    clearErrors()
+
+    const otpErr = validateOtp(otp)
+    if (otpErr) { setErrors(p => ({ ...p, otp: otpErr })); return }
+
+    setIsSubmitting(true)
+    try {
+      const res  = await fetch('/api/auth/verify-otp', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'login' }),
+      })
       const data = await res.json()
 
       if (!res.ok || !data.ok) {
-        setErrors((prev) => ({
-          ...prev,
-          general: data.error || 'Failed to send code.',
-        }))
-        return false
+        setErrors(p => ({ ...p, general: data.error || 'Invalid or expired code.' }))
+        if (res.status === 429) { setStep(1); setOtp('') }
+        return
       }
 
+      // OTP verified — now get the user record
+      const loginRes  = await fetch('/api/auth/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim(), password }),
+      })
+      const loginData = await loginRes.json()
+
+      if (!loginRes.ok || !loginData.ok) {
+        setErrors(p => ({ ...p, general: 'Login failed after verification. Please try again.' }))
+        return
+      }
+
+      finishLogin(loginData.user)
+    } catch {
+      setErrors(p => ({ ...p, general: 'Something went wrong. Please try again.' }))
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // ── Shared: save user and redirect ───────────────────────────────────────
+  function finishLogin(user) {
+    // Persist user to localStorage so getCurrentUser() works client-side
+    localStorage.setItem('jce_current_user', JSON.stringify({
+      id:        user.id,
+      name:      user.name,
+      email:     user.email,
+      role:      user.role,
+      createdAt: user.createdAt,
+    }))
+    setCurrentUserRole(user.role)
+    router.push('/')
+  }
+
+  const handleResendOtp = useCallback(async () => {
+    if (resendCooldown > 0 || isSubmitting) return
+    setOtp(''); clearErrors()
+    setIsSubmitting(true)
+    try {
+      const res  = await fetch('/api/auth/send-otp', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim(), purpose: 'login' }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setErrors(p => ({ ...p, general: data.error || 'Failed to send code.' }))
+        return
+      }
       setDevMode(!!data.devMode)
       setResendCooldown(RESEND_COOLDOWN)
-      return true
     } catch {
-      setErrors((prev) => ({
-        ...prev,
-        general: 'Failed to send code. Please try again.',
-      }))
-      return false
+      setErrors(p => ({ ...p, general: 'Failed to resend code.' }))
     } finally {
       setIsSubmitting(false)
     }
-  }, [email])
-
-  const handleSendOtp = async (e) => {
-    e.preventDefault()
-    setErrors((prev) => ({ ...prev, general: '' }))
-
-    const emailError = validateEmail(email)
-    const passwordError = validatePassword(password)
-
-    if (emailError || passwordError) {
-      setErrors((prev) => ({ ...prev, email: emailError, password: passwordError }))
-      return
-    }
-
-    const check = await verifyLoginCredentials({ email: email.trim(), password })
-
-    if (!check.ok) {
-      const users = loadUsers()
-      const exists = users.some(
-        (u) => String(u.email || '').trim().toLowerCase() === email.trim().toLowerCase()
-      )
-      setErrors((prev) => ({
-        ...prev,
-        general: exists
-          ? 'Incorrect password.'
-          : check.error || 'No account found with this email. Please sign up first.',
-      }))
-      return
-    }
-
-    const sent = await sendOtp()
-    if (sent) setStep(2)
-  }
-
-  const handleResendOtp = async () => {
-    if (resendCooldown > 0 || isSubmitting) return
-    setOtp('')
-    setErrors({ email: '', password: '', otp: '', general: '' })
-    await sendOtp()
-  }
-
-  const handleVerifyAndLogin = async (e) => {
-    e.preventDefault()
-    setErrors((prev) => ({ ...prev, general: '' }))
-
-    const otpError = validateOtp(otp)
-    if (otpError) {
-      setErrors((prev) => ({ ...prev, otp: otpError }))
-      return
-    }
-
-    setIsSubmitting(true)
-
-    try {
-      const verifyRes = await fetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'login' }),
-      })
-
-      const verifyData = await verifyRes.json()
-
-      if (!verifyRes.ok || !verifyData.ok) {
-        setErrors((prev) => ({
-          ...prev,
-          general: verifyData.error || 'Invalid or expired code.',
-        }))
-        // If locked out, send them back to step 1
-        if (verifyRes.status === 429) {
-          setStep(1)
-          setOtp('')
-        }
-        return
-      }
-
-      const result = await loginUser({ email: email.trim(), password })
-
-      if (!result.ok) {
-        setErrors((prev) => ({
-          ...prev,
-          general: result.error || 'Login failed. Please try again.',
-        }))
-        return
-      }
-
-      const roleRes = await fetch(`/api/auth/role?email=${encodeURIComponent(email.trim())}`)
-      const roleData = await roleRes.json()
-      if (roleData.ok && roleData.role) setCurrentUserRole(roleData.role)
-
-      router.push('/')
-    } catch {
-      setErrors((prev) => ({
-        ...prev,
-        general: 'Something went wrong. Please try again.',
-      }))
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+  }, [email, resendCooldown, isSubmitting])
 
   const handleBack = () => {
-    setStep(1)
-    setOtp('')
-    setErrors({ email: '', password: '', otp: '', general: '' })
+    setStep(1); setOtp(''); clearErrors()
   }
 
   return (
@@ -221,9 +207,7 @@ export default function LoginPage() {
           <div className="auth-copy">
             <span className="subtitle">Welcome Back</span>
             <h1>Log in to your account</h1>
-            <p>
-              Access your saved favorites and make it easier to inquire about your chosen looks.
-            </p>
+            <p>Access your saved favorites and make it easier to inquire about your chosen looks.</p>
           </div>
 
           <div className="auth-card">
@@ -232,17 +216,10 @@ export default function LoginPage() {
                 <div className="auth-field">
                   <label htmlFor="email">Email</label>
                   <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setEmail(value)
-                      setErrors((prev) => ({
-                        ...prev,
-                        email: validateEmail(value),
-                        general: '',
-                      }))
+                    id="email" type="email" value={email}
+                    onChange={e => {
+                      setEmail(e.target.value)
+                      setErrors(p => ({ ...p, email: validateEmail(e.target.value), general: '' }))
                     }}
                     placeholder="you@example.com"
                   />
@@ -257,21 +234,15 @@ export default function LoginPage() {
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="current-password"
                       value={password}
-                      onChange={(e) => {
-                        const value = e.target.value
-                        setPassword(value)
-                        setErrors((prev) => ({
-                          ...prev,
-                          password: validatePassword(value),
-                          general: '',
-                        }))
+                      onChange={e => {
+                        setPassword(e.target.value)
+                        setErrors(p => ({ ...p, password: validatePassword(e.target.value), general: '' }))
                       }}
                       placeholder="Your password"
                     />
                     <button
-                      type="button"
-                      className="auth-show-password"
-                      onClick={() => setShowPassword((v) => !v)}
+                      type="button" className="auth-show-password"
+                      onClick={() => setShowPassword(v => !v)}
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? 'Hide' : 'Show'}
@@ -286,12 +257,8 @@ export default function LoginPage() {
                   Forgot your password? <a href="/forgot-password">Reset it</a>
                 </p>
 
-                <button
-                  type="submit"
-                  className="btn btn-primary auth-submit"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? 'Sending…' : 'Log In'}
+                <button type="submit" className="btn btn-primary auth-submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Checking…' : 'Log In'}
                 </button>
 
                 <p className="auth-switch">
@@ -299,80 +266,52 @@ export default function LoginPage() {
                 </p>
               </form>
             ) : (
-              <form onSubmit={handleVerifyAndLogin}>
+              <form onSubmit={handleVerifyOtp}>
                 <p className="auth-otp-intro">
                   {devMode ? (
-                    <>
-                      Check the <strong>terminal</strong> where{' '}
-                      <code>npm run dev</code> is running for your 6-digit code.
-                    </>
+                    <>Check the <strong>terminal</strong> where <code>npm run dev</code> is running for your 6-digit code.</>
                   ) : (
-                    <>
-                      We sent a 6-digit code to <strong>{email}</strong>. Enter it
-                      below. Check your spam folder if you don&apos;t see it.
-                    </>
+                    <>We sent a 6-digit code to <strong>{email}</strong>. Enter it below. Check your spam folder if you don't see it.</>
                   )}
+                </p>
+
+                <p className="auth-trust-note" style={{ fontSize: 12, color: '#888', marginBottom: 14 }}>
+                  After verifying, this device will be trusted for 7 days.
                 </p>
 
                 <div className="auth-field">
                   <label htmlFor="otp">Verification code</label>
                   <input
-                    id="otp"
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={otp}
-                    autoComplete="one-time-code"
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, '')
-                      setOtp(value)
-                      setErrors((prev) => ({
-                        ...prev,
-                        otp: validateOtp(value),
-                        general: '',
-                      }))
+                    id="otp" type="text" inputMode="numeric" maxLength={6}
+                    value={otp} autoComplete="one-time-code"
+                    onChange={e => {
+                      const v = e.target.value.replace(/\D/g, '')
+                      setOtp(v)
+                      setErrors(p => ({ ...p, otp: validateOtp(v), general: '' }))
                     }}
-                    placeholder="000000"
-                    className="auth-otp-input"
+                    placeholder="000000" className="auth-otp-input"
                   />
                 </div>
 
-                {errors.otp && <p className="auth-error">{errors.otp}</p>}
+                {errors.otp     && <p className="auth-error">{errors.otp}</p>}
                 {errors.general && <p className="auth-error">{errors.general}</p>}
 
-                <button
-                  type="submit"
-                  className="btn btn-primary auth-submit"
-                  disabled={isSubmitting}
-                >
+                <button type="submit" className="btn btn-primary auth-submit" disabled={isSubmitting}>
                   {isSubmitting ? 'Verifying…' : 'Verify & Log In'}
                 </button>
 
-                {/* Resend code */}
                 <p className="auth-switch" style={{ marginTop: 12 }}>
-                  Didn&apos;t receive a code?{' '}
+                  Didn't receive a code?{' '}
                   {resendCooldown > 0 ? (
-                    <span className="auth-resend-disabled">
-                      Resend in {resendCooldown}s
-                    </span>
+                    <span className="auth-resend-disabled">Resend in {resendCooldown}s</span>
                   ) : (
-                    <button
-                      type="button"
-                      className="auth-link-btn"
-                      onClick={handleResendOtp}
-                      disabled={isSubmitting}
-                    >
+                    <button type="button" className="auth-link-btn" onClick={handleResendOtp} disabled={isSubmitting}>
                       Resend code
                     </button>
                   )}
                 </p>
 
-                <button
-                  type="button"
-                  className="auth-back-link"
-                  onClick={handleBack}
-                  disabled={isSubmitting}
-                >
+                <button type="button" className="auth-back-link" onClick={handleBack} disabled={isSubmitting}>
                   ← Back to form
                 </button>
 

@@ -1,40 +1,25 @@
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
-import { writeFileSync, readFileSync, existsSync } from 'fs'
-import { join } from 'path'
-import { tmpdir } from 'os'
+import { query } from '@/lib/db'
+import crypto from 'crypto'
 
-const OTP_EXPIRY_MS = 10 * 60 * 1000     // 10 minutes
-const OTP_RESEND_COOLDOWN_MS = 30 * 1000  // 30 seconds
-
-/**
- * Key by email + purpose so login and signup OTPs never overwrite each other.
- * e.g. "user@example.com::login"  vs  "user@example.com::signup"
- */
-function storeKey(email, purpose) {
-  return `${email}::${purpose}`
-}
-
-function getStorePath() {
-  return join(tmpdir(), 'jce-otps.json')
-}
-
-function loadOtps() {
-  const path = getStorePath()
-  if (!existsSync(path)) return {}
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'))
-  } catch {
-    return {}
-  }
-}
-
-function saveOtps(otps) {
-  writeFileSync(getStorePath(), JSON.stringify(otps, null, 0))
-}
+const OTP_EXPIRY_MS        = 10 * 60 * 1000  // 10 minutes
+const OTP_RESEND_COOLDOWN  = 30              // seconds
 
 function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000))
+}
+
+function hashOtp(otp) {
+  return crypto.createHash('sha256').update(otp).digest('hex')
+}
+
+// Map frontend purpose → DB CHECK constraint values
+const PURPOSE_MAP = {
+  login:           'login',
+  signup:          'signup',
+  auth:            'login',
+  'reset-password': 'password_reset',
 }
 
 export async function POST(request) {
@@ -45,76 +30,85 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'Email is required' }, { status: 400 })
     }
 
-    const cleanEmail = email.trim().toLowerCase()
-    const cleanPurpose = String(purpose || 'auth').trim().toLowerCase()
+    const cleanEmail   = email.trim().toLowerCase()
+    const rawPurpose   = String(purpose || 'login').trim().toLowerCase()
+    const dbPurpose    = PURPOSE_MAP[rawPurpose]
+
+    if (!dbPurpose) {
+      return NextResponse.json({ ok: false, error: 'Invalid OTP purpose' }, { status: 400 })
+    }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return NextResponse.json({ ok: false, error: 'Invalid email format' }, { status: 400 })
     }
 
-    if (!['login', 'signup', 'auth', 'reset-password'].includes(cleanPurpose)) {
-      return NextResponse.json({ ok: false, error: 'Invalid OTP purpose' }, { status: 400 })
+    // Cooldown check — look for a recent unexpired OTP for this email+purpose
+    const recent = await query(
+      `SELECT created_at FROM otp_codes
+       WHERE email = $1 AND purpose = $2
+         AND consumed_at IS NULL
+         AND expires_at > NOW()
+       ORDER BY created_at DESC LIMIT 1`,
+      [cleanEmail, dbPurpose]
+    )
+
+    if (recent.length > 0) {
+      const sentAt      = new Date(recent[0].created_at).getTime()
+      const secondsAgo  = Math.floor((Date.now() - sentAt) / 1000)
+      const secondsLeft = OTP_RESEND_COOLDOWN - secondsAgo
+
+      if (secondsLeft > 0) {
+        return NextResponse.json(
+          { ok: false, error: `Please wait ${secondsLeft}s before requesting another code.` },
+          { status: 429 }
+        )
+      }
     }
 
-    const key = storeKey(cleanEmail, cleanPurpose)
-    const otps = loadOtps()
-    const prev = otps[key]
+    const otp      = generateOtp()
+    const codeHash = hashOtp(otp)
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS)
 
-    // Cooldown check: prevent spam
-    if (prev && Date.now() - Number(prev.sentAt || 0) < OTP_RESEND_COOLDOWN_MS) {
-      const secondsLeft = Math.ceil(
-        (OTP_RESEND_COOLDOWN_MS - (Date.now() - Number(prev.sentAt))) / 1000
-      )
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `Please wait ${secondsLeft} second${secondsLeft !== 1 ? 's' : ''} before requesting another code.`,
-        },
-        { status: 429 }
-      )
-    }
+    // Invalidate old OTPs for this email+purpose first
+    await query(
+      `UPDATE otp_codes SET consumed_at = NOW()
+       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL`,
+      [cleanEmail, dbPurpose]
+    )
 
-    const otp = generateOtp()
+    // Insert new OTP
+    await query(
+      `INSERT INTO otp_codes (email, purpose, code_hash, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [cleanEmail, dbPurpose, codeHash, expiresAt]
+    )
 
-    otps[key] = {
-      otp,
-      expires: Date.now() + OTP_EXPIRY_MS,
-      purpose: cleanPurpose,
-      attempts: 0,
-      sentAt: Date.now(),
-    }
-    saveOtps(otps)
-
-    const gmailUser = process.env.GMAIL_USER
+    const gmailUser        = process.env.GMAIL_USER
     const gmailAppPassword = process.env.GMAIL_APP_PASSWORD
 
-    // ── Dev mode: no credentials → print to terminal ──────────────────────
+    // Dev mode — no email credentials
     if (!gmailUser || !gmailAppPassword) {
       console.log('\n╔══════════════════════════════════════╗')
       console.log('║       JCE Bridal — Dev OTP           ║')
       console.log('╠══════════════════════════════════════╣')
-      console.log(`║  Purpose : ${cleanPurpose.padEnd(27)}║`)
+      console.log(`║  Purpose : ${rawPurpose.padEnd(27)}║`)
       console.log(`║  Email   : ${cleanEmail.slice(0, 27).padEnd(27)}║`)
       console.log(`║  Code    : ${otp.padEnd(27)}║`)
-      console.log(`║  Expires : ${new Date(Date.now() + OTP_EXPIRY_MS).toLocaleTimeString().padEnd(27)}║`)
+      console.log(`║  Expires : ${expiresAt.toLocaleTimeString().padEnd(27)}║`)
       console.log('╚══════════════════════════════════════╝\n')
 
-      return NextResponse.json({
-        ok: true,
-        devMode: true,
-        message: 'Dev mode: OTP printed to terminal',
-      })
+      return NextResponse.json({ ok: true, devMode: true, message: 'Dev mode: OTP printed to terminal' })
     }
 
-    // ── Production: send via Gmail ────────────────────────────────────────
+    // Production — send via Gmail
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { user: gmailUser, pass: gmailAppPassword },
     })
 
     await transporter.sendMail({
-      from: `"JCE Bridal" <${gmailUser}>`,
-      to: cleanEmail,
+      from:    `"JCE Bridal" <${gmailUser}>`,
+      to:      cleanEmail,
       subject: 'Your verification code – JCE Bridal',
       html: `
         <div style="font-family:sans-serif;max-width:420px;margin:0 auto;padding:32px 24px;">
@@ -124,8 +118,7 @@ export async function POST(request) {
             ${otp}
           </p>
           <p style="color:#888;font-size:14px;">
-            This code expires in <strong>10 minutes</strong>.
-            Do not share it with anyone.
+            This code expires in <strong>10 minutes</strong>. Do not share it with anyone.
           </p>
           <hr style="border:none;border-top:1px solid #eee;margin:24px 0;" />
           <p style="color:#bbb;font-size:12px;">
@@ -138,12 +131,9 @@ export async function POST(request) {
     return NextResponse.json({ ok: true, devMode: false, message: 'OTP sent to your email' })
   } catch (err) {
     console.error('Send OTP error:', err)
-
-    const msg =
-      err.code === 'EAUTH'
-        ? 'Gmail login failed. Check GMAIL_USER and GMAIL_APP_PASSWORD in .env.local.'
-        : 'Failed to send OTP. Please try again.'
-
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+    return NextResponse.json(
+      { ok: false, error: 'Failed to send OTP. Please try again.' },
+      { status: 500 }
+    )
   }
 }

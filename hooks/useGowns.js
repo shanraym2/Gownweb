@@ -1,37 +1,39 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+
+let cache = null  // module-level cache so re-renders don't refetch
 
 export function useGowns() {
-  const [gowns, setGowns] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [gowns,   setGowns  ] = useState(cache || [])
+  const [loading, setLoading] = useState(!cache)
+  const [error,   setError  ] = useState('')
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    fetch('/api/gowns')
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load gowns')
-        return res.json()
-      })
-      .then((data) => {
-        if (!cancelled) setGowns(Array.isArray(data) ? data : [])
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
+  const fetchGowns = useCallback(async () => {
+    if (cache) { setGowns(cache); setLoading(false); return }
+    setLoading(true); setError('')
+    try {
+      const res  = await fetch('/api/gowns')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load gowns')
+      cache = data.gowns || []
+      setGowns(cache)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  return { gowns, loading, error }
+  useEffect(() => { fetchGowns() }, [fetchGowns])
+
+  // Call this after admin adds/edits/deletes to bust the cache
+  const invalidate = useCallback(() => { cache = null; fetchGowns() }, [fetchGowns])
+
+  return { gowns, loading, error, invalidate }
 }
 
 export function getGownById(gowns, id) {
-  if (!Array.isArray(gowns) || id == null) return null
-  return gowns.find((g) => Number(g.id) === Number(id)) || null
+  if (!id) return null
+  return gowns.find(g => String(g.id) === String(id)) ?? null
 }

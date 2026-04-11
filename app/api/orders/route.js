@@ -1,33 +1,32 @@
 import { NextResponse } from 'next/server'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
-import { getConnection } from '@/lib/db'
+import path from 'path'
+import fs   from 'fs'
 
-function getOrdersPath() {
-  return join(process.cwd(), 'data', 'orders.json')
+const USE_DB   = process.env.USE_DB === 'true'
+const dataFile = path.join(process.cwd(), 'data', 'orders.json')
+
+function loadJson() {
+  if (!fs.existsSync(dataFile)) return []
+  return JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 }
 
-function loadOrdersFromFile() {
-  const path = getOrdersPath()
-  if (!existsSync(path)) return []
-  try {
-    return JSON.parse(readFileSync(path, 'utf8'))
-  } catch {
-    return []
-  }
+function saveJson(orders) {
+  fs.mkdirSync(path.dirname(dataFile), { recursive: true })
+  fs.writeFileSync(dataFile, JSON.stringify(orders, null, 2))
 }
 
-function saveOrdersToFile(orders) {
-  const dir = join(process.cwd(), 'data')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  const path = getOrdersPath()
-  writeFileSync(path, JSON.stringify(orders, null, 2), 'utf8')
+function parsePriceAmount(priceStr) {
+  if (priceStr == null) return 0
+  const n = parseFloat(String(priceStr).replace(/[^\d.]/g, ''))
+  return isNaN(n) ? 0 : n
 }
 
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { contact, delivery, payment, items, note, subtotal, createdAt } = body
+    const { contact, delivery, payment, items, note,
+            subtotal, shippingFee, taxes, total } = body
+
     if (!contact?.email || !items?.length) {
       return NextResponse.json(
         { ok: false, error: 'Contact and items are required' },
@@ -35,84 +34,134 @@ export async function POST(request) {
       )
     }
 
-    const orderId = Date.now().toString()
-    const contactEmail = String(contact.email || '').trim()
-    const contactFirstName = String(contact.firstName || '').trim()
-    const contactLastName = String(contact.lastName || '').trim()
-    const contactPhone = String(contact.phone || '').trim()
-    const deliveryAddress = String((delivery && delivery.address) || '').trim()
-    const deliveryCity = String((delivery && delivery.city) || '').trim()
-    const deliveryProvince = String((delivery && delivery.province) || '').trim()
-    const deliveryZip = String((delivery && delivery.zip) || '').trim()
-    const paymentMethod = String(payment || 'gcash').trim()
-    const noteText = String(note || '').trim()
-    const subtotalNum = Number(subtotal) || 0
-
-    const order = {
-      id: orderId,
-      status: 'placed',
-      contact: { email: contactEmail, firstName: contactFirstName, lastName: contactLastName, phone: contactPhone },
-      delivery: { address: deliveryAddress, city: deliveryCity, province: deliveryProvince, zip: deliveryZip },
-      payment: paymentMethod,
-      items: items || [],
-      note: noteText,
-      subtotal: subtotalNum,
-      createdAt: new Date().toISOString(),
-    }
-    const orders = loadOrdersFromFile()
-    orders.push(order)
-    saveOrdersToFile(orders)
-
-    if (process.env.DATABASE_URL) {
-      try {
-        const conn = await getConnection()
-        try {
-          await conn.beginTransaction()
-          await conn.execute(
-            `INSERT INTO orders (id, contact_email, contact_first_name, contact_last_name, contact_phone,
-             delivery_address, delivery_city, delivery_province, delivery_zip, payment_method, note, subtotal)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              orderId,
-              contactEmail,
-              contactFirstName,
-              contactLastName,
-              contactPhone,
-              deliveryAddress,
-              deliveryCity,
-              deliveryProvince,
-              deliveryZip,
-              paymentMethod,
-              noteText,
-              subtotalNum,
-            ]
-          )
-          for (const item of items) {
-            const gownId = Number(item.id)
-            const itemName = String(item.name || '').trim()
-            const qty = Math.max(1, parseInt(item.qty, 10) || 1)
-            const itemPrice = String(item.price || '').trim()
-            const itemSubtotal = Number(item.subtotal) || 0
-            await conn.execute(
-              `INSERT INTO order_items (order_id, gown_id, name, qty, price, subtotal)
-               VALUES (?, ?, ?, ?, ?, ?)`,
-              [orderId, gownId, itemName, qty, itemPrice, itemSubtotal]
-            )
-          }
-          await conn.commit()
-        } catch (err) {
-          await conn.rollback()
-          throw err
-        } finally {
-          conn.release()
-        }
-      } catch (err) {
-        console.error('DB orders POST error:', err)
+    // ── JSON mode ────────────────────────────────────────────────────────────
+    if (!USE_DB) {
+      const newOrder = {
+        id:        String(Date.now()),
+        status:    'placed',
+        contact: {
+          email:     String(contact.email       || '').trim(),
+          firstName: String(contact.firstName   || '').trim(),
+          lastName:  String(contact.lastName    || '').trim(),
+          phone:     String(contact.phone       || '').trim(),
+        },
+        delivery: {
+          address:  String(delivery?.address  || '').trim(),
+          city:     String(delivery?.city     || '').trim(),
+          province: String(delivery?.province || '').trim(),
+          zip:      String(delivery?.zip      || '').trim(),
+        },
+        payment:     String(payment || 'gcash'),
+        items:       items.map(i => ({
+          id:       i.id,
+          name:     String(i.name     || '').trim(),
+          qty:      Number(i.qty)     || 1,
+          price:    i.price,
+          subtotal: Number(i.subtotal)|| 0,
+        })),
+        note:        String(note        || '').trim(),
+        subtotal:    Number(subtotal)   || 0,
+        shippingFee: Number(shippingFee)|| 0,
+        taxes:       Number(taxes)      || 0,
+        total:       Number(total)      || 0,
+        createdAt:   new Date().toISOString(),
       }
+
+      const orders = loadJson()
+      saveJson([newOrder, ...orders])
+
+      return NextResponse.json({
+        ok: true,
+        orderId:     newOrder.id,
+        orderNumber: newOrder.id,
+      })
     }
-    return NextResponse.json({ ok: true, orderId })
+
+    // ── DB mode ───────────────────────────────────────────────────────────────
+    const { default: pool } = await import('@/lib/db')
+
+    const contactEmail    = String(contact.email       || '').trim().toLowerCase()
+    const contactName     = `${String(contact.firstName || '').trim()} ${String(contact.lastName || '').trim()}`.trim()
+    const contactPhone    = String(contact.phone        || '').trim()
+    const paymentMethod   = ['gcash','bdo','cash'].includes(payment) ? payment : 'gcash'
+    const noteText        = String(note                 || '').trim()
+    const subtotalNum     = Number(subtotal)            || 0
+    const shippingNum     = Number(shippingFee)         || 0
+    const totalNum        = Number(total)               || subtotalNum + shippingNum
+
+    const datePart    = new Date().toISOString().slice(0,10).replace(/-/g,'')
+    const orderNumber = `JCE-${datePart}-${Date.now().toString().slice(-4)}`
+
+    const client = await pool.connect()
+    let orderId
+
+    try {
+      await client.query('BEGIN')
+
+      const orderResult = await client.query(
+        `INSERT INTO orders
+           (order_number, customer_email, customer_name, customer_phone,
+            payment_method, status, payment_status,
+            subtotal, shipping_fee, total, notes)
+         VALUES ($1,$2,$3,$4,$5,'placed','unpaid',$6,$7,$8,$9)
+         RETURNING id`,
+        [orderNumber, contactEmail, contactName, contactPhone,
+         paymentMethod, subtotalNum, shippingNum, totalNum, noteText]
+      )
+
+      orderId = orderResult.rows[0].id
+
+      // Save delivery address
+      if (delivery?.address) {
+        const userResult = await client.query(
+          `SELECT id FROM users WHERE email = $1 LIMIT 1`,
+          [contactEmail]
+        )
+        const userId = userResult.rows[0]?.id || null
+
+        await client.query(
+          `INSERT INTO user_addresses
+             (user_id, recipient_name, line1, city, province, postal_code, country, phone)
+           VALUES ($1,$2,$3,$4,$5,$6,'PH',$7)`,
+          [userId, contactName,
+           String(delivery.address  || '').trim(),
+           String(delivery.city     || '').trim(),
+           String(delivery.province || '').trim(),
+           String(delivery.zip      || '').trim(),
+           contactPhone]
+        )
+      }
+
+      // Save order items
+      for (const item of items) {
+        const unitPrice = Number(item.unitPrice || parsePriceAmount(item.price)) || 0
+        const qty       = Math.max(1, parseInt(item.qty, 10) || 1)
+        const lineTotal = Number(item.subtotal) || unitPrice * qty
+
+        await client.query(
+          `INSERT INTO order_items
+             (order_id, gown_id, gown_name, size_label, quantity, unit_price, line_total)
+           VALUES ($1,$2,$3,NULL,$4,$5,$6)`,
+          [orderId, item.id || null, String(item.name || '').trim(),
+           qty, unitPrice, lineTotal]
+        )
+      }
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    return NextResponse.json({ ok: true, orderId, orderNumber })
+
   } catch (err) {
     console.error('Orders POST error:', err)
-    return NextResponse.json({ ok: false, error: 'Failed to save order' }, { status: 500 })
+    return NextResponse.json(
+      { ok: false, error: 'Failed to save order' },
+      { status: 500 }
+    )
   }
 }

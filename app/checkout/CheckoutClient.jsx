@@ -216,7 +216,7 @@ export default function CheckoutClient() {
             <p className="ck-success-body">
               Your order has been received. We will contact{' '}
               <strong>{form.email}</strong> with{' '}
-              {payment === 'gcash' ? 'GCash' : 'BDO'} payment instructions
+              {{ gcash: 'GCash', bdo: 'BDO', cash: 'Cash' }[payment] || 'payment'} instructions
               and confirm your delivery details shortly.
             </p>
             <div className="ck-success-actions">

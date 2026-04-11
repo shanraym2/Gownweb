@@ -55,9 +55,14 @@ export default function AdminGownsPage() {
   const handleEdit = gown => {
     const raw = String(gown.price || '').replace(/[^\d]/g, '')
     setForm({
-      name: gown.name || '', price: '₱' + (raw ? Number(raw).toLocaleString('en-PH') : ''),
-      image: gown.image || '/images/', alt: gown.alt || '', type: gown.type || 'Gowns',
-      color: gown.color || '', silhouette: gown.silhouette || '', description: gown.description || '',
+      name:        gown.name        || '',
+      price:       '₱' + (raw ? Number(raw).toLocaleString('en-PH') : ''),
+      image:       gown.image       || '/images/',
+      alt:         gown.alt         || '',
+      type:        gown.type        || 'Gowns',
+      color:       gown.color       || '',
+      silhouette:  gown.silhouette  || '',
+      description: gown.description || '',
     })
     setEditingId(gown.id); setFormError(''); setImgError(false)
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
@@ -69,8 +74,8 @@ export default function AdminGownsPage() {
 
   const handleSubmit = async e => {
     e.preventDefault(); setFormError('')
-    if (!form.name.trim())                         { setFormError('Name is required.');  return }
-    if (!form.price.trim() || form.price === '₱') { setFormError('Price is required.'); return }
+    if (!form.name.trim())                         { setFormError('Name is required.');       return }
+    if (!form.price.trim() || form.price === '₱') { setFormError('Price is required.');      return }
     if (!form.image.trim())                        { setFormError('Image path is required.'); return }
     setSaving(true)
     try {
@@ -80,7 +85,8 @@ export default function AdminGownsPage() {
       const data   = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save')
       if (editingId != null) {
-        setGowns(p => p.map(g => Number(g.id) === Number(editingId) ? data.gown : g))
+        // Use String() comparison — works for both numeric and UUID ids
+        setGowns(p => p.map(g => String(g.id) === String(editingId) ? data.gown : g))
         handleCancelEdit()
       } else {
         setGowns(p => [...p, data.gown])
@@ -96,7 +102,8 @@ export default function AdminGownsPage() {
       const res  = await fetch(`/api/admin/gowns?id=${id}`, { method: 'DELETE', headers: headers() })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to delete')
-      setGowns(p => p.filter(g => Number(g.id) !== Number(id)))
+      // Use String() comparison — works for both numeric and UUID ids
+      setGowns(p => p.filter(g => String(g.id) !== String(id)))
       if (editingId === id) handleCancelEdit()
     } catch (e) { setError(e.message) }
     finally { setDeleteId(null) }
@@ -195,7 +202,7 @@ export default function AdminGownsPage() {
       ) : (
         <div className="adm-gown-list">
           {gowns.map(g => (
-            <div key={g.id} className={`adm-gown-row${editingId === g.id ? ' is-editing' : ''}`}>
+            <div key={g.id} className={`adm-gown-row${String(editingId) === String(g.id) ? ' is-editing' : ''}`}>
               <div className="adm-gown-thumb">
                 <img src={g.image} alt={g.alt || g.name}
                   onError={e => { e.target.style.display = 'none' }} />
@@ -203,14 +210,20 @@ export default function AdminGownsPage() {
               <div className="adm-gown-info">
                 <div className="adm-gown-name">{g.name}</div>
                 <div className="adm-gown-meta">
-                  {g.price}{g.type ? ` · ${g.type}` : ''}{g.silhouette ? ` · ${g.silhouette}` : ''}{g.color ? ` · ${g.color}` : ''}
+                  {g.price}
+                  {g.type       ? ` · ${g.type}`       : ''}
+                  {g.silhouette ? ` · ${g.silhouette}` : ''}
+                  {g.color      ? ` · ${g.color}`      : ''}
                 </div>
               </div>
               <div className="adm-gown-actions">
                 <button onClick={() => handleEdit(g)} className="adm-btn-sm">Edit</button>
                 <Link href={`/gowns/${g.id}`} target="_blank" rel="noopener noreferrer" className="adm-btn-sm">View</Link>
-                <button onClick={() => handleDelete(g.id)} className={`adm-btn-danger${deleteId === g.id ? ' armed' : ''}`}>
-                  {deleteId === g.id ? 'Confirm' : 'Delete'}
+                <button
+                  onClick={() => handleDelete(g.id)}
+                  className={`adm-btn-danger${String(deleteId) === String(g.id) ? ' armed' : ''}`}
+                >
+                  {String(deleteId) === String(g.id) ? 'Confirm' : 'Delete'}
                 </button>
               </div>
             </div>

@@ -1,0 +1,93 @@
+import { NextResponse } from 'next/server'
+import { query } from '@/lib/db'
+import bcrypt from 'bcryptjs'
+import { isRealName } from '@/app/utils/authValidation'
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase()
+}
+
+export async function PATCH(request) {
+  try {
+    const userId = request.headers.get('x-user-id')
+    if (!userId) {
+      return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
+    }
+
+    const body = await request.json()
+    const { name, email, password } = body
+
+    const setClauses = []
+    const values     = []
+    let   paramIndex = 1
+
+    if (name !== undefined) {
+      const cleanName = String(name).trim().replace(/\s+/g, ' ')
+      if (!isRealName(cleanName)) {
+        return NextResponse.json(
+          { ok: false, error: 'Use your real name: letters only, spaces, hyphens, and apostrophes.' },
+          { status: 400 }
+        )
+      }
+      const parts = cleanName.split(' ')
+      setClauses.push(`first_name = $${paramIndex++}`)
+      values.push(parts[0])
+      setClauses.push(`last_name = $${paramIndex++}`)
+      values.push(parts.slice(1).join(' ') || parts[0])
+    }
+
+    if (email !== undefined) {
+      const cleanEmail = normalizeEmail(email)
+      // Check not taken by another user
+      const taken = await query(
+        'SELECT id FROM users WHERE email = $1 AND id != $2',
+        [cleanEmail, userId]
+      )
+      if (taken.length > 0) {
+        return NextResponse.json(
+          { ok: false, error: 'That email is already in use.' },
+          { status: 409 }
+        )
+      }
+      setClauses.push(`email = $${paramIndex++}`)
+      values.push(cleanEmail)
+    }
+
+    if (password !== undefined && password !== '') {
+      const hash = await bcrypt.hash(String(password), 12)
+      setClauses.push(`password_hash = $${paramIndex++}`)
+      values.push(hash)
+    }
+
+    if (setClauses.length === 0) {
+      return NextResponse.json({ ok: false, error: 'Nothing to update.' }, { status: 400 })
+    }
+
+    values.push(userId)
+    const rows = await query(
+      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING id, first_name, last_name, email, role`,
+      values
+    )
+
+    if (!rows.length) {
+      return NextResponse.json({ ok: false, error: 'User not found.' }, { status: 404 })
+    }
+
+    const u = rows[0]
+    return NextResponse.json({
+      ok: true,
+      user: {
+        id:    u.id,
+        name:  `${u.first_name} ${u.last_name}`.trim(),
+        email: u.email,
+        role:  u.role,
+      },
+    })
+  } catch (err) {
+    console.error('Update profile error:', err)
+    return NextResponse.json(
+      { ok: false, error: 'Failed to update profile. Please try again.' },
+      { status: 500 }
+    )
+  }
+}

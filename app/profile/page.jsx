@@ -21,7 +21,6 @@ function saveProfileExtra(data) {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(data))
 }
 
-// SHA-256 — must match authClient's hashPassword exactly
 async function hashPassword(pw) {
   if (!window.crypto?.subtle) return String(pw || '')
   const data   = new TextEncoder().encode(String(pw || ''))
@@ -79,7 +78,7 @@ function StatCard({ label, value, icon }) {
 // ─── Change Password Modal ────────────────────────────────────────────────────
 
 function ChangePasswordModal({ email, onClose }) {
-  const [step, setStep]                       = useState(1) // 1=send, 2=verify, 3=new pwd
+  const [step, setStep]                       = useState(1)
   const [otp, setOtp]                         = useState('')
   const [newPassword, setNewPassword]         = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -131,8 +130,6 @@ function ChangePasswordModal({ email, onClose }) {
   const handleResetPassword = async (e) => {
     e.preventDefault(); setError('')
     if (!canSubmit) return
-
-    // ── Guard: reject if new password is the same as current ──
     try {
       const users      = loadUsers()
       const storedUser = users.find(u => u.email?.toLowerCase() === email?.toLowerCase())
@@ -143,9 +140,7 @@ function ChangePasswordModal({ email, onClose }) {
           return
         }
       }
-    } catch {
-      // If we can't check, proceed — better to allow than to block
-    }
+    } catch {}
 
     setSubmitting(true)
     try {
@@ -173,14 +168,12 @@ function ChangePasswordModal({ email, onClose }) {
         <span className="modal-label">ACCOUNT SECURITY</span>
         <h2 className="modal-title">Change password</h2>
 
-        {/* Step indicator */}
         <div className="modal-steps" aria-hidden="true">
           {[1,2,3].map(n => (
             <div key={n} className={`modal-step-dot ${step >= n ? 'modal-step-dot--done' : ''}`} />
           ))}
         </div>
 
-        {/* Step 1 — send OTP */}
         {step === 1 && (
           <div className="modal-body">
             <p className="modal-desc">
@@ -193,7 +186,6 @@ function ChangePasswordModal({ email, onClose }) {
           </div>
         )}
 
-        {/* Step 2 — verify OTP */}
         {step === 2 && (
           <form className="modal-body" onSubmit={handleVerifyOtp}>
             <p className="modal-desc">
@@ -220,7 +212,6 @@ function ChangePasswordModal({ email, onClose }) {
           </form>
         )}
 
-        {/* Step 3 — new password */}
         {step === 3 && (
           <form className="modal-body" onSubmit={handleResetPassword}>
             <div className="modal-field">
@@ -278,13 +269,14 @@ function ChangePasswordModal({ email, onClose }) {
 export default function ProfilePage() {
   const router = useRouter()
 
-  const [user, setUser]                 = useState(null)
-  const [editing, setEditing]           = useState(false)
-  const [saving, setSaving]             = useState(false)
-  const [toast, setToast]               = useState(null)
-  const [orders, setOrders]             = useState([])
-  const [showPwdModal, setShowPwdModal] = useState(false)
-  const [form, setForm]                 = useState({
+  const [user,          setUser         ] = useState(null)
+  const [editing,       setEditing      ] = useState(false)
+  const [saving,        setSaving       ] = useState(false)
+  const [toast,         setToast        ] = useState(null)
+  const [orders,        setOrders       ] = useState([])
+  const [ordersLoading, setOrdersLoading] = useState(true)
+  const [showPwdModal,  setShowPwdModal ] = useState(false)
+  const [form, setForm] = useState({
     name: '', email: '', phone: '',
     address: '', city: '', province: '', zip: '',
   })
@@ -310,10 +302,14 @@ export default function ProfilePage() {
       zip:      extra.zip      || '',
     })
 
-    try {
-      const raw = JSON.parse(localStorage.getItem('jce_orders') || '[]')
-      setOrders(raw.slice(0, 3))
-    } catch { setOrders([]) }
+    fetch('/api/my-orders', {
+      headers: { 'X-Customer-Email': existing.email }
+    })
+      .then(r => r.json())
+      .then(data => { if (data.ok) setOrders((data.orders || []).slice(0, 3)) })
+      .catch(() => {})
+      .finally(() => setOrdersLoading(false))
+
   }, [router])
 
   const handleChange = (e) => {
@@ -325,13 +321,11 @@ export default function ProfilePage() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      if (typeof updateUser === 'function') {
-        updateUser({ name: form.name, email: form.email })
-      } else {
-        const current = getCurrentUser()
-        localStorage.setItem('jce_user', JSON.stringify({ ...current, name: form.name, email: form.email }))
-      }
-      saveProfileExtra({ phone: form.phone, address: form.address, city: form.city, province: form.province, zip: form.zip })
+      updateUser({ name: form.name, email: form.email })
+      saveProfileExtra({
+        phone: form.phone, address: form.address,
+        city: form.city, province: form.province, zip: form.zip,
+      })
       setUser(prev => ({ ...prev, name: form.name, email: form.email }))
       await new Promise(r => setTimeout(r, 500))
       setEditing(false)
@@ -361,8 +355,11 @@ export default function ProfilePage() {
     if (success) showToast('Password updated successfully')
   }
 
-  const profileComplete = [form.name, form.email, form.phone, form.address, form.city, form.province, form.zip].filter(Boolean).length
-  const completionPct   = Math.round((profileComplete / 7) * 100)
+  const profileComplete = [
+    form.name, form.email, form.phone,
+    form.address, form.city, form.province, form.zip,
+  ].filter(Boolean).length
+  const completionPct = Math.round((profileComplete / 7) * 100)
 
   if (!user) return (
     <main className="auth-page">
@@ -389,7 +386,11 @@ export default function ProfilePage() {
           <div className="profile-hero-text">
             <span className="profile-label">YOUR ACCOUNT</span>
             <h1 className="profile-name">{user.name || 'Guest'}</h1>
-            <span className="profile-member-since">Member since {new Date().getFullYear()}</span>
+            <span className="profile-member-since">
+              Member since {user.createdAt
+                ? new Date(user.createdAt).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })
+                : new Date().getFullYear()}
+            </span>
           </div>
           <div className="profile-actions-top">
             {!editing ? (
@@ -417,9 +418,8 @@ export default function ProfilePage() {
       {/* ── Stats ── */}
       <section className="profile-stats-row">
         <div className="profile-stats-inner">
-          <StatCard label="Orders"  value={orders.length || '0'} icon="🛍" />
-          <StatCard label="Wishlist" value="—"                   icon="♡" />
-          <StatCard label="Profile" value={`${completionPct}%`}  icon="◈" />
+          <StatCard label="Orders"  value={ordersLoading ? '…' : orders.length} icon="🛍" />
+          <StatCard label="Profile" value={`${completionPct}%`}                 icon="◈" />
         </div>
       </section>
 
@@ -488,13 +488,15 @@ export default function ProfilePage() {
               <h2 className="profile-card-title">Quick links</h2>
               <div className="profile-links">
                 {[
-                  { href: '/my-orders', label: 'My orders' },
+                  { href: '/my-orders', label: 'My orders'        },
                   { href: '/gowns',     label: 'Browse collection' },
-                  { href: '/cart',      label: 'View cart' },
+                  { href: '/cart',      label: 'View cart'         },
                 ].map(({ href, label }) => (
                   <Link key={href} href={href} className="profile-link">
                     <span>{label}</span>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
                   </Link>
                 ))}
               </div>
@@ -502,7 +504,9 @@ export default function ProfilePage() {
 
             <div className="profile-card profile-card--sm">
               <h2 className="profile-card-title">Recent orders</h2>
-              {orders.length === 0 ? (
+              {ordersLoading ? (
+                <p className="profile-empty-orders">Loading…</p>
+              ) : orders.length === 0 ? (
                 <p className="profile-empty-orders">
                   No orders yet.{' '}
                   <Link href="/gowns" className="profile-link-inline">Shop now →</Link>
@@ -512,9 +516,13 @@ export default function ProfilePage() {
                   {orders.map((o, i) => (
                     <li key={i} className="profile-order-item">
                       <span className="profile-order-date">
-                        {new Date(o.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {new Date(o.createdAt).toLocaleDateString('en-PH', {
+                          month: 'short', day: 'numeric', year: 'numeric',
+                        })}
                       </span>
-                      <span className="profile-order-total">₱{Number(o.total).toLocaleString('en-PH')}</span>
+                      <span className="profile-order-total">
+                        ₱{Number(o.total ?? o.subtotal ?? 0).toLocaleString('en-PH')}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -538,7 +546,6 @@ export default function ProfilePage() {
       )}
 
       <Footer />
-
     </main>
   )
 }
