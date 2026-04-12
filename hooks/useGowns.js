@@ -2,21 +2,38 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-let cache = null  // module-level cache so re-renders don't refetch
+const CACHE_TTL_MS = 60 * 1000  // 1 minute — keeps pages fast but picks up inventory changes
+
+let cache     = null
+let cacheTime = 0
+
+function isCacheValid() {
+  return cache !== null && Date.now() - cacheTime < CACHE_TTL_MS
+}
 
 export function useGowns() {
-  const [gowns,   setGowns  ] = useState(cache || [])
-  const [loading, setLoading] = useState(!cache)
+  const [gowns,   setGowns  ] = useState(isCacheValid() ? cache : [])
+  const [loading, setLoading] = useState(!isCacheValid())
   const [error,   setError  ] = useState('')
 
-  const fetchGowns = useCallback(async () => {
-    if (cache) { setGowns(cache); setLoading(false); return }
-    setLoading(true); setError('')
+  const fetchGowns = useCallback(async (force = false) => {
+    if (!force && isCacheValid()) {
+      setGowns(cache)
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
     try {
       const res  = await fetch('/api/gowns')
       const data = await res.json()
+
       if (!res.ok) throw new Error(data.error || 'Failed to load gowns')
-      cache = data.gowns || []
+
+      cache     = data.gowns || []
+      cacheTime = Date.now()
       setGowns(cache)
     } catch (e) {
       setError(e.message)
@@ -27,8 +44,12 @@ export function useGowns() {
 
   useEffect(() => { fetchGowns() }, [fetchGowns])
 
-  // Call this after admin adds/edits/deletes to bust the cache
-  const invalidate = useCallback(() => { cache = null; fetchGowns() }, [fetchGowns])
+  // Call after admin adds/edits/deletes to bust the cache immediately
+  const invalidate = useCallback(() => {
+    cache     = null
+    cacheTime = 0
+    fetchGowns(true)
+  }, [fetchGowns])
 
   return { gowns, loading, error, invalidate }
 }
