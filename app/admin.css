@@ -701,112 +701,150 @@
 }
 
 .adm-danger-cancel:hover { color: #666; }
-
-
 /* ============================================================
-   ADMIN — gowns
+   admin-gowns.css
+   Styles for app/admin/gowns/page.jsx
+   Merge into your existing admin.css if preferred.
    ============================================================ */
 
-.adm-gowns-page {
-  max-width: 840px;
+/* ── Tabs ─────────────────────────────────────────────────── */
+.adm-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 28px;
+  gap: 2px;
+  margin: 28px 0 0;
+  border-bottom: 2px solid var(--adm-border, #e5e7eb);
 }
-
-.adm-gown-form-card {
-  background: #ffffff;
-  border: 0.5px solid rgba(0,0,0,0.08);
-  border-radius: 14px;
-  padding: 22px 24px;
-}
-
-.adm-gown-form-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1a1a1a;
-  margin: 0 0 20px;
-  letter-spacing: -0.01em;
-}
-
-.adm-gown-form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-.adm-image-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.adm-image-preview {
-  width: 58px;
-  height: 58px;
-  border-radius: 9px;
-  object-fit: cover;
-  border: 0.5px solid rgba(0,0,0,0.1);
-  flex-shrink: 0;
-}
-
-.adm-gown-list {
-  display: flex;
-  flex-direction: column;
+.adm-tab {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--adm-muted, #6b7280);
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.adm-tab:hover { color: var(--adm-text, #111827); }
+.adm-tab--active {
+  color: var(--adm-text, #111827);
+  border-bottom-color: var(--adm-accent, #111827);
+}
+.adm-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--adm-accent, #111827);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.adm-tab-count--muted {
+  background: var(--adm-muted-bg, #f3f4f6);
+  color: var(--adm-muted, #6b7280);
 }
 
-.adm-gown-row {
-  background: #ffffff;
-  border: 0.5px solid rgba(0,0,0,0.08);
-  border-radius: 12px;
-  padding: 12px 16px;
+/* ── Confirmation modal backdrop ──────────────────────────── */
+.adm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
   display: flex;
   align-items: center;
-  gap: 14px;
-  transition: border-color 0.15s;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  animation: adm-backdrop-in 0.15s ease;
 }
+@keyframes adm-backdrop-in { from{opacity:0} to{opacity:1} }
 
-.adm-gown-row:hover { border-color: rgba(0,0,0,0.15); }
-
-.adm-gown-row.is-editing { border-color: #7F77DD; }
-
-.adm-gown-thumb {
-  width: 52px;
-  height: 52px;
-  border-radius: 9px;
-  overflow: hidden;
-  background: #f5f4f0;
-  flex-shrink: 0;
-}
-
-.adm-gown-thumb img {
+/* ── Modal card ───────────────────────────────────────────── */
+.adm-modal {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 420px;
+  margin: 16px;
+  background: var(--adm-surface, #fff);
+  border-radius: 12px;
+  padding: 32px 28px 24px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.08);
+  animation: adm-modal-in 0.18s cubic-bezier(0.34,1.56,0.64,1);
+  text-align: center;
+}
+@keyframes adm-modal-in {
+  from { opacity:0; transform: scale(0.92) translateY(8px); }
+  to   { opacity:1; transform: scale(1)    translateY(0);   }
+}
+.adm-modal-icon     { font-size: 2rem; margin-bottom: 14px; line-height: 1; }
+.adm-modal-title    { font-size: 1.15rem; font-weight: 700; color: var(--adm-text,#111827); margin: 0 0 8px; }
+.adm-modal-gown-name { font-size: 0.9rem; color: var(--adm-muted,#6b7280); margin: 0 0 16px; font-style: italic; }
+.adm-modal-body     { font-size: 0.875rem; color: var(--adm-muted,#6b7280); margin: 0 0 20px; line-height: 1.55; }
+
+/* Modal summary (add/update) */
+.adm-modal-summary {
+  text-align: left;
+  background: var(--adm-muted-bg, #f9fafb);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0 0 20px;
+  font-size: 0.82rem;
+}
+.adm-modal-summary-row { display: flex; gap: 8px; padding: 3px 0; }
+.adm-modal-summary-row dt { min-width: 76px; color: var(--adm-muted,#9ca3af); font-weight: 500; }
+.adm-modal-summary-row dd { color: var(--adm-text,#111827); margin: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Modal buttons */
+.adm-modal-actions { display: flex; flex-direction: column; gap: 10px; }
+.adm-modal-btn {
+  width: 100%; padding: 11px 18px; border-radius: 8px;
+  border: none; cursor: pointer; font-size: 0.875rem; font-weight: 600;
+  transition: opacity 0.15s, background 0.15s;
+}
+.adm-modal-btn:disabled { opacity: .55; cursor: not-allowed; }
+.adm-modal-btn--primary { background: var(--adm-accent,#111827); color: #fff; }
+.adm-modal-btn--primary:hover:not(:disabled) { opacity: .85; }
+.adm-modal-btn--warning { background: #f59e0b; color: #fff; }
+.adm-modal-btn--warning:hover:not(:disabled) { background: #d97706; }
+.adm-modal-btn--danger  { background: #ef4444; color: #fff; }
+.adm-modal-btn--danger:hover:not(:disabled)  { background: #dc2626; }
+.adm-modal-btn--ghost   { background: var(--adm-muted-bg,#f3f4f6); color: var(--adm-muted,#374151); }
+.adm-modal-btn--ghost:hover:not(:disabled)   { background: var(--adm-border,#e5e7eb); }
+
+/* ── Archived tab content ─────────────────────────────────── */
+.adm-archive-info {
+  font-size: 0.82rem;
+  color: var(--adm-muted, #6b7280);
+  margin: 12px 0 16px;
+  line-height: 1.55;
+}
+.adm-archive-empty { text-align: center; padding: 48px 0; color: var(--adm-muted, #9ca3af); }
+.adm-archive-empty-icon { font-size: 2.5rem; display: block; margin-bottom: 12px; }
+.adm-archive-empty p { margin: 4px 0; }
+
+/* Archived gown row */
+.adm-gown-row--archived { opacity: .78; }
+.adm-gown-thumb--dim img { filter: grayscale(40%); }
+.adm-gown-name--archived { text-decoration: line-through; color: var(--adm-muted, #9ca3af); }
+.adm-archived-badge {
+  display: inline-block; margin-top: 4px;
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--adm-muted-bg,#f3f4f6); color: var(--adm-muted,#9ca3af);
+  font-size: 0.68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
 }
 
-.adm-gown-info { flex: 1; min-width: 0; }
-
-.adm-gown-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #1a1a1a;
-  margin-bottom: 3px;
-}
-
-.adm-gown-meta {
-  font-size: 12px;
-  color: #888;
-}
-
-.adm-gown-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
+/* Archive / restore buttons */
+.adm-btn-archive { color: var(--adm-muted,#6b7280); border-color: var(--adm-border,#d1d5db); }
+.adm-btn-archive:hover { background: var(--adm-muted-bg,#f3f4f6); border-color: var(--adm-muted,#9ca3af); }
+.adm-btn-restore { color: #059669; border-color: #a7f3d0; }
+.adm-btn-restore:hover { background: #ecfdf5; border-color: #6ee7b7; }
 
 /* ============================================================
    ADMIN — orders

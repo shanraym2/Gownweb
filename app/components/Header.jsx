@@ -90,96 +90,7 @@ export default function Header({ solid = false }) {
 
   return (
     <>
-      <style>{`
-        /* ── Search overlay ── */
-        .search-overlay {
-          position: fixed;
-          inset: 0;
-          background: rgba(0,0,0,.45);
-          z-index: 200;
-          display: flex;
-          align-items: flex-start;
-          justify-content: center;
-          padding-top: 100px;
-          animation: fadeIn .18s ease;
-        }
-        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-
-        .search-box {
-          background: #fff;
-          border-radius: 16px;
-          width: 100%;
-          max-width: 560px;
-          margin: 0 20px;
-          box-shadow: 0 24px 64px rgba(0,0,0,.18);
-          overflow: hidden;
-          animation: slideDown .2s ease;
-        }
-        @keyframes slideDown { from{transform:translateY(-12px);opacity:0} to{transform:none;opacity:1} }
-
-        .search-form {
-          display: flex;
-          align-items: center;
-          gap: 0;
-        }
-
-        .search-icon-inner {
-          padding: 0 16px;
-          display: flex;
-          align-items: center;
-          flex-shrink: 0;
-          color: #aaa;
-        }
-        .search-icon-inner svg {
-          width: 20px; height: 20px;
-          stroke: currentColor; fill: none;
-          stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-        }
-
-        .search-input {
-          flex: 1;
-          border: none;
-          outline: none;
-          font-size: 1.05rem;
-          padding: 18px 0;
-          background: transparent;
-          font-family: inherit;
-          color: #111;
-        }
-        .search-input::placeholder { color: #bbb; }
-
-        .search-submit {
-          background: #111;
-          color: #fff;
-          border: none;
-          padding: 12px 20px;
-          margin: 8px 10px 8px 0;
-          border-radius: 10px;
-          font-size: .85rem;
-          font-weight: 600;
-          cursor: pointer;
-          font-family: inherit;
-          transition: background .15s;
-          white-space: nowrap;
-        }
-        .search-submit:hover { background: #333; }
-
-        .search-hint {
-          padding: 10px 16px 14px;
-          font-size: .78rem;
-          color: #bbb;
-          border-top: 1px solid #f4f4f4;
-        }
-        .search-hint kbd {
-          display: inline-block;
-          padding: 1px 6px;
-          background: #f0f0f0;
-          border-radius: 4px;
-          font-size: .72rem;
-          color: #888;
-          font-family: inherit;
-        }
-      `}</style>
+    
 
       <header className={`hdr${isActive ? ' scrolled' : ''}`}>
         <div className="hdr-inner">
@@ -187,6 +98,7 @@ export default function Header({ solid = false }) {
           <nav className="hdr-nav">
             <Link href="/gowns">Gowns</Link>
             <Link href="/virtual-try-on">Virtual Try-On</Link>
+            <Link href="/style-recommender">Style Recommender</Link>
             <Link href="/contact">Contact</Link>
             {currentUser?.role === 'admin' && (
               <Link href="/admin">Admin</Link>
@@ -304,6 +216,7 @@ export default function Header({ solid = false }) {
 
           <Link href="/gowns" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Gowns</Link>
           <Link href="/virtual-try-on" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link>
+          <Link href="/style-recommender" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Style Recommender</Link>
           <Link href="/about" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
           <Link href="/contact" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Contact</Link>
           <Link href="/cart" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Cart</Link>

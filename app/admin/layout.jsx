@@ -5,15 +5,23 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { getCurrentUser, setCurrentUserRole } from '../utils/authClient'
 
+// ── Secret storage ────────────────────────────────────────────────────────────
+// localStorage instead of sessionStorage so the secret survives page refreshes
+// and Next.js hot-reloads during development.
+
 const ADMIN_SECRET_KEY = 'jce_admin_secret'
 
 export function getAdminSecret() {
   if (typeof window === 'undefined') return null
-  return sessionStorage.getItem(ADMIN_SECRET_KEY)
+  return localStorage.getItem(ADMIN_SECRET_KEY)
 }
 export function setAdminSecret(secret) {
   if (typeof window === 'undefined') return
-  sessionStorage.setItem(ADMIN_SECRET_KEY, secret)
+  localStorage.setItem(ADMIN_SECRET_KEY, secret)
+}
+export function clearAdminSecret() {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem(ADMIN_SECRET_KEY)
 }
 
 const NAV_LINKS = [
@@ -24,35 +32,109 @@ const NAV_LINKS = [
   { href: '/admin/users',     label: 'Users'     },
 ]
 
+// ── Secret gate ───────────────────────────────────────────────────────────────
+
+function SecretGate({ onSuccess }) {
+  const [secret,      setSecret     ] = useState('')
+  const [error,       setError      ] = useState('')
+  const [validating,  setValidating ] = useState(false)
+
+  // Auto-validate on mount if a secret is already stored
+  useEffect(() => {
+    const stored = getAdminSecret()
+    if (stored) validateSecret(stored, false)
+  }, [])
+
+  async function validateSecret(value, store = true) {
+    if (!value.trim()) { setError('Enter the admin secret.'); return }
+    setValidating(true); setError('')
+    try {
+      // Probe a cheap endpoint to verify the secret is correct
+      const res = await fetch('/api/admin/gowns', {
+        headers: { 'X-Admin-Secret': value.trim() },
+      })
+      if (res.ok || res.status === 200) {
+        if (store) setAdminSecret(value.trim())
+        onSuccess()
+      } else if (res.status === 401) {
+        // Stored secret is wrong — clear it so the form shows
+        clearAdminSecret()
+        setError('Incorrect secret. Check ADMIN_SECRET in your .env.local.')
+      } else {
+        // Any other status (e.g. 500) — secret might be fine, let them through
+        if (store) setAdminSecret(value.trim())
+        onSuccess()
+      }
+    } catch {
+      // Network error — trust the stored secret and let them through
+      if (store) setAdminSecret(value.trim())
+      onSuccess()
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    validateSecret(secret)
+  }
+
+  return (
+    <div className="adm-secret-gate">
+      <h1 className="adm-secret-title">Enter admin secret</h1>
+      <p className="adm-secret-hint">
+        Set <code>ADMIN_SECRET</code> in your <code>.env.local</code> file,
+        then enter the same value here. It will be remembered until you clear it.
+      </p>
+      <form onSubmit={handleSubmit} className="adm-secret-form">
+        <input
+          type="password"
+          value={secret}
+          onChange={e => { setSecret(e.target.value); setError('') }}
+          placeholder="Admin secret (e.g. qweqwe)"
+          autoComplete="off"
+          autoFocus
+          className="adm-input"
+        />
+        {error && <p className="adm-error-msg">{error}</p>}
+        <button type="submit" disabled={validating} className="adm-btn">
+          {validating ? 'Checking…' : 'Continue'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+// ── Main layout ───────────────────────────────────────────────────────────────
+
 export default function AdminLayout({ children }) {
   const pathname = usePathname()
+
   const [user,           setUser          ] = useState(null)
-  const [secret,         setSecret        ] = useState('')
-  const [secretError,    setSecretError   ] = useState('')
   const [checking,       setChecking      ] = useState(true)
+  const [secretOk,       setSecretOk      ] = useState(false)
+  const [sidebarOpen,    setSidebarOpen   ] = useState(false)
   const [refreshingRole, setRefreshingRole] = useState(false)
   const [roleError,      setRoleError     ] = useState('')
-  const [sidebarOpen,    setSidebarOpen   ] = useState(false)
 
-  useEffect(() => { setUser(getCurrentUser()); setChecking(false) }, [])
+  // Check auth on mount
+  useEffect(() => {
+    setUser(getCurrentUser())
+    // If a secret is already stored, optimistically mark it as ok —
+    // the SecretGate will validate it in the background and clear if wrong.
+    if (getAdminSecret()) setSecretOk(true)
+    setChecking(false)
+  }, [])
 
   // Close sidebar on route change
   useEffect(() => { setSidebarOpen(false) }, [pathname])
 
-  // Prevent body scroll when sidebar is open on mobile
+  // Prevent body scroll when sidebar is open
   useEffect(() => {
     if (typeof document === 'undefined') return
     document.body.style.overflow = sidebarOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [sidebarOpen])
-
-  const handleSecretSubmit = (e) => {
-    e.preventDefault()
-    if (!secret.trim()) { setSecretError('Enter the admin secret.'); return }
-    setAdminSecret(secret.trim())
-    setSecret('')
-    window.location.reload()
-  }
 
   const handleRefreshRole = async () => {
     const u = getCurrentUser()
@@ -67,7 +149,7 @@ export default function AdminLayout({ children }) {
         setRoleError(
           data.adminEmailConfigured === false
             ? `ADMIN_EMAIL not set. Add ADMIN_EMAIL=${u.email} to .env.local and restart.`
-            : `Email mismatch. Use ADMIN_EMAIL=${u.email} in .env.local (no quotes) and restart.`
+            : `Role is "${data.role}", not admin. Make sure ADMIN_EMAIL=${u.email} in .env.local (no quotes) and restart the dev server.`
         )
       } else {
         setRoleError('Could not fetch role. Is the server running?')
@@ -76,12 +158,14 @@ export default function AdminLayout({ children }) {
     finally  { setRefreshingRole(false) }
   }
 
+  // ── Loading ──────────────────────────────────────────────────────────────
   if (checking) return (
     <div className="adm-loading-screen">
       <span className="adm-loading-text">Loading…</span>
     </div>
   )
 
+  // ── Not admin ────────────────────────────────────────────────────────────
   if (!user || user.role !== 'admin') return (
     <div className="adm-access-screen">
       <div className="adm-access-card">
@@ -115,107 +199,82 @@ export default function AdminLayout({ children }) {
     </div>
   )
 
-  const hasSecret = getAdminSecret()
-
+  // ── Admin layout ─────────────────────────────────────────────────────────
   return (
-    <>
-      <div className="adm-layout">
+    <div className="adm-layout">
 
-        {/* ── Mobile top bar ── */}
-        <div className="adm-topnav">
-          <button
-            className="adm-hamburger"
-            onClick={() => setSidebarOpen(v => !v)}
-            aria-label="Toggle menu"
-          >
-            {sidebarOpen ? (
-              // X icon
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            ) : (
-              // Hamburger icon
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <line x1="3" y1="6"  x2="21" y2="6"/>
-                <line x1="3" y1="12" x2="21" y2="12"/>
-                <line x1="3" y1="18" x2="21" y2="18"/>
-              </svg>
-            )}
-          </button>
-          <div className="adm-topnav-brand">JCE Bridal · Admin</div>
-          <Link href="/" className="adm-topnav-back">← Site</Link>
+      {/* ── Mobile top bar ── */}
+      <div className="adm-topnav">
+        <button
+          className="adm-hamburger"
+          onClick={() => setSidebarOpen(v => !v)}
+          aria-label="Toggle menu"
+        >
+          {sidebarOpen ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6"  x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          )}
+        </button>
+        <div className="adm-topnav-brand">JCE Bridal · Admin</div>
+        <Link href="/" className="adm-topnav-back">← Site</Link>
+      </div>
+
+      {/* ── Backdrop ── */}
+      {sidebarOpen && (
+        <div className="adm-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* ── Sidebar ── */}
+      <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
+        <div className="adm-sidebar-brand">
+          <Link href="/admin" onClick={() => setSidebarOpen(false)}>
+            <div className="adm-brand-name">JCE Bridal</div>
+            <div className="adm-brand-sub">Admin panel</div>
+          </Link>
         </div>
 
-        {/* ── Backdrop ── */}
-        {sidebarOpen && (
-          <div
-            className="adm-sidebar-backdrop"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
+        <nav className="adm-nav">
+          {NAV_LINKS.map(({ href, label, exact }) => {
+            const active = exact ? pathname === href : pathname.startsWith(href)
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={`adm-nav-link${active ? ' active' : ''}`}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <span className="adm-nav-dot" />
+                {label}
+              </Link>
+            )
+          })}
+        </nav>
 
-        {/* ── Sidebar ── */}
-        <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
-          <div className="adm-sidebar-brand">
-            <Link href="/admin" onClick={() => setSidebarOpen(false)}>
-              <div className="adm-brand-name">JCE Bridal</div>
-              <div className="adm-brand-sub">Admin panel</div>
-            </Link>
-          </div>
+        <div className="adm-sidebar-footer">
+          <Link href="/" className="adm-footer-btn">← Back to site</Link>
+          <button
+            className="adm-footer-btn"
+            onClick={() => { clearAdminSecret(); setSecretOk(false) }}
+          >
+            Clear secret
+          </button>
+        </div>
+      </aside>
 
-          <nav className="adm-nav">
-            {NAV_LINKS.map(({ href, label, exact }) => {
-              const active = exact ? pathname === href : pathname.startsWith(href)
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={`adm-nav-link${active ? ' active' : ''}`}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <span className="adm-nav-dot" />
-                  {label}
-                </Link>
-              )
-            })}
-          </nav>
-
-          <div className="adm-sidebar-footer">
-            <Link href="/" className="adm-footer-btn">← Back to site</Link>
-            <button
-              className="adm-footer-btn"
-              onClick={() => { sessionStorage.removeItem(ADMIN_SECRET_KEY); window.location.reload() }}
-            >
-              Clear session
-            </button>
-          </div>
-        </aside>
-
-        {/* ── Main ── */}
-        <main className="adm-main">
-          {!hasSecret ? (
-            <div className="adm-secret-gate">
-              <h1 className="adm-secret-title">Enter admin secret</h1>
-              <p className="adm-secret-hint">
-                Set <code>ADMIN_SECRET</code> in your <code>.env.local</code> file.
-              </p>
-              <form onSubmit={handleSecretSubmit} className="adm-secret-form">
-                <input
-                  type="password"
-                  value={secret}
-                  onChange={e => setSecret(e.target.value)}
-                  placeholder="Admin secret"
-                  autoComplete="off"
-                  className="adm-input"
-                />
-                {secretError && <p className="adm-error-msg">{secretError}</p>}
-                <button type="submit" className="adm-btn">Continue</button>
-              </form>
-            </div>
-          ) : children}
-        </main>
-      </div>
-    </>
+      {/* ── Main ── */}
+      <main className="adm-main">
+        {!secretOk
+          ? <SecretGate onSuccess={() => setSecretOk(true)} />
+          : children
+        }
+      </main>
+    </div>
   )
 }
-

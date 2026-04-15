@@ -97,7 +97,7 @@
         }
         .hdr-nav a {
           font-size: 0.68rem;
-          font-weight: 300;
+          font-weight: 500;
           letter-spacing: 0.28em;
           text-transform: uppercase;
           text-decoration: none;
@@ -114,8 +114,8 @@
           transition: width 0.3s ease;
         }
         .hdr-nav a:hover::after { width: 100%; }
-        .hdr-nav a:hover { color: var(--ivory); }
-        .hdr.scrolled .hdr-nav a { color: var(--muted); }
+        .hdr-nav a:hover {  color: var(--gold);  }
+        .hdr.scrolled .hdr-nav a { color: rgba(44,36,32,0.75); }
         .hdr.scrolled .hdr-nav a:hover { color: var(--charcoal); }
 
         /* ── Right actions ── */
