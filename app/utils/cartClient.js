@@ -50,24 +50,32 @@ export function saveCart(items) {
   safeSetItem(key, JSON.stringify(items))
 }
 
-export function addToCart(gownId) {
+// Each unique (id + size) combination is a separate cart line
+export function addToCart(gownId, qty = 1, options = {}) {
   const items = loadCart()
-  const existing = items.find((item) => item.id === gownId)
+  const size = options.size ?? null
+  const existing = items.find(
+    (item) => item.id === gownId && (item.size ?? null) === size
+  )
   if (existing) {
-    existing.qty += 1
+    existing.qty += qty
   } else {
-    items.push({ id: gownId, qty: 1 })
+    items.push({ id: gownId, qty, size })
   }
   saveCart(items)
   return items
 }
 
-export function setQuantity(gownId, qty) {
+export function setQuantity(gownId, qty, size = null) {
   const items = loadCart()
-  const entry = items.find((item) => item.id === gownId)
+  const entry = items.find(
+    (item) => item.id === gownId && (item.size ?? null) === size
+  )
   if (!entry) return items
   if (qty < 1) {
-    const next = items.filter((item) => item.id !== gownId)
+    const next = items.filter(
+      (item) => !(item.id === gownId && (item.size ?? null) === size)
+    )
     saveCart(next)
     return next
   }
@@ -76,8 +84,10 @@ export function setQuantity(gownId, qty) {
   return items
 }
 
-export function removeItem(gownId) {
-  const items = loadCart().filter((item) => item.id !== gownId)
+export function removeItem(gownId, size = null) {
+  const items = loadCart().filter(
+    (item) => !(item.id === gownId && (item.size ?? null) === size)
+  )
   saveCart(items)
   return items
 }
@@ -91,7 +101,6 @@ export function clearCart() {
   }
 }
 
-/** Clears all carts (for admin reset). */
 export function clearAllCarts() {
   if (typeof window === 'undefined') return
   const keysToRemove = []

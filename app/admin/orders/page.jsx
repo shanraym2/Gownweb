@@ -1,213 +1,913 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { useGowns, getGownById } from '@/hooks/useGowns'
 import { getAdminSecret } from '../layout'
 
-const ORDER_STATUSES = ['placed','paid','preparing','shipped','delivered','cancelled']
-const STATUS_LABELS  = {
-  placed:'Placed', paid:'Paid', preparing:'Preparing',
-  shipped:'Shipped', delivered:'Delivered', cancelled:'Cancelled',
-}
-const NEXT_ACTIONS = {
-  placed:    [{ label: 'Mark paid',       to: 'paid'      }],
-  paid:      [{ label: 'Start preparing', to: 'preparing' }],
-  preparing: [{ label: 'Mark shipped',    to: 'shipped'   }],
-  shipped:   [{ label: 'Mark delivered',  to: 'delivered' }],
-  delivered: [],
-  cancelled: [],
-}
-const CANCEL_ALLOWED = ['placed','paid','preparing']
+// ── Status machine ────────────────────────────────────────────────────────────
 
-function fmtPhp(n)    { return '₱' + Number(n || 0).toLocaleString('en-PH') }
-function fmtDate(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) }
-function normStatus(s){ const v = String(s||'').toLowerCase(); return ORDER_STATUSES.includes(v) ? v : 'placed' }
+const PAYMENT_GATED = new Set(['processing', 'ready', 'shipped'])
 
-function StatusBadge({ status }) {
-  return <span className={`adm-badge adm-badge-${status}`}>{STATUS_LABELS[status] || status}</span>
+const STATUS_FLOW = {
+  placed:          { next: 'pending_payment', prev: null },
+  pending_payment: { next: 'paid',            prev: 'placed' },
+  paid:            { next: 'processing',      prev: null },
+  processing:      { next: 'ready',           prev: 'paid' },
+  ready:           { next: 'shipped',         prev: 'processing' },
+  shipped:         { next: 'completed',       prev: null },
+  completed:       { next: null,              prev: null },
+  cancelled:       { next: null,              prev: null },
+  refunded:        { next: null,              prev: null },
 }
 
-function OrderCard({ order, gowns, onAction, updating }) {
-  const [open, setOpen] = useState(false)
-  const status    = normStatus(order.status)
-  const actions   = NEXT_ACTIONS[status] || []
-  const canCancel = CANCEL_ALLOWED.includes(status)
+const ESCAPE_TRANSITIONS = {
+  placed:          ['cancelled'],
+  pending_payment: ['cancelled'],
+  paid:            ['cancelled', 'refunded'],
+  processing:      ['cancelled', 'refunded'],
+  ready:           ['cancelled', 'refunded'],
+  shipped:         ['refunded'],
+}
+
+function getAllowedTransitions(status, paymentStatus) {
+  const flow = STATUS_FLOW[status]
+  if (!flow) return { next: null, prev: null, escapes: [] }
+
+  let next = flow.next
+  const prev = flow.prev
+
+  // Gate: can't move into payment-gated statuses without verified payment
+  if (next && PAYMENT_GATED.has(next) && paymentStatus !== 'paid') next = null
+
+  const escapes = ESCAPE_TRANSITIONS[status] || []
+  return { next, prev, escapes }
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const STATUS_META = {
+  placed:          { label: 'Placed',          bg: '#e8f0ff', color: '#2d5be3', step: 0 },
+  pending_payment: { label: 'Pending Payment', bg: '#fff3cd', color: '#856404', step: 1 },
+  paid:            { label: 'Paid',            bg: '#d4edda', color: '#155724', step: 2 },
+  processing:      { label: 'Processing',      bg: '#e2d9f3', color: '#4a2c82', step: 3 },
+  ready:           { label: 'Ready',           bg: '#cff4fc', color: '#0a5276', step: 4 },
+  shipped:         { label: 'Shipped',         bg: '#d1ecf1', color: '#0c5460', step: 5 },
+  completed:       { label: 'Completed',       bg: '#d4edda', color: '#155724', step: 6 },
+  cancelled:       { label: 'Cancelled',       bg: '#f8d7da', color: '#721c24', step: -1 },
+  refunded:        { label: 'Refunded',        bg: '#fce8d4', color: '#7a3608', step: -1 },
+}
+
+const PAYMENT_STATUS_META = {
+  unpaid:   { bg: '#f8d7da', color: '#721c24' },
+  pending:  { bg: '#fff3cd', color: '#856404' },
+  paid:     { bg: '#d4edda', color: '#155724' },
+  failed:   { bg: '#f8d7da', color: '#721c24' },
+  refunded: { bg: '#fce8d4', color: '#7a3608' },
+}
+
+const PAYMENT_METHOD_LABEL = { gcash: 'GCash', bdo: 'BDO', cash: 'Cash' }
+const DELIVERY_LABEL       = { pickup: 'Store Pickup', lalamove: 'Lalamove' }
+
+function fmtPhp(n) {
+  return '₱' + Number(n || 0).toLocaleString('en-PH')
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('en-PH', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
+}
+
+// ── StatusBadge ───────────────────────────────────────────────────────────────
+
+function StatusBadge({ status, type = 'order' }) {
+  const meta   = type === 'payment' ? PAYMENT_STATUS_META[status] : STATUS_META[status]
+  const colors = meta || { bg: '#f0e6d3', color: '#6b3f2a' }
+  const label  = type === 'order' ? (STATUS_META[status]?.label || status) : status
+  return (
+    <span className="adm-badge" style={{ background: colors.bg, color: colors.color }}>
+      {label.replace(/_/g, ' ')}
+    </span>
+  )
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+function Toast({ message, type = 'success', onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 3200)
+    return () => clearTimeout(t)
+  }, [onDone])
 
   return (
-    <div className={`adm-order-card${updating ? ' is-updating' : ''}`}>
-      <div className="adm-order-head" onClick={() => setOpen(o => !o)}>
-        <span className="adm-order-id">#{order.id}</span>
-        <StatusBadge status={status} />
-        <span className="adm-order-name">{order.contact?.firstName} {order.contact?.lastName}</span>
-        <span className="adm-order-amt">{fmtPhp(order.subtotal)}</span>
-        <span className="adm-order-date">{fmtDate(order.createdAt)}</span>
-        <span className="adm-order-chevron">{open ? '▲' : '▼'}</span>
-      </div>
-
-      {open && (
-        <div className="adm-order-body">
-          <div className="adm-order-items">
-            {order.items?.map((item, i) => {
-              const gown = getGownById(gowns, item.id)
-              return (
-                <div key={i} className="adm-order-item">
-                  <div className="adm-order-item-thumb">
-                    {gown?.image && <img src={gown.image} alt={item.name} />}
-                  </div>
-                  <div>
-                    <div className="adm-order-item-name">{item.name} × {item.qty}</div>
-                    <div className="adm-order-item-meta">{item.price} · subtotal {fmtPhp(item.subtotal)}</div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="adm-order-detail-grid">
-            <div>
-              <div className="adm-order-detail-head">Customer</div>
-              <div className="adm-order-detail-line">{order.contact?.email}</div>
-              <div className="adm-order-detail-line">{order.contact?.phone}</div>
-            </div>
-            <div>
-              <div className="adm-order-detail-head">Delivery</div>
-              <div className="adm-order-detail-line">{order.delivery?.address}</div>
-              <div className="adm-order-detail-line">{order.delivery?.city}, {order.delivery?.province} {order.delivery?.zip}</div>
-            </div>
-          </div>
-
-          {order.note && <div className="adm-order-note">Note: {order.note}</div>}
-
-          {(actions.length > 0 || canCancel) && (
-            <div className="adm-order-action-row">
-              {actions.map(a => (
-                <button key={a.to} disabled={updating} onClick={() => onAction(order.id, a.to)} className="adm-action-btn">
-                  {a.label}
-                </button>
-              ))}
-              {canCancel && (
-                <button
-                  disabled={updating}
-                  onClick={() => { if (confirm('Cancel this order?')) onAction(order.id, 'cancelled') }}
-                  className="adm-action-btn-cancel"
-                >
-                  Cancel order
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+    <div className={`adm-toast adm-toast--${type}`} role="status">
+      {type === 'success'
+        ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
+        : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+      }
+      {message}
     </div>
   )
 }
 
+// ── ConfirmModal ──────────────────────────────────────────────────────────────
+
+function ConfirmModal({ title, message, confirmLabel, danger, onConfirm, onClose, children }) {
+  useEffect(() => {
+    const fn = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [onClose])
+
+  return (
+    <div className="adm-confirm-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="adm-confirm-box">
+        <p className="adm-confirm-title">{title}</p>
+        <p className="adm-confirm-msg">{message}</p>
+        {children}
+        <div className="adm-confirm-actions">
+          <button className="adm-btn-outline" onClick={onClose}>Cancel</button>
+          <button
+            className={danger ? 'adm-btn-danger armed' : 'adm-btn'}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── ProofModal ────────────────────────────────────────────────────────────────
+
+function ProofModal({ order, onVerify, onReject, onClose }) {
+  const [refNo,      setRefNo     ] = useState(order.proofReferenceNo || '')
+  const [reason,     setReason    ] = useState('')
+  const [loading,    setLoading   ] = useState(false)
+  const [proofImage, setProofImage] = useState(null)
+  const [proofMeta,  setProofMeta ] = useState(null)
+  const [fetching,   setFetching  ] = useState(true)
+
+  useEffect(() => {
+    const fn = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [onClose])
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res  = await fetch(`/api/orders/upload-proof?orderId=${order.id}`, {
+          headers: { 'X-Admin-Secret': getAdminSecret() || '' },
+        })
+        const data = await res.json()
+        if (data.ok) {
+          setProofImage(data.proofImage)
+          setProofMeta({ uploadedAt: data.uploadedAt, referenceNo: data.referenceNo })
+          if (data.referenceNo) setRefNo(data.referenceNo)
+        }
+      } catch (e) {
+        console.warn('Failed to load proof', e)
+      } finally {
+        setFetching(false)
+      }
+    }
+    load()
+  }, [order.id])
+
+  return (
+    <div className="adm-confirm-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="adm-proof-modal">
+
+        <div className="adm-proof-header">
+          <div>
+            <p className="adm-proof-eyebrow">Payment Proof</p>
+            <h2 className="adm-proof-title">{order.orderNumber}</h2>
+            <p className="adm-proof-meta">
+              {order.customerName} · {fmtPhp(order.total)} · {PAYMENT_METHOD_LABEL[order.paymentMethod]}
+            </p>
+          </div>
+          <button className="adm-modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="adm-proof-body">
+          <div className="adm-proof-img-wrap">
+            {fetching ? (
+              <div className="adm-proof-no-img">Loading proof…</div>
+            ) : proofImage ? (
+              <img src={proofImage} alt="Payment proof" className="adm-proof-img" />
+            ) : (
+              <div className="adm-proof-no-img">No proof image uploaded yet</div>
+            )}
+          </div>
+
+          <div className="adm-proof-details">
+            <div className="adm-proof-detail-row">
+              <span>Uploaded</span>
+              <span>{proofMeta?.uploadedAt ? fmtDate(proofMeta.uploadedAt) : 'Not yet'}</span>
+            </div>
+            <div className="adm-proof-detail-row">
+              <span>Proof status</span>
+              <StatusBadge status={order.proofStatus || 'none'} type="payment" />
+            </div>
+            <div className="adm-proof-detail-row">
+              <span>Customer ref no.</span>
+              <span>{proofMeta?.referenceNo || '—'}</span>
+            </div>
+          </div>
+
+          <div className="adm-proof-refno">
+            <label className="adm-label">
+              Confirmed reference / transaction number
+              <span className="adm-label-hint"> (optional)</span>
+            </label>
+            <input
+              className="adm-input"
+              type="text"
+              value={refNo}
+              onChange={e => setRefNo(e.target.value)}
+              placeholder="e.g. GCash ref 123456789"
+            />
+          </div>
+
+          {proofImage && (
+            <div className="adm-proof-refno">
+              <label className="adm-label">
+                Rejection reason
+                <span className="adm-label-hint"> (optional — sent to customer)</span>
+              </label>
+              <input
+                className="adm-input"
+                type="text"
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                placeholder="e.g. Amount doesn't match, blurry image"
+              />
+            </div>
+          )}
+
+          <div className="adm-proof-actions">
+            <button
+              className="adm-btn"
+              disabled={loading || !proofImage}
+              onClick={async () => {
+                setLoading(true)
+                await onVerify(order.id, refNo)
+                setLoading(false)
+              }}
+            >
+              {loading ? 'Verifying…' : '✓ Verify payment'}
+            </button>
+            {proofImage && (
+              <button
+                className="adm-btn-danger armed"
+                disabled={loading}
+                onClick={async () => {
+                  setLoading(true)
+                  await onReject(order.id, reason)
+                  setLoading(false)
+                }}
+              >
+                ✕ Reject proof
+              </button>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
+// ── StatusControls ────────────────────────────────────────────────────────────
+
+function StatusControls({ order, onAction, onRefresh }) {
+  const [note,    setNote   ] = useState('')
+  const [confirm, setConfirm] = useState(null)
+  const [saving,  setSaving ] = useState(false)
+
+  const { next, prev, escapes } = getAllowedTransitions(order.status, order.paymentStatus)
+  const isTerminal = !next && !prev && escapes.length === 0
+
+  function requestChange(toStatus) {
+    // Hard gate — never allow payment-gated status without verified payment
+    if (PAYMENT_GATED.has(toStatus) && order.paymentStatus !== 'paid') return
+
+    const meta       = STATUS_META[toStatus]
+    const isDanger   = ['cancelled', 'refunded'].includes(toStatus)
+    const isBackward = prev === toStatus
+
+    setConfirm({
+      toStatus,
+      title:   `Change to "${meta?.label || toStatus}"?`,
+      message: isDanger
+        ? toStatus === 'cancelled'
+          ? 'This will cancel the order, release reserved inventory, and notify the customer. This cannot be undone.'
+          : 'This will mark the order as refunded and notify the customer. This cannot be undone.'
+        : isBackward
+          ? `This will move the order back to "${meta?.label}". The customer will be notified.`
+          : `This will advance the order to "${meta?.label}". The customer will be notified by email.`,
+      danger: isDanger,
+    })
+  }
+
+  async function doChange() {
+    if (!confirm) return
+    setSaving(true)
+    setConfirm(null)
+    await onAction(order.id, 'status', { status: confirm.toStatus, note })
+    setNote('')
+    setSaving(false)
+    onRefresh()
+  }
+
+  return (
+    <>
+      {confirm && (
+        <ConfirmModal
+          title={confirm.title}
+          message={confirm.message}
+          confirmLabel={`Yes, ${STATUS_META[confirm.toStatus]?.label || confirm.toStatus}`}
+          danger={confirm.danger}
+          onConfirm={doChange}
+          onClose={() => setConfirm(null)}
+        >
+          {!confirm.danger && (
+            <input
+              className="adm-input"
+              placeholder="Internal note (optional)"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+        </ConfirmModal>
+      )}
+
+      <p className="adm-drawer-section-title">Update Status</p>
+      <p className="adm-drawer-section-hint">Customer receives an email on every change.</p>
+
+      {isTerminal ? (
+        <p className="adm-muted" style={{ fontStyle: 'italic', fontSize: 14 }}>
+          This order is in a terminal state ({STATUS_META[order.status]?.label || order.status}) and cannot be changed.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+          {/* ← Previous step */}
+          {prev && (
+            <button
+              className="adm-btn-outline"
+              disabled={saving}
+              onClick={() => requestChange(prev)}
+            >
+              ← {STATUS_META[prev]?.label}
+            </button>
+          )}
+
+          {/* → Next step */}
+          {next ? (
+            <button
+              className="adm-btn"
+              disabled={saving || (PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid')}
+              onClick={() => requestChange(next)}
+              title={
+                PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid'
+                  ? 'Payment must be verified before processing'
+                  : `Advance to ${STATUS_META[next]?.label}`
+              }
+            >
+              {STATUS_META[next]?.label} →
+              {PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid' && (
+                <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.85 }}>🔒 Verify payment first</span>
+              )}
+            </button>
+          ) : (
+            !isTerminal && (
+              <p className="adm-muted" style={{ fontSize: 13 }}>No further steps available.</p>
+            )
+          )}
+
+          {/* Escape: cancel / refund */}
+          {escapes.length > 0 && (
+            <div style={{
+              display: 'flex', gap: 8, flexWrap: 'wrap',
+              paddingTop: 10, marginTop: 2,
+              borderTop: '1px solid var(--adm-border)',
+            }}>
+              {escapes.map(s => (
+                <button
+                  key={s}
+                  className="adm-btn-danger"
+                  disabled={saving}
+                  onClick={() => requestChange(s)}
+                >
+                  {STATUS_META[s]?.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {saving && (
+        <p className="adm-muted" style={{ fontSize: 13, marginTop: 8 }}>Saving…</p>
+      )}
+    </>
+  )
+}
+
+// ── OrderDrawer ───────────────────────────────────────────────────────────────
+
+function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
+  useEffect(() => {
+    const fn = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [onClose])
+
+  const totalItems = (order.items || []).reduce((s, i) => s + (i.quantity || 1), 0)
+
+  return (
+    <div className="adm-drawer-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <aside className="adm-drawer">
+
+        <div className="adm-drawer-header">
+          <div>
+            <p className="adm-drawer-eyebrow">Order</p>
+            <h2 className="adm-drawer-title">{order.orderNumber}</h2>
+            <p className="adm-drawer-meta">{fmtDate(order.placedAt)}</p>
+          </div>
+          <button className="adm-modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="adm-drawer-body">
+
+          {/* Status badges */}
+          <div className="adm-drawer-badges">
+            <StatusBadge status={order.status} />
+            <StatusBadge status={order.paymentStatus} type="payment" />
+            {order.proofStatus === 'pending' && (
+              <span
+                className="adm-badge adm-badge--pulse"
+                style={{ background: '#fff3cd', color: '#856404' }}
+              >
+                Proof pending review
+              </span>
+            )}
+          </div>
+
+          {/* Customer */}
+          <div className="adm-drawer-section">
+            <p className="adm-drawer-section-title">Customer</p>
+            <div className="adm-drawer-rows">
+              <div className="adm-drawer-row">
+                <span>Name</span>
+                <span>{order.customerName}</span>
+              </div>
+              <div className="adm-drawer-row">
+                <span>Email</span>
+                <a href={`mailto:${order.customerEmail}`} className="adm-drawer-link">
+                  {order.customerEmail}
+                </a>
+              </div>
+              {order.customerPhone && (
+                <div className="adm-drawer-row">
+                  <span>Phone</span>
+                  <span>{order.customerPhone}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Items */}
+          <div className="adm-drawer-section">
+            <p className="adm-drawer-section-title">Items ({totalItems})</p>
+            <div className="adm-drawer-items">
+              {(order.items || []).map((item, i) => (
+                <div key={i} className="adm-drawer-item">
+                  <span className="adm-drawer-item-name">
+                    {item.gownName}{item.sizeLabel ? ` — ${item.sizeLabel}` : ''}
+                  </span>
+                  <span className="adm-drawer-item-qty">×{item.quantity || 1}</span>
+                  <span className="adm-drawer-item-price">
+                    {fmtPhp(item.lineTotal || (item.unitPrice * (item.quantity || 1)))}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="adm-drawer-total">
+              <span>Total</span>
+              <span>{fmtPhp(order.total)}</span>
+            </div>
+          </div>
+
+          {/* Delivery */}
+          <div className="adm-drawer-section">
+            <p className="adm-drawer-section-title">Delivery</p>
+            <div className="adm-drawer-rows">
+              <div className="adm-drawer-row">
+                <span>Method</span>
+                <span>{DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod}</span>
+              </div>
+              {order.deliveryAddress && (
+                <div className="adm-drawer-row adm-drawer-row--col">
+                  <span>Address</span>
+                  <span>{order.deliveryAddress}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Payment */}
+          <div className="adm-drawer-section">
+            <p className="adm-drawer-section-title">Payment</p>
+            <div className="adm-drawer-rows">
+              <div className="adm-drawer-row">
+                <span>Method</span>
+                <span>{PAYMENT_METHOD_LABEL[order.paymentMethod] || order.paymentMethod}</span>
+              </div>
+              <div className="adm-drawer-row">
+                <span>Status</span>
+                <StatusBadge status={order.paymentStatus} type="payment" />
+              </div>
+              {order.proofReferenceNo && (
+                <div className="adm-drawer-row">
+                  <span>Reference</span>
+                  <span>{order.proofReferenceNo}</span>
+                </div>
+              )}
+            </div>
+            {order.proofStatus === 'pending' && (
+              <button
+                className="adm-btn-sm"
+                style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
+                onClick={() => onOpenProof(order)}
+              >
+                Review payment proof →
+              </button>
+            )}
+          </div>
+
+          {/* Notes */}
+          {order.notes && (
+            <div className="adm-drawer-section">
+              <p className="adm-drawer-section-title">Notes</p>
+              <p className="adm-drawer-note">{order.notes}</p>
+            </div>
+          )}
+
+          {/* Status controls */}
+          <div className="adm-drawer-section adm-drawer-section--action">
+            <StatusControls
+              order={order}
+              onAction={onAction}
+              onRefresh={() => { onRefresh(); onClose() }}
+            />
+          </div>
+
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+// ── AdminOrdersPage ───────────────────────────────────────────────────────────
+
 export default function AdminOrdersPage() {
-  const { gowns }  = useGowns()
   const [orders,       setOrders      ] = useState([])
   const [loading,      setLoading     ] = useState(true)
   const [error,        setError       ] = useState('')
-  const [updatingId,   setUpdatingId  ] = useState(null)
-  const [statusFilter, setStatusFilter] = useState('all')
   const [search,       setSearch      ] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [toast,        setToast       ] = useState(null)
+  const [proofOrder,   setProofOrder  ] = useState(null)
+  const [drawerOrder,  setDrawerOrder ] = useState(null)
+  const [stats,        setStats       ] = useState(null)
+  const [sortKey,      setSortKey     ] = useState('placedAt')
+  const [sortDir,      setSortDir     ] = useState('desc')
 
-  const load = async () => {
-    const secret = getAdminSecret()
-    if (!secret) { setError('Enter the admin secret first.'); setLoading(false); return }
-    setLoading(true); setError('')
-    try {
-      const res  = await fetch('/api/admin/orders', { headers: { 'X-Admin-Secret': secret } })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed')
-      setOrders(Array.isArray(data.orders) ? data.orders : [])
-    } catch { setError('Could not load orders.') }
-    finally { setLoading(false) }
+  function headers() {
+    return { 'Content-Type': 'application/json', 'X-Admin-Secret': getAdminSecret() || '' }
   }
 
-  useEffect(() => { load() }, [])
+  function showToast(msg, type = 'success') {
+    setToast({ message: msg, type })
+  }
 
-  const doAction = async (orderId, status) => {
-    const secret = getAdminSecret()
-    if (!secret) return
-    setUpdatingId(orderId)
+  const loadOrders = useCallback(async (status = '') => {
+    setLoading(true)
+    setError('')
+    try {
+      const url  = `/api/admin/orders${status ? `?status=${status}` : ''}`
+      const res  = await fetch(url, { headers: headers() })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load')
+      const all = data.orders || []
+      setOrders(all)
+      setStats({
+        total:          all.length,
+        pendingProof:   all.filter(o => o.proofStatus === 'pending').length,
+        pendingPayment: all.filter(o => ['placed', 'pending_payment'].includes(o.status) && o.paymentMethod !== 'cash').length,
+        processing:     all.filter(o => ['processing', 'ready', 'shipped'].includes(o.status)).length,
+        revenue:        all.filter(o => o.paymentStatus === 'paid').reduce((s, o) => s + Number(o.total || 0), 0),
+      })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadOrders() }, [loadOrders])
+
+  // ── Admin action dispatcher ──────────────────────────────────────────────
+  const handleAction = useCallback(async (orderId, action, payload = {}) => {
     try {
       const res  = await fetch('/api/admin/orders', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': secret },
-        body: JSON.stringify({ id: orderId, status }),
+        method:  'PATCH',
+        headers: headers(),
+        body:    JSON.stringify({ action, orderId, ...payload }),
       })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.ok) { alert(data.error || 'Could not update.'); return }
-      setOrders(prev => prev.map(o => String(o.id) === String(orderId) ? { ...o, status } : o))
-    } finally { setUpdatingId(null) }
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed')
+
+      if (action === 'status') {
+        const { status } = payload
+        setOrders(p => p.map(o => o.id === orderId
+          ? { ...o, status, updatedAt: new Date().toISOString() }
+          : o
+        ))
+        setDrawerOrder(p => p?.id === orderId ? { ...p, status } : p)
+        showToast(`Status updated to "${STATUS_META[status]?.label || status}"`)
+      } else if (action === 'verify-payment') {
+        const { referenceNo } = payload
+        setOrders(p => p.map(o => o.id === orderId
+          ? { ...o, paymentStatus: 'paid', status: 'paid', proofStatus: 'verified', proofReferenceNo: referenceNo || o.proofReferenceNo }
+          : o
+        ))
+        setDrawerOrder(p => p?.id === orderId
+          ? { ...p, paymentStatus: 'paid', status: 'paid', proofStatus: 'verified' }
+          : p
+        )
+        setProofOrder(null)
+        showToast('Payment verified — customer notified')
+        loadOrders(filterStatus)
+      } else if (action === 'reject-payment') {
+        setOrders(p => p.map(o => o.id === orderId
+          ? { ...o, paymentStatus: 'unpaid', status: 'placed', proofStatus: 'rejected' }
+          : o
+        ))
+        setDrawerOrder(p => p?.id === orderId
+          ? { ...p, paymentStatus: 'unpaid', status: 'placed', proofStatus: 'rejected' }
+          : p
+        )
+        setProofOrder(null)
+        showToast('Proof rejected — customer notified', 'error')
+        loadOrders(filterStatus)
+      }
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }, [filterStatus])
+
+  // ── Sorting ──────────────────────────────────────────────────────────────
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
   }
 
-  const TABS = [{ key: 'all', label: 'All' }, ...ORDER_STATUSES.map(s => ({ key: s, label: STATUS_LABELS[s] }))]
+  function sortIcon(key) {
+    if (sortKey !== key) return <span style={{ opacity: 0.4, marginLeft: 4, fontSize: 11 }}>↕</span>
+    return <span style={{ marginLeft: 4, fontSize: 11 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
+  }
 
-  const filtered = useMemo(() => {
-    let list = orders
-    if (statusFilter !== 'all') list = list.filter(o => normStatus(o.status) === statusFilter)
-    if (search.trim()) {
+  // ── Filter + search + sort ───────────────────────────────────────────────
+  const filtered = orders
+    .filter(o => {
+      const matchStatus = !filterStatus || o.status === filterStatus
       const q = search.toLowerCase()
-      list = list.filter(o =>
-        o.contact?.email?.toLowerCase().includes(q) ||
-        o.contact?.firstName?.toLowerCase().includes(q) ||
-        o.contact?.lastName?.toLowerCase().includes(q) ||
-        String(o.id).includes(q)
-      )
-    }
-    return list
-  }, [orders, statusFilter, search])
+      const matchSearch = !q ||
+        o.orderNumber?.toLowerCase().includes(q) ||
+        o.customerName?.toLowerCase().includes(q) ||
+        o.customerEmail?.toLowerCase().includes(q)
+      return matchStatus && matchSearch
+    })
+    .sort((a, b) => {
+      let av, bv
+      if (sortKey === 'placedAt')    { av = new Date(a.placedAt).getTime(); bv = new Date(b.placedAt).getTime() }
+      else if (sortKey === 'total')  { av = a.total;                        bv = b.total }
+      else if (sortKey === 'status') { av = STATUS_META[a.status]?.step ?? 99; bv = STATUS_META[b.status]?.step ?? 99 }
+      else                           { av = a.customerName?.toLowerCase();  bv = b.customerName?.toLowerCase() }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1
+      if (av > bv) return sortDir === 'asc' ?  1 : -1
+      return 0
+    })
+
+  const pendingProofOrders = orders.filter(o => o.proofStatus === 'pending')
+
+  // Column header style
+  const thStyle = {
+    fontSize: 11, fontWeight: 700,
+    color: 'var(--adm-text-3)',
+    letterSpacing: '0.07em',
+    textTransform: 'uppercase',
+    padding: '6px 18px',
+    cursor: 'pointer',
+    userSelect: 'none',
+  }
 
   return (
     <div className="adm-orders-page">
-      <div className="adm-orders-topbar">
+
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />
+      )}
+
+      {proofOrder && (
+        <ProofModal
+          order={proofOrder}
+          onVerify={(id, ref)    => handleAction(id, 'verify-payment', { referenceNo: ref })}
+          onReject={(id, reason) => handleAction(id, 'reject-payment', { reason })}
+          onClose={() => setProofOrder(null)}
+        />
+      )}
+
+      {drawerOrder && (
+        <OrderDrawer
+          order={drawerOrder}
+          onAction={handleAction}
+          onOpenProof={o => { setDrawerOrder(null); setProofOrder(o) }}
+          onClose={() => setDrawerOrder(null)}
+          onRefresh={() => loadOrders(filterStatus)}
+        />
+      )}
+
+      {/* Header */}
+      <div className="adm-topbar">
         <h1 className="adm-page-title">Orders</h1>
-        <div className="adm-orders-actions">
-          <Link href="/admin/dashboard" className="adm-back-link">Sales →</Link>
-          <button onClick={load} className="adm-btn-outline">Refresh</button>
+        <button className="adm-btn-sm" onClick={() => loadOrders(filterStatus)}>↻ Refresh</button>
+      </div>
+
+      {/* Stats */}
+      {stats && (
+        <div className="adm-stats-row">
+          <div className="adm-stat">
+            <div className="adm-stat-val">{stats.total}</div>
+            <div className="adm-stat-lbl">Total orders</div>
+          </div>
+          <div className={`adm-stat${stats.pendingProof > 0 ? ' warn' : ''}`}>
+            <div className="adm-stat-val">{stats.pendingProof}</div>
+            <div className="adm-stat-lbl">Proofs to review</div>
+          </div>
+          <div className={`adm-stat${stats.pendingPayment > 0 ? ' warn' : ''}`}>
+            <div className="adm-stat-val">{stats.pendingPayment}</div>
+            <div className="adm-stat-lbl">Awaiting payment</div>
+          </div>
+          <div className="adm-stat">
+            <div className="adm-stat-val">{stats.processing}</div>
+            <div className="adm-stat-lbl">In progress</div>
+          </div>
+          <div className="adm-stat">
+            <div className="adm-stat-val">{fmtPhp(stats.revenue)}</div>
+            <div className="adm-stat-lbl">Verified revenue</div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending proof alert */}
+      {pendingProofOrders.length > 0 && (
+        <div className="adm-proof-alert">
+          <p className="adm-proof-alert-title">
+            ⚠ {pendingProofOrders.length} order{pendingProofOrders.length > 1 ? 's' : ''} with proof awaiting review
+          </p>
+          <div className="adm-proof-alert-list">
+            {pendingProofOrders.slice(0, 4).map(o => (
+              <div key={o.id} className="adm-proof-alert-item">
+                <span className="adm-proof-alert-name">{o.orderNumber} · {o.customerName}</span>
+                <span style={{ fontWeight: 700, color: 'var(--adm-text)' }}>{fmtPhp(o.total)}</span>
+                <button className="adm-proof-alert-btn" onClick={() => setProofOrder(o)}>
+                  Review
+                </button>
+              </div>
+            ))}
+            {pendingProofOrders.length > 4 && (
+              <p className="adm-muted" style={{ fontSize: 13 }}>
+                +{pendingProofOrders.length - 4} more — use filters below
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="adm-filter-row">
+        <input
+          className="adm-search"
+          placeholder="Search by order no., name, or email…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <div className="adm-filter-status">
+          <button
+            className={`adm-filter-pill${!filterStatus ? ' active' : ''}`}
+            onClick={() => { setFilterStatus(''); loadOrders('') }}
+          >
+            All
+          </button>
+          {['pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled'].map(s => (
+            <button
+              key={s}
+              className={`adm-filter-pill${filterStatus === s ? ' active' : ''}`}
+              onClick={() => { setFilterStatus(s); loadOrders(s) }}
+            >
+              {STATUS_META[s]?.label || s}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="adm-pills">
-        {TABS.map(tab => {
-          const count = tab.key === 'all'
-            ? orders.length
-            : orders.filter(o => normStatus(o.status) === tab.key).length
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setStatusFilter(tab.key)}
-              className={`adm-pill${statusFilter === tab.key ? ' active' : ''}`}
+      {error && <p className="adm-error-msg">{error}</p>}
+
+      {/* Order list */}
+      {loading ? (
+        <p className="adm-muted">Loading orders…</p>
+      ) : filtered.length === 0 ? (
+        <p className="adm-muted">No orders found.</p>
+      ) : (
+        <div>
+          {/* Sortable header row */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '150px 1fr 140px 110px 110px 90px',
+            gap: 14,
+          }}>
+            <div style={thStyle}>Order</div>
+            <div style={thStyle} onClick={() => toggleSort('customerName')}>
+              Customer {sortIcon('customerName')}
+            </div>
+            <div style={thStyle} onClick={() => toggleSort('status')}>
+              Status {sortIcon('status')}
+            </div>
+            <div style={{ ...thStyle, cursor: 'default' }}>Payment</div>
+            <div style={{ ...thStyle, textAlign: 'right' }} onClick={() => toggleSort('total')}>
+              Total {sortIcon('total')}
+            </div>
+            <div style={thStyle} onClick={() => toggleSort('placedAt')}>
+              Date {sortIcon('placedAt')}
+            </div>
+          </div>
+
+          {/* Order rows */}
+          {filtered.map(order => (
+            <div
+              key={order.id}
+              className={`adm-order-row${order.proofStatus === 'pending' ? ' has-proof' : ''}`}
+              onClick={() => setDrawerOrder(order)}
             >
-              {tab.label}{count > 0 ? ` (${count})` : ''}
-            </button>
-          )
-        })}
-      </div>
+              <div className="adm-order-num">
+                {order.orderNumber}
+                {order.proofStatus === 'pending' && (
+                  <span style={{
+                    marginLeft: 6,
+                    fontSize: 9,
+                    background: '#fff3cd',
+                    color: '#856404',
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
+                  }}>
+                    PROOF
+                  </span>
+                )}
+              </div>
 
-      <input
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search by name, email or order ID…"
-        className="adm-search"
-      />
+              <div className="adm-order-customer">
+                <div className="adm-order-customer-name">{order.customerName}</div>
+                <div className="adm-order-customer-email">{order.customerEmail}</div>
+              </div>
 
-      {loading && <p className="adm-muted">Loading…</p>}
-      {error   && <p className="adm-error-msg">{error}</p>}
-      {!loading && !error && filtered.length === 0 && (
-        <p className="adm-muted">No orders match this filter.</p>
+              <div><StatusBadge status={order.status} /></div>
+              <div><StatusBadge status={order.paymentStatus} type="payment" /></div>
+
+              <div className="adm-order-total">{fmtPhp(order.total)}</div>
+
+              <div className="adm-order-actions" onClick={e => e.stopPropagation()}>
+                {order.proofStatus === 'pending' && (
+                  <button className="adm-btn-sm" onClick={() => setProofOrder(order)}>
+                    Verify
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
-      {!loading && !error && filtered.map(order => (
-        <OrderCard
-          key={order.id}
-          order={order}
-          gowns={gowns}
-          onAction={doAction}
-          updating={updatingId === order.id}
-        />
-      ))}
 
       <Link href="/admin" className="adm-back-link">← Dashboard</Link>
     </div>

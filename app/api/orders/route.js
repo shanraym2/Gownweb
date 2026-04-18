@@ -5,9 +5,11 @@ import fs   from 'fs'
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'orders.json')
 
+// ── JSON fallback helpers ─────────────────────────────────────────────────────
+
 function loadJson() {
   if (!fs.existsSync(dataFile)) return []
-  return JSON.parse(fs.readFileSync(dataFile, 'utf8'))
+  try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')) } catch { return [] }
 }
 
 function saveJson(orders) {
@@ -15,153 +17,394 @@ function saveJson(orders) {
   fs.writeFileSync(dataFile, JSON.stringify(orders, null, 2))
 }
 
-function parsePriceAmount(priceStr) {
-  if (priceStr == null) return 0
-  const n = parseFloat(String(priceStr).replace(/[^\d.]/g, ''))
-  return isNaN(n) ? 0 : n
+// ── Order number generator ────────────────────────────────────────────────────
+// Format: JCE-YYYYMMDD-XXXX
+function makeOrderNumber(existing = []) {
+  const date   = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const prefix = `JCE-${date}-`
+  const used   = existing
+    .filter(o => (o.orderNumber || o.order_number || '').startsWith(prefix))
+    .map(o => parseInt((o.orderNumber || o.order_number || '').slice(-4)) || 0)
+  const next = used.length ? Math.max(...used) + 1 : 1
+  return prefix + String(next).padStart(4, '0')
 }
 
-export async function POST(request) {
+// ── GET — fetch orders for a user (or all orders for admin) ──────────────────
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url)
+  const userId  = searchParams.get('userId')
+  const adminId = request.headers.get('x-admin-secret')
+  const isAdmin = process.env.ADMIN_SECRET && adminId === process.env.ADMIN_SECRET
+
+  if (!userId && !isAdmin) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (!USE_DB) {
+    const all    = loadJson()
+    const orders = isAdmin && !userId
+      ? all
+      : all.filter(o => String(o.userId) === String(userId))
+    return NextResponse.json({ ok: true, orders })
+  }
+
   try {
-    const body = await request.json()
-    const { contact, delivery, payment, items, note,
-            subtotal, shippingFee, taxes, total } = body
+    const { query } = await import('@/lib/db')
 
-    if (!contact?.email || !items?.length) {
-      return NextResponse.json(
-        { ok: false, error: 'Contact and items are required' },
-        { status: 400 }
-      )
+    let rows
+    if (isAdmin && !userId) {
+      rows = await query(`
+        SELECT o.*,
+          json_agg(
+            json_build_object(
+              'id',        oi.id,
+              'gownId',    oi.gown_id,
+              'gownName',  oi.gown_name,
+              'sizeLabel', oi.size_label,
+              'quantity',  oi.quantity,
+              'unitPrice', oi.unit_price,
+              'lineTotal', oi.line_total
+            ) ORDER BY oi.id
+          ) AS items
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        GROUP BY o.id
+        ORDER BY o.placed_at DESC
+      `)
+    } else {
+      rows = await query(`
+        SELECT o.*,
+          json_agg(
+            json_build_object(
+              'id',        oi.id,
+              'gownId',    oi.gown_id,
+              'gownName',  oi.gown_name,
+              'sizeLabel', oi.size_label,
+              'quantity',  oi.quantity,
+              'unitPrice', oi.unit_price,
+              'lineTotal', oi.line_total
+            ) ORDER BY oi.id
+          ) AS items
+        FROM orders o
+        LEFT JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.user_id = $1
+        GROUP BY o.id
+        ORDER BY o.placed_at DESC
+      `, [userId])
     }
 
-    // ── JSON mode ────────────────────────────────────────────────────────────
-    if (!USE_DB) {
-      const newOrder = {
-        id:        String(Date.now()),
-        status:    'placed',
-        contact: {
-          email:     String(contact.email       || '').trim(),
-          firstName: String(contact.firstName   || '').trim(),
-          lastName:  String(contact.lastName    || '').trim(),
-          phone:     String(contact.phone       || '').trim(),
-        },
-        delivery: {
-          address:  String(delivery?.address  || '').trim(),
-          city:     String(delivery?.city     || '').trim(),
-          province: String(delivery?.province || '').trim(),
-          zip:      String(delivery?.zip      || '').trim(),
-        },
-        payment:     String(payment || 'gcash'),
-        items:       items.map(i => ({
-          id:       i.id,
-          name:     String(i.name     || '').trim(),
-          qty:      Number(i.qty)     || 1,
-          price:    i.price,
-          subtotal: Number(i.subtotal)|| 0,
-        })),
-        note:        String(note        || '').trim(),
-        subtotal:    Number(subtotal)   || 0,
-        shippingFee: Number(shippingFee)|| 0,
-        taxes:       Number(taxes)      || 0,
-        total:       Number(total)      || 0,
-        createdAt:   new Date().toISOString(),
-      }
+    const orders = rows.map(r => ({
+      id:              r.id,
+      orderNumber:     r.order_number,
+      status:          r.status,
+      paymentMethod:   r.payment_method,
+      paymentStatus:   r.payment_status,
+      deliveryMethod:  r.delivery_method,
+      deliveryAddress: r.delivery_address,
+      subtotal:        Number(r.subtotal),
+      total:           Number(r.total),
+      notes:           r.notes,
+      placedAt:        r.placed_at,
+      items:           r.items?.filter(Boolean) || [],
+    }))
 
-      const orders = loadJson()
-      saveJson([newOrder, ...orders])
+    return NextResponse.json({ ok: true, orders })
+  } catch (err) {
+    console.error('GET /api/orders error:', err)
+    return NextResponse.json({ ok: false, error: 'Failed to fetch orders' }, { status: 500 })
+  }
+}
 
-      return NextResponse.json({
-        ok: true,
-        orderId:     newOrder.id,
-        orderNumber: newOrder.id,
-      })
+// ── POST — create a new order ─────────────────────────────────────────────────
+
+export async function POST(request) {
+  const userId = request.headers.get('x-user-id')
+   console.log('--- POST /api/orders ---')
+  console.log('USE_DB:', process.env.USE_DB)
+  console.log('userId header:', userId)
+  console.log('DATABASE_URL set:', !!process.env.DATABASE_URL)
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+  }
+
+  let body
+  try { body = await request.json() }
+  catch { return NextResponse.json({ ok: false, error: 'Invalid request body' }, { status: 400 }) }
+
+  const {
+    customerEmail, customerName,
+    paymentMethod, deliveryMethod, deliveryAddress,
+    items, subtotal, total, notes,
+  } = body
+
+  // ── Validation ──────────────────────────────────────────────────────────────
+
+  if (!customerEmail)          return NextResponse.json({ ok: false, error: 'Email required' },          { status: 400 })
+  if (!paymentMethod)          return NextResponse.json({ ok: false, error: 'Payment method required' }, { status: 400 })
+  if (!deliveryMethod)         return NextResponse.json({ ok: false, error: 'Delivery method required' }, { status: 400 })
+  if (!items?.length)          return NextResponse.json({ ok: false, error: 'No items in order' },       { status: 400 })
+  if (!['gcash','bdo','cash'].includes(paymentMethod)) {
+    return NextResponse.json({ ok: false, error: 'Invalid payment method' }, { status: 400 })
+  }
+  if (!['pickup','lalamove'].includes(deliveryMethod)) {
+    return NextResponse.json({ ok: false, error: 'Invalid delivery method' }, { status: 400 })
+  }
+  if (deliveryMethod === 'lalamove' && !deliveryAddress?.trim()) {
+    return NextResponse.json({ ok: false, error: 'Delivery address required for Lalamove' }, { status: 400 })
+  }
+
+  // ── JSON path ────────────────────────────────────────────────────────────────
+
+  if (!USE_DB) {
+    const all         = loadJson()
+    const orderNumber = makeOrderNumber(all)
+    const newOrder = {
+      id:              Date.now(),
+      orderNumber,
+      userId:          String(userId),
+      customerEmail:   customerEmail.trim().toLowerCase(),
+      customerName:    (customerName || '').trim(),
+      status:          'placed',
+      paymentMethod,
+      paymentStatus:   'unpaid',
+      deliveryMethod,
+      deliveryAddress: (deliveryAddress || '').trim() || null,
+      subtotal:        Number(subtotal) || 0,
+      discountTotal:   0,
+      shippingFee:     0,
+      total:           Number(total) || 0,
+      notes:           (notes || '').trim(),
+      placedAt:        new Date().toISOString(),
+      items:           items.map((i, idx) => ({
+        id:        Date.now() + idx,
+        gownId:    i.gownId,
+        gownName:  i.gownName,
+        sizeLabel: i.sizeLabel || null,
+        quantity:  i.quantity  || 1,
+        unitPrice: Number(i.unitPrice) || 0,
+        lineTotal: (Number(i.unitPrice) || 0) * (i.quantity || 1),
+      })),
     }
+    saveJson([newOrder, ...all])
 
-    // ── DB mode ───────────────────────────────────────────────────────────────
-    const { default: pool } = await import('@/lib/db')
+    // Send confirmation email (non-blocking)
+    sendOrderEmail(newOrder).catch(console.error)
 
-    const contactEmail    = String(contact.email       || '').trim().toLowerCase()
-    const contactName     = `${String(contact.firstName || '').trim()} ${String(contact.lastName || '').trim()}`.trim()
-    const contactPhone    = String(contact.phone        || '').trim()
-    const paymentMethod   = ['gcash','bdo','cash'].includes(payment) ? payment : 'gcash'
-    const noteText        = String(note                 || '').trim()
-    const subtotalNum     = Number(subtotal)            || 0
-    const shippingNum     = Number(shippingFee)         || 0
-    const totalNum        = Number(total)               || subtotalNum + shippingNum
+    return NextResponse.json({ ok: true, orderId: newOrder.id, orderNumber })
+  }
 
-    const datePart    = new Date().toISOString().slice(0,10).replace(/-/g,'')
-    const orderNumber = `JCE-${datePart}-${Date.now().toString().slice(-4)}`
+  // ── DB path ──────────────────────────────────────────────────────────────────
 
-    const client = await pool.connect()
+  try {
+    const { query, getClient } = await import('@/lib/db')  // ← getClient, not getConnection
+
+    const recent = await query(
+      `SELECT order_number FROM orders WHERE placed_at > NOW() - INTERVAL '1 day'`
+    )
+    const orderNumber = makeOrderNumber(recent.map(r => ({ orderNumber: r.order_number })))
+
+    const conn = await getClient()  // ← getClient(), not getConnection()
     let orderId
-
     try {
-      await client.query('BEGIN')
-
-      const orderResult = await client.query(
+      await conn.query('BEGIN')        // ← conn.query(), not conn.execute()
+      
+      const { rows: [order] } = await conn.query(
         `INSERT INTO orders
-           (order_number, customer_email, customer_name, customer_phone,
-            payment_method, status, payment_status,
-            subtotal, shipping_fee, total, notes)
-         VALUES ($1,$2,$3,$4,$5,'placed','unpaid',$6,$7,$8,$9)
-         RETURNING id`,
-        [orderNumber, contactEmail, contactName, contactPhone,
-         paymentMethod, subtotalNum, shippingNum, totalNum, noteText]
+          (order_number, user_id, customer_email, customer_name,
+            status, payment_method, payment_status,
+            delivery_method, delivery_address,
+            subtotal, discount_total, shipping_fee, total, notes)
+        VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,0,$9,$10)
+        RETURNING *`,
+        [
+          orderNumber, userId,
+          customerEmail.trim().toLowerCase(), (customerName || '').trim(),
+          paymentMethod,
+          deliveryMethod, (deliveryAddress || '').trim() || null,
+          Number(subtotal) || 0,
+          Number(total) || 0,
+          (notes || '').trim(),
+        ]
       )
+      orderId = order.id
 
-      orderId = orderResult.rows[0].id
-
-      // Save delivery address
-      if (delivery?.address) {
-        const userResult = await client.query(
-          `SELECT id FROM users WHERE email = $1 LIMIT 1`,
-          [contactEmail]
-        )
-        const userId = userResult.rows[0]?.id || null
-
-        await client.query(
-          `INSERT INTO user_addresses
-             (user_id, recipient_name, line1, city, province, postal_code, country, phone)
-           VALUES ($1,$2,$3,$4,$5,$6,'PH',$7)`,
-          [userId, contactName,
-           String(delivery.address  || '').trim(),
-           String(delivery.city     || '').trim(),
-           String(delivery.province || '').trim(),
-           String(delivery.zip      || '').trim(),
-           contactPhone]
-        )
-      }
-
-      // Save order items
       for (const item of items) {
-        const unitPrice = Number(item.unitPrice || parsePriceAmount(item.price)) || 0
-        const qty       = Math.max(1, parseInt(item.qty, 10) || 1)
-        const lineTotal = Number(item.subtotal) || unitPrice * qty
-
-        await client.query(
+        const lineTotal = (Number(item.unitPrice) || 0) * (item.quantity || 1)
+        await conn.query(
           `INSERT INTO order_items
-             (order_id, gown_id, gown_name, size_label, quantity, unit_price, line_total)
-           VALUES ($1,$2,$3,NULL,$4,$5,$6)`,
-          [orderId, item.id || null, String(item.name || '').trim(),
-           qty, unitPrice, lineTotal]
+            (order_id, gown_id, gown_name, size_label, quantity, unit_price, line_total)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [order.id, item.gownId || null, item.gownName,
+          item.sizeLabel || null, item.quantity || 1,
+          Number(item.unitPrice) || 0, lineTotal]
         )
+        if (item.gownId && item.sizeLabel) {
+          await conn.query(
+            `UPDATE gown_inventory
+            SET reserved_qty = reserved_qty + $1
+            WHERE gown_id = $2 AND size_label = $3
+              AND (stock_qty - reserved_qty) >= $1`,
+            [item.quantity || 1, item.gownId, item.sizeLabel]
+          )
+        }
       }
 
-      await client.query('COMMIT')
+      await conn.query('COMMIT')
+      sendOrderEmail({ ...order, orderNumber, items }).catch(console.error)
+      return NextResponse.json({ ok: true, orderId: order.id, orderNumber })
     } catch (err) {
-      await client.query('ROLLBACK')
+      await conn.query('ROLLBACK')
       throw err
     } finally {
-      client.release()
+      conn.release()
     }
-
-    return NextResponse.json({ ok: true, orderId, orderNumber })
-
-  } catch (err) {
-    console.error('Orders POST error:', err)
-    return NextResponse.json(
-      { ok: false, error: 'Failed to save order' },
-      { status: 500 }
-    )
   }
+   catch (err) {
+    console.error('POST /api/orders error:', err)
+    return NextResponse.json({ ok: false, error: 'Failed to create order' }, { status: 500 })
+  }
+}
+
+// ── PATCH — update order status (admin) ──────────────────────────────────────
+
+export async function PATCH(request) {
+  const adminSecret = request.headers.get('x-admin-secret')
+  const isAdmin     = process.env.ADMIN_SECRET && adminSecret === process.env.ADMIN_SECRET
+
+  // Also allow customer to confirm receipt
+  const userId = request.headers.get('x-user-id')
+
+  if (!isAdmin && !userId) {
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body
+  try { body = await request.json() }
+  catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }) }
+
+  const { orderId, status, paymentStatus } = body
+  if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
+
+  const VALID_STATUSES = ['placed','pending_payment','paid','processing','ready','shipped','completed','cancelled','refunded']
+  if (status && !VALID_STATUSES.includes(status)) {
+    return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 })
+  }
+
+  // Customers can only mark as 'completed' (received item)
+  if (!isAdmin && status && status !== 'completed') {
+    return NextResponse.json({ ok: false, error: 'Unauthorized status change' }, { status: 403 })
+  }
+
+  if (!USE_DB) {
+    const all = loadJson()
+    const idx = all.findIndex(o => String(o.id) === String(orderId))
+    if (idx === -1) return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
+    if (status)        all[idx].status        = status
+    if (paymentStatus) all[idx].paymentStatus = paymentStatus
+    saveJson(all)
+    return NextResponse.json({ ok: true, order: all[idx] })
+  }
+
+  try {
+    const { query } = await import('@/lib/db')
+    const setParts  = []
+    const vals      = []
+    let   i         = 1
+
+    if (status)        { setParts.push(`status=$${i++}`);         vals.push(status) }
+    if (paymentStatus) { setParts.push(`payment_status=$${i++}`); vals.push(paymentStatus) }
+    if (!setParts.length) return NextResponse.json({ ok: false, error: 'Nothing to update' }, { status: 400 })
+
+    vals.push(orderId)
+    const rows = await query(
+      `UPDATE orders SET ${setParts.join(', ')}, updated_at=NOW() WHERE id=$${i} RETURNING *`,
+      vals
+    )
+    if (!rows.length) return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
+
+    // Send status email
+    sendStatusEmail(rows[0]).catch(console.error)
+
+    return NextResponse.json({ ok: true, order: rows[0] })
+  } catch (err) {
+    console.error('PATCH /api/orders error:', err)
+    return NextResponse.json({ ok: false, error: 'Failed to update order' }, { status: 500 })
+  }
+}
+
+// ── Email helpers (non-blocking, uses your existing Gmail setup) ──────────────
+
+async function sendOrderEmail(order) {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return
+
+  const { default: nodemailer } = await import('nodemailer')
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+  })
+
+  const itemLines = (order.items || [])
+    .map(i => `  • ${i.gownName}${i.sizeLabel ? ` (${i.sizeLabel})` : ''} ×${i.quantity} — ₱${Number(i.unitPrice).toLocaleString('en-PH')}`)
+    .join('\n')
+
+  await transporter.sendMail({
+    from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
+    to:      order.customerEmail || order.customer_email,
+    subject: `Order confirmed — ${order.orderNumber || order.order_number}`,
+    text: `
+Hi ${order.customerName || order.customer_name || 'there'},
+
+Thank you for your order at JCE Bridal Boutique!
+
+Order number: ${order.orderNumber || order.order_number}
+Status: Placed — awaiting payment confirmation
+
+Items:
+${itemLines}
+
+Total: ₱${Number(order.total).toLocaleString('en-PH')}
+
+Payment method: ${order.paymentMethod || order.payment_method}
+${(order.paymentMethod || order.payment_method) !== 'cash' ? `Please upload your proof of payment within 24 hours to avoid cancellation.` : ''}
+
+Delivery: ${order.deliveryMethod || order.delivery_method}
+${order.deliveryAddress || order.delivery_address ? `Address: ${order.deliveryAddress || order.delivery_address}` : ''}
+
+You can track your order on your profile page.
+
+Thank you,
+JCE Bridal Boutique
+    `.trim(),
+  })
+}
+
+async function sendStatusEmail(order) {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return
+  const email = order.customer_email || order.customerEmail
+  if (!email) return
+
+  const { default: nodemailer } = await import('nodemailer')
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+  })
+
+  const status = order.status
+  const labels = {
+    paid:       'Payment verified ✓',
+    processing: 'Your order is being prepared',
+    ready:      'Ready for pickup / out for delivery',
+    shipped:    'Order on its way',
+    completed:  'Order completed — thank you!',
+    cancelled:  'Order cancelled',
+  }
+  const label = labels[status] || `Order status updated: ${status}`
+
+  await transporter.sendMail({
+    from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
+    to:      email,
+    subject: `${label} — ${order.order_number}`,
+    text:    `Hi,\n\nYour order ${order.order_number} has been updated.\n\nStatus: ${label}\n\nView your order on your profile page.\n\nThank you,\nJCE Bridal Boutique`,
+  })
 }

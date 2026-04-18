@@ -10,10 +10,14 @@ import ProductCard from '../../components/ProductCard'
 import { addToCart, loadCart } from '../../utils/cartClient'
 import { getCurrentUser } from '../../utils/authClient'
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-function isInCart(cart, id) {
-  return cart.some(i => i.id === id)
+function isInCart(cart, id, size) {
+  return cart.some(i => String(i.id) === String(id) && (i.size ?? null) === (size ?? null))
+}
+
+function countInCart(cart, id) {
+  return cart.filter(i => String(i.id) === String(id)).reduce((s, i) => s + (i.qty || 1), 0)
 }
 
 function scoreGown(g, ref) {
@@ -117,6 +121,37 @@ function AuthToast({ onClose }) {
   )
 }
 
+// ─── Add to Cart Toast ────────────────────────────────────────────────────────
+
+function AddedToast({ name, size, qty, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3000)
+    return () => clearTimeout(t)
+  }, [onClose])
+
+  return (
+    <div className="at-wrap" role="status">
+      <div className="at-box at-box--success">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 01-8 0"/>
+        </svg>
+        <div className="at-text">
+          <p className="at-title">Added to cart</p>
+          <p className="at-sub">{name} — Size {size} × {qty}</p>
+        </div>
+        <Link href="/cart" className="at-login">View cart</Link>
+        <button className="at-close" onClick={onClose} aria-label="Dismiss">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function GownDetailPage() {
@@ -125,16 +160,25 @@ export default function GownDetailPage() {
   const { gowns, loading, error } = useGowns()
   const gown = id != null ? getGownById(gowns, id) : null
 
-  const [added,        setAdded]        = useState(false)
+  const [cart,         setCart        ] = useState([])
   const [selectedSize, setSelectedSize] = useState(null)
-  const [sizeErr,      setSizeErr]      = useState(false)
-  const [showGuide,    setShowGuide]    = useState(false)
-  const [showAuth,     setShowAuth]     = useState(false)
-  const [activeImg,    setActiveImg]    = useState(0)
+  const [qty,          setQty         ] = useState(1)
+  const [sizeErr,      setSizeErr     ] = useState(false)
+  const [showGuide,    setShowGuide   ] = useState(false)
+  const [showAuth,     setShowAuth    ] = useState(false)
+  const [addedToast,   setAddedToast  ] = useState(null) // { name, size, qty }
+  const [activeImg,    setActiveImg   ] = useState(0)
 
+  // Sync cart state
+  const refreshCart = () => setCart(loadCart())
+
+  // Reset state when navigating to a different gown
   useEffect(() => {
     if (id == null) return
-    setAdded(isInCart(loadCart(), id))
+    setSelectedSize(null)
+    setQty(1)
+    setSizeErr(false)
+    refreshCart()
     try {
       const rv = JSON.parse(localStorage.getItem('jce_recently_viewed') || '[]')
       const s  = String(id)
@@ -143,19 +187,27 @@ export default function GownDetailPage() {
     } catch {}
   }, [id])
 
-  useEffect(() => { setSelectedSize(null); setSizeErr(false) }, [id])
+  // Re-check cart whenever size changes
+  useEffect(() => {
+    refreshCart()
+  }, [selectedSize])
+
+  const thisInCart   = isInCart(cart, id, selectedSize)
+  const totalInCart  = countInCart(cart, id)
 
   const handleAdd = () => {
     if (!getCurrentUser()) { setShowAuth(true); return }
     if (!selectedSize)     { setSizeErr(true);  return }
     const sizeObj = gown?.sizeStock?.find(s => s.size === selectedSize)
     if (sizeObj && sizeObj.stock === 0) { setSizeErr(true); return }
-    addToCart(gown.id, 1, { size: selectedSize })
-    setAdded(true)
-    setSizeErr(false)
+    addToCart(gown.id, qty, { size: selectedSize })
+    refreshCart()
+    setAddedToast({ name: gown.name, size: selectedSize, qty })
+    // Reset qty to 1 after adding, keep size selected
+    setQty(1)
   }
 
-  // ── FIX 1: String comparison — safe for both UUIDs and numeric IDs ──────────
+  // ── untouched recommender logic ────────────────────────────────────────────
   const recs = gown
     ? [...gowns]
         .filter(g => String(g.id) !== String(gown.id))
@@ -164,27 +216,22 @@ export default function GownDetailPage() {
         .slice(0, 3)
     : []
 
-  const images = gown ? [gown.image, ...(gown.images || [])].filter(Boolean) : []
-
-  const specs = gown ? [
-    { key: 'Category',   val: gown.category  || gown.type        },
-    { key: 'Silhouette', val: gown.silhouette                     },
-    { key: 'Color',      val: gown.color                          },
-    { key: 'Style',      val: gown.styleName || gown.style?.name  },
-    { key: 'Fabric',     val: gown.fabric                         },
-    { key: 'Occasion',   val: gown.occasion                       },
+  const images    = gown ? [gown.image, ...(gown.images || [])].filter(Boolean) : []
+  const specs     = gown ? [
+    { key: 'Category',   val: gown.category  || gown.type       },
+    { key: 'Silhouette', val: gown.silhouette                    },
+    { key: 'Color',      val: gown.color                         },
+    { key: 'Style',      val: gown.styleName || gown.style?.name },
+    { key: 'Fabric',     val: gown.fabric                        },
+    { key: 'Occasion',   val: gown.occasion                      },
   ].filter(s => s.val) : []
 
-  const sizeStock = gown?.sizeStock?.length
+  const sizeStock  = gown?.sizeStock?.length
     ? gown.sizeStock
     : (gown?.sizes || []).map(s => ({ size: s, stock: null }))
+  const allSoldOut = sizeStock.length > 0 && sizeStock.every(s => s.stock === 0)
 
-  // ── FIX 2: Empty sizeStock → treat as available, not sold out ───────────────
-  // The old `some()` on an empty array returns false → hid the Add to Cart button.
-  const allSoldOut  = sizeStock.length > 0 && sizeStock.every(s => s.stock === 0)
-  const hasAnyStock = !allSoldOut
-
-  // ── Loading ──────────────────────────────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) return (
     <main className="dp">
       <Header />
@@ -201,7 +248,7 @@ export default function GownDetailPage() {
     </main>
   )
 
-  // ── 404 ──────────────────────────────────────────────────────────────────
+  // ── 404 ───────────────────────────────────────────────────────────────────
   if (error || !gown) return (
     <main className="dp">
       <Header />
@@ -219,13 +266,13 @@ export default function GownDetailPage() {
   return (
     <main className="dp">
 
-      {showAuth  && <AuthToast onClose={() => setShowAuth(false)} />}
-      {showGuide && <SizeGuideModal onClose={() => setShowGuide(false)} />}
+      {showAuth    && <AuthToast onClose={() => setShowAuth(false)} />}
+      {addedToast  && <AddedToast {...addedToast} onClose={() => setAddedToast(null)} />}
+      {showGuide   && <SizeGuideModal onClose={() => setShowGuide(false)} />}
 
       <Header solid />
       <div className="dp-spacer" />
 
-      {/* Breadcrumb */}
       <nav className="dp-bc container">
         <Link href="/">Home</Link>
         <span>/</span>
@@ -247,6 +294,17 @@ export default function GownDetailPage() {
             {(gown.category || gown.type) && (
               <span className="dp-img-cat">{gown.category || gown.type}</span>
             )}
+            {/* Cart badge on image */}
+            {totalInCart > 0 && (
+              <Link href="/cart" className="dp-cart-badge" aria-label={`${totalInCart} in cart`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <path d="M16 10a4 4 0 01-8 0"/>
+                </svg>
+                {totalInCart} in cart
+              </Link>
+            )}
           </div>
 
           {images.length > 1 && (
@@ -264,7 +322,6 @@ export default function GownDetailPage() {
             </div>
           )}
 
-          {/* ── FIX 3: Try-on link path — /virtual-try-on not /try-on ── */}
           <div className="dp-tryon">
             <div className="dp-tryon-left">
               <span className="dp-tryon-eye">Virtual Try-On</span>
@@ -320,6 +377,7 @@ export default function GownDetailPage() {
                   {sizeStock.map(({ size, stock }) => {
                     const lbl     = stockLabel(stock)
                     const soldOut = stock === 0
+                    const inCart  = isInCart(cart, id, size)
                     return (
                       <button
                         key={size}
@@ -329,10 +387,18 @@ export default function GownDetailPage() {
                           'dp-size-btn',
                           selectedSize === size ? 'dp-size-btn--on' : '',
                           soldOut ? 'dp-size-btn--out' : '',
+                          inCart  ? 'dp-size-btn--incart' : '',
                         ].join(' ')}
                         onClick={() => { if (!soldOut) { setSelectedSize(size); setSizeErr(false) } }}
                       >
                         <span className="dp-size-label">{size}</span>
+                        {inCart && !soldOut && (
+                          <span className="dp-size-incart-dot" title="In your cart">
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                            </svg>
+                          </span>
+                        )}
                         {lbl && (
                           <span className={`dp-size-stock dp-size-stock--${lbl.cls}`}>
                             {lbl.text}
@@ -342,6 +408,20 @@ export default function GownDetailPage() {
                     )
                   })}
                 </div>
+
+                {/* Cart indicator for selected size */}
+                {selectedSize && thisInCart && (
+                  <p className="dp-size-incart-note">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                      <line x1="3" y1="6" x2="21" y2="6"/>
+                      <path d="M16 10a4 4 0 01-8 0"/>
+                    </svg>
+                    Size {selectedSize} is already in your cart —{' '}
+                    <Link href="/cart" className="dp-size-incart-link">view cart</Link>
+                    {' '}or add more below.
+                  </p>
+                )}
 
                 {sizeErr && (
                   <p className="dp-size-err">
@@ -394,20 +474,55 @@ export default function GownDetailPage() {
                   Inquire for restock or custom order
                 </Link>
               </>
-            ) : added ? (
-              <>
-                <Link href="/cart" className="dp-btn-add dp-btn-add--done">
-                  ✓ Added to Cart — View Cart
-                </Link>
-                <Link href="/contact" className="dp-btn-inquire">
-                  Inquire About This Piece
-                </Link>
-              </>
             ) : (
               <>
-                <button className="dp-btn-add" onClick={handleAdd} type="button">
-                  Add to Cart
-                </button>
+                {/* Quantity + Add to Cart row */}
+                <div className="dp-add-row">
+                  {/* Qty stepper */}
+                  <div className="dp-qty">
+                    <button
+                      type="button"
+                      className="dp-qty-btn"
+                      onClick={() => setQty(q => Math.max(1, q - 1))}
+                      aria-label="Decrease quantity"
+                    >−</button>
+                    <span className="dp-qty-val">{qty}</span>
+                    <button
+                      type="button"
+                      className="dp-qty-btn"
+                      onClick={() => setQty(q => q + 1)}
+                      aria-label="Increase quantity"
+                    >+</button>
+                  </div>
+
+                  {/* Add to cart button with icon */}
+                  <button
+                    className="dp-btn-add"
+                    onClick={handleAdd}
+                    type="button"
+                    aria-label="Add to cart"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                      <line x1="3" y1="6" x2="21" y2="6"/>
+                      <path d="M16 10a4 4 0 01-8 0"/>
+                    </svg>
+                    {thisInCart ? 'Add more to cart' : 'Add to cart'}
+                  </button>
+
+                  {/* Quick cart link if anything in cart */}
+                  {totalInCart > 0 && (
+                    <Link href="/cart" className="dp-btn-cart-icon" aria-label="View cart">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
+                        <line x1="3" y1="6" x2="21" y2="6"/>
+                        <path d="M16 10a4 4 0 01-8 0"/>
+                      </svg>
+                      <span className="dp-btn-cart-count">{totalInCart}</span>
+                    </Link>
+                  )}
+                </div>
+
                 <Link href="/contact" className="dp-btn-inquire">
                   Inquire About This Piece
                 </Link>
@@ -415,7 +530,6 @@ export default function GownDetailPage() {
             )}
           </div>
 
-          {/* ── Footer note ── */}
           <p className="dp-footnote">
             This is a ready-to-wear piece. Each dress has limited stock — sizes vary by supplier.
             Custom orders and alteration services are available upon inquiry.
@@ -424,7 +538,6 @@ export default function GownDetailPage() {
         </div>
       </div>
 
-      {/* Recommendations */}
       {recs.length > 0 && (
         <section className="dp-recs">
           <div className="container">
