@@ -93,6 +93,7 @@ export default function AdminDashboardPage() {
           { href: '/admin/orders',    title: 'Orders',          desc: 'View and manage all orders.'        },
           { href: '/admin/dashboard', title: 'Sales dashboard', desc: 'Revenue charts and analytics.'      },
           { href: '/admin/users',     title: 'Users',           desc: 'View registered accounts.'          },
+          { href: '/admin/contents',  title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'  }, 
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">
             <div className="adm-nav-card-title">{title}</div>

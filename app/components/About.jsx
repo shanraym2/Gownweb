@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 
 const OBSERVER_OPTIONS = { threshold: 0.15 }
@@ -7,6 +8,21 @@ const OBSERVER_OPTIONS = { threshold: 0.15 }
 export default function About() {
   const { ref: imageRef, isVisible: imageVisible } = useIntersectionObserver(OBSERVER_OPTIONS)
   const { ref: textRef,  isVisible: textVisible  } = useIntersectionObserver(OBSERVER_OPTIONS)
+
+  const [content, setContent] = useState({
+    eyebrow_label: 'ABOUT US',
+    heading:       'Comfort and Quality Come First.',
+    body_1:        "JCE Bridal has always dreamed of comfortable women's clothing that would look appropriate in any circumstances.",
+    body_2:        'This is how the JCE Bridal brand appeared — it is a brand for women who like to feel confident, seductive, and stylish in any situation. We use only natural fabrics and pay great attention to details that make the difference.',
+    image_url:     '/images/aboutus.png',
+  })
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=about')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
 
   return (
     <section id="about" className="about-section">
@@ -17,7 +33,7 @@ export default function About() {
           className={`image-col reveal-left ${imageVisible ? 'active' : ''}`}
         >
           <img
-            src="/images/aboutus.png"
+            src={content.image_url}
             alt="A designer carefully crafting a wedding gown"
             className="feature-img"
           />
@@ -38,18 +54,10 @@ export default function About() {
           ref={textRef}
           className={`text-col reveal-right ${textVisible ? 'active' : ''}`}
         >
-          <span className="subtitle">ABOUT US</span>
-          <h2>Comfort and<br />Quality Come First.</h2>
-          <p>
-            JCE Bridal has always dreamed of comfortable women's clothing that would
-            look appropriate in any circumstances.
-          </p>
-          <p>
-            This is how the JCE Bridal brand appeared — it is a brand for women who
-            like to feel confident, seductive, and stylish in any situation. We use
-            only natural fabrics and pay great attention to details that make
-            the difference.
-          </p>
+          <span className="subtitle">{content.eyebrow_label}</span>
+          <h2>{content.heading}</h2>
+          <p>{content.body_1}</p>
+          <p>{content.body_2}</p>
         </div>
 
       </div>

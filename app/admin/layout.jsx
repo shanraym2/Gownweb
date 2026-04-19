@@ -30,6 +30,7 @@ const NAV_LINKS = [
   { href: '/admin/orders',    label: 'Orders'    },
   { href: '/admin/dashboard', label: 'Sales'     },
   { href: '/admin/users',     label: 'Users'     },
+  { href: '/admin/contents',  label: 'Content'   }, 
 ]
 
 // ── Secret gate ───────────────────────────────────────────────────────────────

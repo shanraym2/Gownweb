@@ -1,28 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { getCurrentUser } from '../utils/authClient'
-
-const slides = [
-  {
-    image: '/images/weds.jpg',
-    subtitle: 'DESIGNER COLLECTION',
-    heading: 'Your New\nDream Look.',
-    body: 'JCE Bridal Boutique is your destination for designer and comfortable wedding gowns for your special day.',
-  },
-  {
-    image: '/images/image1.png',
-    subtitle: 'LUXURY GOWNS',
-    heading: 'Timeless\nElegance.',
-    body: 'From classic silhouettes to modern couture — discover the gown that was made for you.',
-  },
-  {
-    image: '/images/image2.png',
-    subtitle: 'BRIDAL READY',
-    heading: 'Walk Down\nIn Style.',
-    body: 'Every stitch crafted with love. Every detail designed to make you shine on your most beautiful day.',
-  },
-]
+import { getCurrentUser } from '@/app/utils/authClient'
 
 function HeroGreeting() {
   const [greeting, setGreeting] = useState(null)
@@ -52,24 +31,31 @@ function HeroGreeting() {
 }
 
 export default function Hero() {
-  const [current, setCurrent]             = useState(0)
+  const [slides, setSlides] = useState([
+    { image_url: '/images/weds.jpg',   subtitle: 'DESIGNER COLLECTION', heading: 'Your New\nDream Look.',  body: 'JCE Bridal Boutique is your destination for designer and comfortable wedding gowns for your special day.' },
+    { image_url: '/images/image1.png', subtitle: 'LUXURY GOWNS',        heading: 'Timeless\nElegance.',    body: 'From classic silhouettes to modern couture — discover the gown that was made for you.' },
+    { image_url: '/images/image2.png', subtitle: 'BRIDAL READY',        heading: 'Walk Down\nIn Style.',   body: 'Every stitch crafted with love. Every detail designed to make you shine on your most beautiful day.' },
+  ])
+
+  const [current, setCurrent]           = useState(0)
   const [transitioning, setTransitioning] = useState(false)
   const [contentVisible, setContentVisible] = useState(true)
   const timerRef   = useRef(null)
   const currentRef = useRef(current)
+
+  // Fetch CMS slides on mount, fall back to hardcoded if unavailable
+  useEffect(() => {
+    fetch('/api/cms/hero')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.slides?.length) setSlides(d.slides) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => { currentRef.current = current }, [current])
 
   const clearAutoplay = () => {
     if (timerRef.current) clearInterval(timerRef.current)
   }
-
-  const startAutoplay = useCallback(() => {
-    clearAutoplay()
-    timerRef.current = setInterval(() => {
-      navigate((currentRef.current + 1) % slides.length)
-    }, 5500)
-  }, [])
 
   const navigate = useCallback((index) => {
     if (transitioning || index === currentRef.current) return
@@ -82,15 +68,22 @@ export default function Hero() {
     }, 500)
   }, [transitioning])
 
+  const startAutoplay = useCallback(() => {
+    clearAutoplay()
+    timerRef.current = setInterval(() => {
+      navigate((currentRef.current + 1) % slides.length)
+    }, 5500)
+  }, [navigate, slides.length])
+
   const next = useCallback(() => {
     navigate((currentRef.current + 1) % slides.length)
     startAutoplay()
-  }, [navigate, startAutoplay])
+  }, [navigate, startAutoplay, slides.length])
 
   const prev = useCallback(() => {
     navigate((currentRef.current - 1 + slides.length) % slides.length)
     startAutoplay()
-  }, [navigate, startAutoplay])
+  }, [navigate, startAutoplay, slides.length])
 
   useEffect(() => {
     startAutoplay()
@@ -117,7 +110,7 @@ export default function Hero() {
           className={`hero-slide ${i === current ? 'hero-slide--active' : ''}`}
           aria-hidden={i !== current}
         >
-          <img src={s.image} alt="" role="presentation" />
+          <img src={s.image_url} alt="" role="presentation" />
         </div>
       ))}
 

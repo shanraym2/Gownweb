@@ -1,52 +1,8 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-
-const CONTACT_DETAILS = [
-  {
-    label: 'Studio Address',
-    value: 'Quezon City, Metro Manila\nPhilippines',
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 22s-8-5.25-8-12a8 8 0 0 1 16 0c0 6.75-8 12-8 12z"/>
-        <circle cx="12" cy="10" r="2.5"/>
-      </svg>
-    ),
-  },
-  {
-    label: 'Phone',
-    value: '+63 917 123 4567',
-    href: 'tel:+639171234567',
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-      </svg>
-    ),
-  },
-  {
-    label: 'Email',
-    value: 'karina@jcebridal.com',
-    href: 'mailto:ayacochokarina@gmail.com',
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="4" width="20" height="16" rx="2"/>
-        <path d="m2 7 10 7 10-7"/>
-      </svg>
-    ),
-  },
-  {
-    label: 'Studio Hours',
-    value: 'Mon – Sat  ·  10:00 AM – 7:00 PM\nPhilippine Standard Time',
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M12 6v6l4 2"/>
-      </svg>
-    ),
-  },
-]
 
 const INITIAL_FIELDS = { name: '', email: '', message: '' }
 const INITIAL_ERRORS = { name: '', email: '', message: '' }
@@ -67,11 +23,64 @@ function hasErrors(errors) {
   return Object.values(errors).some(Boolean)
 }
 
+// ── Icons (unchanged) ─────────────────────────────────────────────────────────
+
+const IconLocation = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s-8-5.25-8-12a8 8 0 0 1 16 0c0 6.75-8 12-8 12z"/>
+    <circle cx="12" cy="10" r="2.5"/>
+  </svg>
+)
+
+const IconPhone = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+  </svg>
+)
+
+const IconEmail = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="4" width="20" height="16" rx="2"/>
+    <path d="m2 7 10 7 10-7"/>
+  </svg>
+)
+
+const IconClock = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M12 6v6l4 2"/>
+  </svg>
+)
+
+// ── Default CMS values (instant fallback, no flash) ───────────────────────────
+
+const DEFAULT_CONTACT = {
+  heading:      'Get in Touch',
+  subheading:   "We'd love to hear from you.",
+  address:      'Quezon City, Metro Manila\nPhilippines',
+  phone:        '+63 917 123 4567',
+  email:        'karina@jcebridal.com',
+  hours:        'Mon – Sat  ·  10:00 AM – 7:00 PM\nPhilippine Standard Time',
+  facebook:     '#',
+  instagram:    '#',
+  map_embed_url: '',
+}
+
 export default function ContactPage() {
+  const [cms, setCms] = useState(DEFAULT_CONTACT)
+
   const [fields, setFields]   = useState(INITIAL_FIELDS)
   const [errors, setErrors]   = useState(INITIAL_ERRORS)
   const [touched, setTouched] = useState({})
-  const [status, setStatus]   = useState('idle') // idle | sending | sent
+  const [status, setStatus]   = useState('idle')
+
+  // Fetch CMS contact block
+  useEffect(() => {
+    fetch('/api/cms/content?section=contact')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields && Object.keys(d.fields).length) setCms(d.fields) })
+      .catch(() => {})
+  }, [])
 
   const handleChange = useCallback((e) => {
     const { name, value } = e.target
@@ -91,9 +100,7 @@ export default function ContactPage() {
     const validationErrors = validate(fields)
     setErrors(validationErrors)
     setTouched({ name: true, email: true, message: true })
-
     if (hasErrors(validationErrors)) return
-
     setStatus('sending')
 
     const subject  = `Bridal inquiry from ${fields.name}`
@@ -106,7 +113,7 @@ export default function ContactPage() {
     ].join('\n')
 
     window.location.href =
-      `mailto:karina@jcebridal.com` +
+      `mailto:${cms.email || 'karina@jcebridal.com'}` +
       `?subject=${encodeURIComponent(subject)}` +
       `&body=${encodeURIComponent(bodyText)}`
 
@@ -115,26 +122,54 @@ export default function ContactPage() {
       setFields(INITIAL_FIELDS)
       setTouched({})
     }, 600)
-  }, [fields])
+  }, [fields, cms.email])
 
   const handleReset = useCallback(() => {
     setStatus('idle')
     setErrors(INITIAL_ERRORS)
   }, [])
 
+  // Build contact details from CMS
+  const CONTACT_DETAILS = [
+    {
+      label: 'Address',
+      value: cms.address,
+      icon:  <IconLocation />,
+    },
+    {
+      label: 'Phone',
+      value: cms.phone,
+      href:  cms.phone ? `tel:${cms.phone.replace(/\s/g, '')}` : undefined,
+      icon:  <IconPhone />,
+    },
+    {
+      label: 'Email',
+      value: cms.email,
+      href:  cms.email ? `mailto:${cms.email}` : undefined,
+      icon:  <IconEmail />,
+    },
+    {
+      label: 'Shop Hours',
+      value: cms.hours,
+      icon:  <IconClock />,
+    },
+  ]
+
   return (
     <main className="contact-page">
-      <Header solid/>
+      <Header solid />
       <div className="contact-header-spacer" />
 
       <section className="contact-section">
 
         <div className="contact-left">
           <div className="contact-left-inner">
-            <span className="contact-eyebrow">Get in Touch</span>
+            <span className="contact-eyebrow">{cms.heading || 'Get in Touch'}</span>
             <h1 className="contact-heading">
-              We'd love to<br />
-              <em>hear from you.</em>
+              {cms.subheading
+                ? <><em>{cms.subheading}</em></>
+                : <>We'd love to<br /><em>hear from you.</em></>
+              }
             </h1>
             <p className="contact-intro">
               Visit our studio or send us a message about fittings, custom gowns,
@@ -152,12 +187,48 @@ export default function ContactPage() {
                         {value}
                       </a>
                     ) : (
-                      <span className="contact-detail-value">{value}</span>
+                      <span className="contact-detail-value" style={{ whiteSpace: 'pre-line' }}>
+                        {value}
+                      </span>
                     )}
                   </div>
                 </li>
               ))}
             </ul>
+
+            {/* Social links — only show if set */}
+            {(cms.facebook !== '#' || cms.instagram !== '#') && (
+              <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                {cms.facebook && cms.facebook !== '#' && (
+                  <a href={cms.facebook} target="_blank" rel="noopener noreferrer"
+                    className="contact-detail-link" style={{ fontSize: 13 }}>
+                    Facebook
+                  </a>
+                )}
+                {cms.instagram && cms.instagram !== '#' && (
+                  <a href={cms.instagram} target="_blank" rel="noopener noreferrer"
+                    className="contact-detail-link" style={{ fontSize: 13 }}>
+                    Instagram
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Map embed — only show if URL is set */}
+            {cms.map_embed_url && (
+              <div style={{ marginTop: 28, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.1)' }}>
+                <iframe
+                  src={cms.map_embed_url}
+                  width="100%"
+                  height="220"
+                  style={{ border: 0, display: 'block' }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Studio location"
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -177,11 +248,7 @@ export default function ContactPage() {
                   Your email client should have opened with your message pre-filled.
                   We'll be in touch within one business day.
                 </p>
-                <button
-                  type="button"
-                  className="btn-contact-ghost"
-                  onClick={handleReset}
-                >
+                <button type="button" className="btn-contact-ghost" onClick={handleReset}>
                   Send another message
                 </button>
               </div>
@@ -193,13 +260,10 @@ export default function ContactPage() {
                   <div className={`contact-field ${touched.name && errors.name ? 'has-error' : ''}`}>
                     <label htmlFor="name">Full Name</label>
                     <input
-                      id="name"
-                      name="name"
-                      type="text"
+                      id="name" name="name" type="text"
                       placeholder="Your full name"
                       value={fields.name}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
+                      onChange={handleChange} onBlur={handleBlur}
                       autoComplete="name"
                       aria-describedby={errors.name ? 'name-error' : undefined}
                       aria-invalid={touched.name && !!errors.name}
@@ -212,13 +276,10 @@ export default function ContactPage() {
                   <div className={`contact-field ${touched.email && errors.email ? 'has-error' : ''}`}>
                     <label htmlFor="email">Email Address</label>
                     <input
-                      id="email"
-                      name="email"
-                      type="email"
+                      id="email" name="email" type="email"
                       placeholder="you@example.com"
                       value={fields.email}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
+                      onChange={handleChange} onBlur={handleBlur}
                       autoComplete="email"
                       aria-describedby={errors.email ? 'email-error' : undefined}
                       aria-invalid={touched.email && !!errors.email}
@@ -232,13 +293,10 @@ export default function ContactPage() {
                 <div className={`contact-field ${touched.message && errors.message ? 'has-error' : ''}`}>
                   <label htmlFor="message">Message</label>
                   <textarea
-                    id="message"
-                    name="message"
-                    rows={5}
+                    id="message" name="message" rows={5}
                     placeholder="Tell us about your opinions..."
                     value={fields.message}
-                    onChange={handleChange}
-                    onBlur={handleBlur}
+                    onChange={handleChange} onBlur={handleBlur}
                     aria-describedby={errors.message ? 'message-error' : undefined}
                     aria-invalid={touched.message && !!errors.message}
                   />

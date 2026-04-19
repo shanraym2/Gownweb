@@ -322,3 +322,109 @@ for each row execute function set_updated_at();
 create trigger trg_orders_updated
 before update on public.orders
 for each row execute function set_updated_at();
+
+-- =============================================================
+-- CMS: HERO SLIDES
+-- =============================================================
+create table public.cms_hero_slides (
+  id         uuid primary key default gen_random_uuid(),
+  image_url  text not null,
+  subtitle   text not null default '',
+  heading    text not null default '',
+  body       text not null default '',
+  sort_order int not null default 0,
+  is_active  boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create trigger trg_cms_hero_updated
+before update on public.cms_hero_slides
+for each row execute function set_updated_at();
+
+-- =============================================================
+-- CMS: TESTIMONIALS
+-- =============================================================
+create table public.cms_testimonials (
+  id          uuid primary key default gen_random_uuid(),
+  quote_text  text not null,
+  author_name text not null,
+  image_url   text,
+  sort_order  int not null default 0,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
+-- =============================================================
+-- CMS: CONTENT BLOCKS (About, Collection, Footer, Theme)
+-- =============================================================
+create table public.cms_content_blocks (
+  id         uuid primary key default gen_random_uuid(),
+  section    text not null unique check (section in (
+               'about', 'collection-spotlight', 'footer', 'theme-config'
+             )),
+  fields     jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+create trigger trg_cms_blocks_updated
+before update on public.cms_content_blocks
+for each row execute function set_updated_at();
+
+-- Seed default content blocks so they always exist
+insert into public.cms_content_blocks (section, fields) values
+  ('about', '{
+    "eyebrow_label": "ABOUT US",
+    "heading": "Comfort and Quality Come First.",
+    "body_1": "JCE Bridal has always dreamed of comfortable women''s clothing that would look appropriate in any circumstances.",
+    "body_2": "This is how the JCE Bridal brand appeared — it is a brand for women who like to feel confident, seductive, and stylish in any situation.",
+    "image_url": "/images/aboutus.png"
+  }'::jsonb),
+  ('collection-spotlight', '{
+    "eyebrow_label": "THE COLLECTION",
+    "heading": "Handpicked Elegance"
+  }'::jsonb),
+  ('footer', '{
+    "brand_name": "JCE Bridal.",
+    "instagram": "#",
+    "facebook": "#",
+    "pinterest": "#",
+    "copyright": "© 2026 JCE Bridal Boutique. All rights reserved."
+  }'::jsonb),
+  ('theme-config', '{
+    "colors": { "navBg": "#1a1a2e", "primary": "#c8a96e" },
+    "fonts":  { "body": "Jost, sans-serif" }
+  }'::jsonb)
+on conflict (section) do nothing;
+
+-- Seed default hero slides from current hardcoded values
+insert into public.cms_hero_slides (image_url, subtitle, heading, body, sort_order) values
+  ('/images/weds.jpg',  'DESIGNER COLLECTION', 'Your New\nDream Look.',   'JCE Bridal Boutique is your destination for designer and comfortable wedding gowns for your special day.', 0),
+  ('/images/image1.png','LUXURY GOWNS',        'Timeless\nElegance.',     'From classic silhouettes to modern couture — discover the gown that was made for you.',                    1),
+  ('/images/image2.png','BRIDAL READY',         'Walk Down\nIn Style.',    'Every stitch crafted with love. Every detail designed to make you shine on your most beautiful day.',       2);
+
+-- Seed default testimonial
+insert into public.cms_testimonials (quote_text, author_name, image_url, sort_order) values
+  ('I have always had difficulties with buying clothes for every-day wear. Therefore, together with Linda, we decided to create our own brand.',
+   'Karina Ayacocho', '/images/image2.png', 0);
+
+   ALTER TABLE public.cms_content_blocks
+DROP CONSTRAINT cms_content_blocks_section_check;
+
+ALTER TABLE public.cms_content_blocks
+ADD CONSTRAINT cms_content_blocks_section_check
+CHECK (section IN ('about','collection-spotlight','footer','theme-config','contact'));
+
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('contact', '{
+    "heading": "Get in Touch",
+    "subheading": "We''d love to hear from you.",
+    "address": "4I-19 Soler Wing 168 Mall Recto Mla, Manila, Philippines",
+    "phone": "0917 843 2531",
+    "email": "jceboutique@gmail.com",
+    "hours": "Mon - Sat  10:00 AM - 7:00 PM\nPhilippine Standard Time",
+    "facebook": "https://www.facebook.com/JCEbridalboutique",
+    "instagram": "#",
+    "map_embed_url": ""
+  }'::JSONB)
+ON CONFLICT (section) DO NOTHING;
