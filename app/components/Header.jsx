@@ -1,34 +1,5 @@
 'use client'
 
-/**
- * app/components/Header.jsx  — DROP-IN REPLACEMENT
- *
- * Preserves ALL original logic:
- *   ✓ isScrolled scroll listener
- *   ✓ getCurrentUser + cart count (loadCart, pathname refresh, storage/focus events)
- *   ✓ Mobile drawer (isMobileOpen, body overflow lock)
- *   ✓ Profile dropdown (isProfileOpen, click-outside ref)
- *   ✓ Search overlay (isSearchOpen, Escape key, focus management)
- *   ✓ handleLogout, handleSearchSubmit
- *   ✓ solid prop
- *   ✓ All class names and JSX structure unchanged
- *
- * CMS addition (ONLY when `cmsTheme` prop is passed):
- *   + Injects --cms-nav-bg, --cms-primary, --cms-font-body as inline vars on <header>
- *   + navBg color applied to header background when scrolled/solid
- *   + All original class-based styling still works as before
- *
- * Usage in app/layout.jsx (Server Component):
- *   import { getCmsConfig } from '@/lib/cmsConfig'
- *   import Header from '@/app/components/Header'
- *   const cmsTheme = await getCmsConfig()
- *   // then: <Header cmsTheme={cmsTheme} />
- *
- * Usage without CMS (original, zero changes):
- *   <Header />
- *   <Header solid />
- */
-
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
@@ -49,7 +20,6 @@ export default function Header({ solid = false, cmsTheme = null }) {
   const searchRef  = useRef(null)
   const searchInputRef = useRef(null)
 
-  // Recount cart — IDENTICAL to original
   const refreshCartCount = () => {
     try {
       const items = loadCart()
@@ -131,17 +101,23 @@ export default function Header({ solid = false, cmsTheme = null }) {
 
   const isActive = isScrolled || solid
 
-  // CMS inline vars — only set when cmsTheme prop provided
+  // CMS inline vars
   const cmsVars = cmsTheme ? {
     '--cms-nav-bg':    cmsTheme.colors?.navBg  || cmsTheme.colors?.secondary || '#1a1a2e',
     '--cms-primary':   cmsTheme.colors?.primary || '#c8a96e',
     '--cms-font-body': cmsTheme.fonts?.body     || "'Jost', sans-serif",
   } : {}
 
-  // When CMS theme is active and header is scrolled/solid, override background
   const headerBgOverride = cmsTheme && isActive
     ? { backgroundColor: 'var(--cms-nav-bg)' }
     : {}
+
+  // ── Role-based dashboard link ─────────────────────────────────────────────
+  const dashboardLink = currentUser?.role === 'admin'
+    ? { href: '/admin', label: 'Admin' }
+    : currentUser?.role === 'staff'
+      ? { href: '/staff', label: 'Staff' }
+      : null
 
   return (
     <>
@@ -151,18 +127,20 @@ export default function Header({ solid = false, cmsTheme = null }) {
       >
         <div className="hdr-inner">
 
-          {/* Nav links — IDENTICAL to original */}
+          {/* Nav links */}
           <nav className="hdr-nav">
             <Link href="/gowns">Gowns</Link>
             <Link href="/virtual-try-on">Virtual Try-On</Link>
             <Link href="/style-recommender">Style Recommender</Link>
             <Link href="/contact">Contact</Link>
-            {currentUser?.role === 'admin' && (
-              <Link href="/admin" className="nav-admin">Admin</Link>
+            {dashboardLink && (
+              <Link href={dashboardLink.href} className="nav-admin">
+                {dashboardLink.label}
+              </Link>
             )}
           </nav>
 
-          {/* Burger — IDENTICAL */}
+          {/* Burger */}
           <button
             className={`hdr-burger${isMobileOpen ? ' open' : ''}`}
             aria-label="Toggle menu"
@@ -171,7 +149,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
             <span /><span /><span />
           </button>
 
-          {/* Logo — IDENTICAL */}
+          {/* Logo */}
           <Link href="/" className="hdr-logo" aria-label="JCE Bridal Boutique — Home">
             <img src="/images/jce_logo.svg" alt="" aria-hidden="true" />
             <div className="hdr-logo-text">
@@ -180,7 +158,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
             </div>
           </Link>
 
-          {/* Actions — IDENTICAL */}
+          {/* Actions */}
           <div className="hdr-actions">
             <button className="hdr-icon-btn" aria-label="Search" onClick={openSearch}>
               <img src="/images/search_logo.svg" alt="" aria-hidden="true" />
@@ -220,6 +198,11 @@ export default function Header({ solid = false, cmsTheme = null }) {
                     <span className="drop-label">Signed in as {currentUser.name}</span>
                     <Link href="/profile"   className="drop-item" onClick={() => setIsProfileOpen(false)}>My Profile</Link>
                     <Link href="/my-orders" className="drop-item" onClick={() => setIsProfileOpen(false)}>My Orders</Link>
+                    {dashboardLink && (
+                      <Link href={dashboardLink.href} className="drop-item" onClick={() => setIsProfileOpen(false)}>
+                        {dashboardLink.label} Dashboard
+                      </Link>
+                    )}
                     <button className="drop-item drop-logout" onClick={handleLogout}>Logout</button>
                   </div>
                 )}
@@ -236,7 +219,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
         </div>
       </header>
 
-      {/* Search overlay — IDENTICAL to original */}
+      {/* Search overlay */}
       {isSearchOpen && (
         <div className="search-overlay" onClick={e => { if (e.target === e.currentTarget) closeSearch() }}>
           <div className="search-box" ref={searchRef}>
@@ -262,7 +245,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
         </div>
       )}
 
-      {/* Mobile drawer — IDENTICAL to original */}
+      {/* Mobile drawer */}
       <div className={`mobile-drawer${isMobileOpen ? ' open' : ''}`}>
         <div className="mobile-backdrop" onClick={() => setIsMobileOpen(false)} />
         <div className="mobile-panel">
@@ -323,8 +306,11 @@ export default function Header({ solid = false, cmsTheme = null }) {
             >Go</button>
           </form>
 
-          {currentUser?.role === 'admin' && (
-            <Link href="/admin" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Admin Dashboard</Link>
+          {/* Dashboard link in mobile drawer */}
+          {dashboardLink && (
+            <Link href={dashboardLink.href} className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>
+              {dashboardLink.label} Dashboard
+            </Link>
           )}
 
           {currentUser ? (

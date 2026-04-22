@@ -428,3 +428,10 @@ INSERT INTO public.cms_content_blocks (section, fields) VALUES
     "map_embed_url": ""
   }'::JSONB)
 ON CONFLICT (section) DO NOTHING;
+
+ALTER TABLE public.users
+DROP CONSTRAINT users_role_check;
+
+ALTER TABLE public.users
+ADD CONSTRAINT users_role_check
+CHECK (role IN ('customer', 'staff', 'admin'));

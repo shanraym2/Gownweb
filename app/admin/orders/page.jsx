@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../layout'
+import { useRoleGuard } from '../../utils/useRoleGuard'
+ 
+ 
 
 // ── Status machine ────────────────────────────────────────────────────────────
 
@@ -577,8 +580,9 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
 }
 
 // ── AdminOrdersPage ───────────────────────────────────────────────────────────
-
 export default function AdminOrdersPage() {
+  
+  const { user: authUser, ready } = useRoleGuard(['admin', 'staff'], '/')
   const [orders,       setOrders      ] = useState([])
   const [loading,      setLoading     ] = useState(true)
   const [error,        setError       ] = useState('')
@@ -590,7 +594,7 @@ export default function AdminOrdersPage() {
   const [stats,        setStats       ] = useState(null)
   const [sortKey,      setSortKey     ] = useState('placedAt')
   const [sortDir,      setSortDir     ] = useState('desc')
-
+ 
   function headers() {
     return { 'Content-Type': 'application/json', 'X-Admin-Secret': getAdminSecret() || '' }
   }
@@ -720,6 +724,8 @@ export default function AdminOrdersPage() {
     cursor: 'pointer',
     userSelect: 'none',
   }
+
+  if (!ready) return null
 
   return (
     <div className="adm-orders-page">

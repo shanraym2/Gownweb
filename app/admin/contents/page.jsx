@@ -3,6 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../layout'
+import { useRoleGuard } from '../../utils/useRoleGuard'
+
+
+
+  // ... rest unchanged
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -305,6 +310,8 @@ function TestimonialModal({ item, onSave, onClose, saving }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AdminContentsPage() {
+  const { ready } = useRoleGuard(['admin'], '/staff')
+ 
   // ── Tab state ──
   const [tab, setTab] = useState('hero')  // 'hero' | 'testimonials' | section key
 
@@ -512,7 +519,7 @@ export default function AdminContentsPage() {
   const activeSlides  = slides.filter(s => s.is_active).length
   const hiddenSlides  = slides.filter(s => !s.is_active).length
   const activeTestims = testims.filter(t => t.is_active).length
-
+ if (!ready) return null
   return (
     <>
       <style>{`

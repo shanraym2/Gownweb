@@ -50,12 +50,16 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'All fields are required.' }, { status: 400 })
     }
     const cleanEmail = email.trim().toLowerCase()
-    const existing = await query('SELECT id FROM users WHERE email = $1', [cleanEmail])
+    const existing   = await query('SELECT id FROM users WHERE email = $1', [cleanEmail])
     if (existing.length > 0) {
-      return NextResponse.json({ ok: false, error: 'An account with this email already exists.' }, { status: 409 })
+      return NextResponse.json(
+        { ok: false, error: 'An account with this email already exists.' },
+        { status: 409 }
+      )
     }
     const passwordHash = await bcrypt.hash(password, 12)
-    const validRole    = ['customer', 'admin'].includes(role) ? role : 'customer'
+    // ── Accept customer, staff, and admin ──
+    const validRole = ['customer', 'staff', 'admin'].includes(role) ? role : 'customer'
     const rows = await query(
       `INSERT INTO users (first_name, last_name, email, password_hash, role)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
@@ -83,14 +87,17 @@ export async function PUT(request) {
 
     if (firstName !== undefined) { setClauses.push(`first_name=$${p++}`); values.push(firstName.trim()) }
     if (lastName  !== undefined) { setClauses.push(`last_name=$${p++}`);  values.push(lastName.trim()) }
-    if (email     !== undefined) {
+    if (email !== undefined) {
       const cleanEmail = email.trim().toLowerCase()
       const taken = await query('SELECT id FROM users WHERE email=$1 AND id!=$2', [cleanEmail, id])
-      if (taken.length > 0) return NextResponse.json({ ok: false, error: 'Email already in use.' }, { status: 409 })
+      if (taken.length > 0) {
+        return NextResponse.json({ ok: false, error: 'Email already in use.' }, { status: 409 })
+      }
       setClauses.push(`email=$${p++}`); values.push(cleanEmail)
     }
     if (role !== undefined) {
-      const validRole = ['customer', 'admin'].includes(role) ? role : 'customer'
+      // ── Accept customer, staff, and admin ──
+      const validRole = ['customer', 'staff', 'admin'].includes(role) ? role : 'customer'
       setClauses.push(`role=$${p++}`); values.push(validRole)
     }
     if (isActive !== undefined) { setClauses.push(`is_active=$${p++}`); values.push(isActive) }
@@ -99,14 +106,18 @@ export async function PUT(request) {
       setClauses.push(`password_hash=$${p++}`); values.push(hash)
     }
 
-    if (!setClauses.length) return NextResponse.json({ ok: false, error: 'Nothing to update.' }, { status: 400 })
+    if (!setClauses.length) {
+      return NextResponse.json({ ok: false, error: 'Nothing to update.' }, { status: 400 })
+    }
 
     values.push(id)
     const rows = await query(
       `UPDATE users SET ${setClauses.join(', ')} WHERE id=$${p} RETURNING *`,
       values
     )
-    if (!rows.length) return NextResponse.json({ ok: false, error: 'User not found.' }, { status: 404 })
+    if (!rows.length) {
+      return NextResponse.json({ ok: false, error: 'User not found.' }, { status: 404 })
+    }
     return NextResponse.json({ ok: true, user: mapUser(rows[0]) })
   } catch (err) {
     console.error('Admin users PUT error:', err)

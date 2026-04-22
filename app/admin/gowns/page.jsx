@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../layout'
-
+import { useRoleGuard } from '../../utils/useRoleGuard'
+ 
 const emptyGown = {
   name: '', price: '₱', image: '/images/', alt: '',
   type: 'Gowns', color: '', silhouette: '',
@@ -104,8 +105,7 @@ function InventoryEditor({ inventory, onChange }) {
 }
 
 // ── Gown row ──────────────────────────────────────────────────────────────────
-
-function GownRow({ g, editingId, onEdit, onArchive, onPermanentDelete, archived = false }) {
+function GownRow({ g, editingId, onEdit, onArchive, onPermanentDelete, archived = false, isAdmin = false }) {
   const inv      = g.inventory || []
   const totalQty = inv.reduce((s, i) => s + (i.stock || 0), 0)
 
@@ -162,6 +162,10 @@ function GownRow({ g, editingId, onEdit, onArchive, onPermanentDelete, archived 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AdminGownsPage() {
+  const { user: authUser, ready } = useRoleGuard(['admin', 'staff'], '/')
+  
+  const isAdmin = authUser?.role === 'admin'
+
   const [gowns,      setGowns     ] = useState([])
   const [archived,   setArchived  ] = useState([])
   const [arcCount,   setArcCount  ] = useState(0)   // separate count loaded eagerly
@@ -375,6 +379,7 @@ export default function AdminGownsPage() {
   const totalUnits  = allInv.reduce((s, i) => s + Math.max(0, i.stock - (i.reserved || 0)), 0)
   const lowCount    = allInv.filter(i => { const a = i.stock-(i.reserved||0); return a > 0 && a <= 2 }).length
   const outCount    = allInv.filter(i => (i.stock-(i.reserved||0)) <= 0).length
+  if (!ready) return null
 
   return (
     <>
@@ -585,7 +590,7 @@ export default function AdminGownsPage() {
             : gowns.length === 0
               ? <p className="adm-muted">No active gowns. Add one above.</p>
               : gowns.map(g => (
-                  <GownRow key={g.id} g={g} editingId={editingId}
+                  <GownRow key={g.id} g={g} editingId={editingId} isAdmin={isAdmin}
                     onEdit={handleEdit} onArchive={handleArchive} onPermanentDelete={handlePermanentDelete} />
                 ))
         ) : (
@@ -599,7 +604,7 @@ export default function AdminGownsPage() {
                     Restore to make them visible again, or permanently delete to remove them entirely.
                   </p>
                   {archived.map(g => (
-                    <GownRow key={g.id} g={g} editingId={editingId} archived
+                    <GownRow key={g.id} g={g} editingId={editingId} archived isAdmin={isAdmin}
                       onEdit={handleEdit} onArchive={handleArchive} onPermanentDelete={handlePermanentDelete} />
                   ))}
                 </>

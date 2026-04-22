@@ -8,6 +8,7 @@ import {
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { getAdminSecret } from '../layout'
+import { useRoleGuard } from '../../utils/useRoleGuard'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip)
 
@@ -222,6 +223,8 @@ async function downloadReport(type, secret, setExporting) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AdminSalesDashboardPage() {
+  const { user: authUser, ready } = useRoleGuard(['admin', 'staff'], '/')
+ 
   const [orders,    setOrders   ] = useState([])
   const [loading,   setLoading  ] = useState(true)
   const [error,     setError    ] = useState('')
@@ -281,6 +284,7 @@ export default function AdminSalesDashboardPage() {
   const statusInterp = useMemo(() => interpStatus(statusCounts, orders),       [statusCounts, orders])
 
   const secret = typeof window !== 'undefined' ? getAdminSecret() : ''
+  const isAdmin = authUser?.role === 'admin'
 
   const tickColor = '#999'
   const gridColor = 'rgba(0,0,0,0.05)'
@@ -307,8 +311,9 @@ export default function AdminSalesDashboardPage() {
     plugins: { legend: { display: false } },
   }
 
-  if (loading) return <p className="adm-muted">Loading dashboard…</p>
-  if (error)   return <p className="adm-error-msg">{error}</p>
+  if (!ready) return null                                          
+  if (loading) return <p className="adm-muted">Loading dashboard…</p>  
+  if (error)   return <p className="adm-error-msg">{error}</p> 
 
   return (
     <div className="adm-sales-page">
@@ -329,7 +334,10 @@ export default function AdminSalesDashboardPage() {
       </div>
 
       {/* Export bar */}
-      <div className="adm-export-bar">
+      {/* Export bar — admin only */}
+      {isAdmin && (
+        <div className="adm-export-bar">
+
         <span className="adm-export-lbl">Export report:</span>
         {[
           { type: 'orders',  label: 'All orders' },
@@ -359,7 +367,7 @@ export default function AdminSalesDashboardPage() {
         <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginLeft: 'auto' }}>
           CSV · {orders.length} orders
         </span>
-      </div>
+      </div>)}
 
       {/* Metrics */}
       <div className="adm-metrics">

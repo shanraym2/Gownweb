@@ -11,24 +11,26 @@ const RESEND_COOLDOWN = 30
 export default function LoginPage() {
   const router = useRouter()
 
-  const [email,        setEmail       ] = useState('')
-  const [password,     setPassword    ] = useState('')
-  const [otp,          setOtp         ] = useState('')
-  const [step,         setStep        ] = useState(1)   // 1=credentials, 2=otp
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [devMode,      setDevMode     ] = useState(false)
-  const [showPassword, setShowPassword] = useState(false)
-  const [resendCooldown, setResendCooldown] = useState(0)
+  const [email,         setEmail        ] = useState('')
+  const [password,      setPassword     ] = useState('')
+  const [otp,           setOtp          ] = useState('')
+  const [step,          setStep         ] = useState(1)   // 1=credentials, 2=otp
+  const [isSubmitting,  setIsSubmitting ] = useState(false)
+  const [devMode,       setDevMode      ] = useState(false)
+  const [showPassword,  setShowPassword ] = useState(false)
+  const [resendCooldown,setResendCooldown] = useState(0)
   const cooldownRef = useRef(null)
 
   const [errors, setErrors] = useState({
     email: '', password: '', otp: '', general: '',
   })
 
-  // Redirect if already logged in
+  // Redirect if already logged in — send to the right dashboard
   useEffect(() => {
-    if (getCurrentUser()) router.replace('/')
-  }, [router])
+    const user = getCurrentUser()
+    if (!user) return
+    redirectByRole(user.role)
+  }, [])
 
   // Countdown timer
   useEffect(() => {
@@ -41,6 +43,13 @@ export default function LoginPage() {
     }, 1000)
     return () => clearInterval(cooldownRef.current)
   }, [resendCooldown])
+
+  // ── Role-based redirect helper ───────────────────────────────────────────
+  function redirectByRole(role) {
+    if (role === 'admin')  { router.replace('/admin'); return }
+    if (role === 'staff')  { router.replace('/staff'); return }
+    router.replace('/')
+  }
 
   const clearErrors = () => setErrors({ email: '', password: '', otp: '', general: '' })
 
@@ -84,7 +93,6 @@ export default function LoginPage() {
       const trustData = await trustRes.json()
 
       if (trustData.trusted) {
-        // Device is trusted — log in directly, no OTP needed
         finishLogin(loginData.user)
         return
       }
@@ -135,7 +143,7 @@ export default function LoginPage() {
         return
       }
 
-      // OTP verified — now get the user record
+      // OTP verified — fetch the user record
       const loginRes  = await fetch('/api/auth/login', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -156,9 +164,8 @@ export default function LoginPage() {
     }
   }
 
-  // ── Shared: save user and redirect ───────────────────────────────────────
+  // ── Shared: save user and redirect by role ───────────────────────────────
   function finishLogin(user) {
-    // Persist user to localStorage so getCurrentUser() works client-side
     localStorage.setItem('jce_current_user', JSON.stringify({
       id:        user.id,
       name:      user.name,
@@ -167,7 +174,7 @@ export default function LoginPage() {
       createdAt: user.createdAt,
     }))
     setCurrentUserRole(user.role)
-    router.push('/')
+    redirectByRole(user.role)
   }
 
   const handleResendOtp = useCallback(async () => {
@@ -194,9 +201,7 @@ export default function LoginPage() {
     }
   }, [email, resendCooldown, isSubmitting])
 
-  const handleBack = () => {
-    setStep(1); setOtp(''); clearErrors()
-  }
+  const handleBack = () => { setStep(1); setOtp(''); clearErrors() }
 
   return (
     <main className="auth-page">

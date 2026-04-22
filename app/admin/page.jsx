@@ -3,22 +3,40 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { resetAllUsers, getCurrentUser } from '../utils/authClient'
+import { getCurrentUser } from '../utils/authClient'
 import { getAdminSecret } from './layout'
 
-const ORDER_STATUSES = ['placed','paid','preparing','shipped','delivered','cancelled']
+const ORDER_STATUSES = ['placed', 'pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled', 'refunded']
 
 export default function AdminDashboardPage() {
   const router = useRouter()
-  const user   = getCurrentUser?.() || null
-
+  const [user,         setUser        ] = useState(null)
+  const [ready,        setReady       ] = useState(false)
   const [orderStats,   setOrderStats  ] = useState(null)
   const [gownCount,    setGownCount   ] = useState(null)
   const [resetConfirm, setResetConfirm] = useState(false)
 
+  // ── Auth guard (runs client-side, avoids hook-in-conditional) ─────────────
   useEffect(() => {
+    const u = getCurrentUser()
+    if (!u || !['admin', 'staff'].includes(u.role)) {
+      router.replace('/login')
+      return
+    }
+    if (u.role !== 'admin') {
+      router.replace('/staff')
+      return
+    }
+    setUser(u)
+    setReady(true)
+  }, [router])
+
+  // ── Data fetch (only after auth confirmed) ────────────────────────────────
+  useEffect(() => {
+    if (!ready) return
     const secret = getAdminSecret()
     if (!secret) return
+
     Promise.all([
       fetch('/api/admin/orders', { headers: { 'X-Admin-Secret': secret } }).then(r => r.json()).catch(() => null),
       fetch('/api/admin/gowns',  { headers: { 'X-Admin-Secret': secret } }).then(r => r.json()).catch(() => null),
@@ -27,22 +45,32 @@ export default function AdminDashboardPage() {
         const orders = od.orders || []
         const counts = {}
         for (const s of ORDER_STATUSES) counts[s] = 0
-        for (const o of orders) if (counts[o.status] !== undefined) counts[o.status]++
-        const revenue = orders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + Number(o.subtotal || 0), 0)
+        for (const o of orders) if (o.status in counts) counts[o.status]++
+
+        // Use `total` and exclude cancelled + refunded — consistent with sales dashboard
+        const revenue = orders
+          .filter(o => !['cancelled', 'refunded'].includes(o.status))
+          .reduce((s, o) => s + Number(o.total || 0), 0)
+
         setOrderStats({ total: orders.length, counts, revenue })
       }
       if (gd?.ok) setGownCount((gd.gowns || []).length)
     })
-  }, [])
+  }, [ready])
+
+  if (!ready) return null
+
+  const fmtPhp = n => '₱' + Math.round(n).toLocaleString('en-PH')
 
   const handleResetUsers = () => {
     if (!resetConfirm) { setResetConfirm(true); return }
-    resetAllUsers()
-    router.push('/')
-    window.location.reload()
+    // Dynamic import keeps resetAllUsers out of the critical path
+    import('../utils/authClient').then(({ resetAllUsers }) => {
+      resetAllUsers()
+      router.push('/')
+      window.location.reload()
+    })
   }
-
-  const fmtPhp = n => '₱' + Math.round(n).toLocaleString('en-PH')
 
   return (
     <div className="adm-dash-page">
@@ -65,16 +93,18 @@ export default function AdminDashboardPage() {
             </div>
             <div className="adm-stat">
               <span className="adm-stat-val adm-stat-val-purple">
-                {orderStats.counts.paid + orderStats.counts.preparing + orderStats.counts.shipped}
+                {(orderStats.counts.paid || 0) + (orderStats.counts.processing || 0) + (orderStats.counts.shipped || 0)}
               </span>
               <span className="adm-stat-lbl">In progress</span>
             </div>
             <div className="adm-stat">
-              <span className="adm-stat-val adm-stat-val-green">{orderStats.counts.delivered}</span>
-              <span className="adm-stat-lbl">Delivered</span>
+              <span className="adm-stat-val adm-stat-val-green">{orderStats.counts.completed || 0}</span>
+              <span className="adm-stat-lbl">Completed</span>
             </div>
             <div className="adm-stat">
-              <span className="adm-stat-val adm-stat-val-amber">{orderStats.counts.placed}</span>
+              <span className="adm-stat-val adm-stat-val-amber">
+                {(orderStats.counts.placed || 0) + (orderStats.counts.pending_payment || 0)}
+              </span>
               <span className="adm-stat-lbl">Awaiting payment</span>
             </div>
             {gownCount !== null && (
@@ -89,11 +119,11 @@ export default function AdminDashboardPage() {
 
       <div className="adm-nav-cards">
         {[
-          { href: '/admin/gowns',     title: 'Gowns',           desc: 'Add, edit, or remove listings.'     },
-          { href: '/admin/orders',    title: 'Orders',          desc: 'View and manage all orders.'        },
-          { href: '/admin/dashboard', title: 'Sales dashboard', desc: 'Revenue charts and analytics.'      },
-          { href: '/admin/users',     title: 'Users',           desc: 'View registered accounts.'          },
-          { href: '/admin/contents',  title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'  }, 
+          { href: '/admin/gowns',     title: 'Gowns',           desc: 'Add, edit, or remove listings.'        },
+          { href: '/admin/orders',    title: 'Orders',          desc: 'View and manage all orders.'           },
+          { href: '/admin/dashboard', title: 'Sales dashboard', desc: 'Revenue charts and analytics.'         },
+          { href: '/admin/users',     title: 'Users',           desc: 'View registered accounts.'             },
+          { href: '/admin/contents',  title: 'Content',         desc: 'Edit homepage slides, copy, and theme.' },
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">
             <div className="adm-nav-card-title">{title}</div>
