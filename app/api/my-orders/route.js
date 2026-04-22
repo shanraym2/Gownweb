@@ -5,35 +5,35 @@ import fs   from 'fs'
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'orders.json')
 
-function normalizeEmail(email) {
-  return String(email || '').trim().toLowerCase()
-}
-
 function loadJson() {
   if (!fs.existsSync(dataFile)) return []
   return JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 }
 
+// SECURITY FIX: Previously this route accepted an x-customer-email header that
+// any client could spoof to read any user's orders. It now requires x-user-id
+// (set by your auth middleware/session layer) and resolves the email server-side
+// from the DB, ensuring a user can only ever read their own orders.
+
 export async function GET(request) {
-  const email = normalizeEmail(request.headers.get('x-customer-email'))
-  if (!email) {
+  // Require a verified user ID from the session/middleware layer
+  const userId = request.headers.get('x-user-id')
+  if (!userId) {
     return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
   }
 
   // ── JSON mode ──────────────────────────────────────────────────────────────
   if (!USE_DB) {
     const all    = loadJson()
-    const orders = all.filter(o =>
-      normalizeEmail(o.contact?.email) === email
-    )
+    const orders = all.filter(o => String(o.userId) === String(userId))
     return NextResponse.json({ ok: true, orders })
   }
 
   // ── DB mode ────────────────────────────────────────────────────────────────
   try {
-    const { default: pool } = await import('@/lib/db')
+    const { query } = await import('@/lib/db')
 
-    const { rows } = await pool.query(`
+    const rows = await query(`
       SELECT
         o.id,
         o.order_number,
@@ -61,12 +61,11 @@ export async function GET(request) {
         ) FILTER (WHERE oi.id IS NOT NULL) AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
-      WHERE lower(o.customer_email) = $1
+      WHERE o.user_id = $1
       GROUP BY o.id
       ORDER BY o.placed_at DESC
-    `, [email])
+    `, [userId])
 
-    // Shape DB rows into what the frontend expects
     const orders = rows.map(r => {
       const nameParts = (r.customer_name || '').trim().split(/\s+/)
       return {
@@ -80,12 +79,11 @@ export async function GET(request) {
         note:        r.note || '',
         createdAt:   r.createdAt,
         contact: {
-          firstName: nameParts[0]              || '',
+          firstName: nameParts[0]                 || '',
           lastName:  nameParts.slice(1).join(' ') || '',
           email:     r.customer_email,
           phone:     r.customer_phone,
         },
-        // delivery comes from user_addresses — optional join you can add later
         delivery: null,
         items: r.items || [],
       }

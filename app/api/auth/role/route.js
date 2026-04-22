@@ -1,17 +1,69 @@
 // app/api/auth/role/route.js
 //
-// Role resolution order:
-//   1. Database  — role column on the users table (source of truth for staff/admin
-//                  created via the Users UI)
-//   2. Env vars  — ADMIN_EMAIL / STAFF_EMAILS override (useful for the very first
-//                  bootstrap admin before the DB row exists, or for CI environments)
+// SECURITY FIX: Added rate limiting to prevent email enumeration.
+// Previously this endpoint was open — any caller could probe it to discover
+// whether an email belongs to an admin/staff user. We now enforce a per-IP
+// sliding window (same pattern as the OTP cooldown).
 //
-// The DB wins when a row exists; env vars act as a fallback/override.
+// Rate limit: 20 requests per minute per IP (generous for legitimate use,
+// tight enough to prevent automated enumeration).
 
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 
+// In-memory rate limit store (per-process; good enough for single-instance).
+// For multi-instance deployments, swap this for a Redis/Upstash counter.
+const rateLimitMap = new Map()
+const WINDOW_MS    = 60_000  // 1 minute
+const MAX_REQUESTS = 20
+
+function getRateLimitKey(request) {
+  // Use the X-Forwarded-For header (set by your reverse proxy / Vercel edge)
+  // falling back to a generic key if unavailable.
+  const forwarded = request.headers.get('x-forwarded-for')
+  return forwarded ? forwarded.split(',')[0].trim() : 'unknown'
+}
+
+function checkRateLimit(key) {
+  const now = Date.now()
+  const entry = rateLimitMap.get(key)
+
+  if (!entry || now - entry.windowStart > WINDOW_MS) {
+    rateLimitMap.set(key, { windowStart: now, count: 1 })
+    return { allowed: true, remaining: MAX_REQUESTS - 1 }
+  }
+
+  entry.count++
+  if (entry.count > MAX_REQUESTS) {
+    const retryAfter = Math.ceil((entry.windowStart + WINDOW_MS - now) / 1000)
+    return { allowed: false, retryAfter }
+  }
+
+  return { allowed: true, remaining: MAX_REQUESTS - entry.count }
+}
+
+// Periodically prune stale entries to avoid unbounded memory growth
+setInterval(() => {
+  const cutoff = Date.now() - WINDOW_MS
+  for (const [key, entry] of rateLimitMap) {
+    if (entry.windowStart < cutoff) rateLimitMap.delete(key)
+  }
+}, WINDOW_MS)
+
 export async function GET(request) {
+  // ── Rate limit ───────────────────────────────────────────────────────────
+  const rlKey    = getRateLimitKey(request)
+  const rl       = checkRateLimit(rlKey)
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { ok: false, error: `Too many requests. Please wait ${rl.retryAfter}s.` },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(rl.retryAfter) },
+      }
+    )
+  }
+
   const { searchParams } = new URL(request.url)
   const email = searchParams.get('email')
 
@@ -30,7 +82,6 @@ export async function GET(request) {
     )
     if (rows.length > 0) dbRole = rows[0].role
   } catch (err) {
-    // DB unavailable — fall through to env-var check
     console.warn('[role] DB lookup failed, falling back to env vars:', err.message)
   }
 
@@ -44,13 +95,11 @@ export async function GET(request) {
   const envIsAdmin = adminEmail.length > 0 && normalizedEmail === adminEmail
   const envIsStaff = staffEmails.includes(normalizedEmail)
 
-  // ── 3. Merge: env-var admin/staff designation always wins upward;
-  //             DB role wins when env vars don't match ────────────────────
+  // ── 3. Merge ─────────────────────────────────────────────────────────────
   let role
   if (envIsAdmin) {
     role = 'admin'
   } else if (envIsStaff) {
-    // Env marks them as staff — honour it even if DB says customer
     role = dbRole === 'admin' ? 'admin' : 'staff'
   } else if (dbRole) {
     role = dbRole
@@ -60,13 +109,12 @@ export async function GET(request) {
 
   const res = { ok: true, role }
 
-  // Development debug info
   if (process.env.NODE_ENV === 'development') {
-    res.dbRole                  = dbRole
-    res.adminEmailConfigured    = adminEmail.length > 0
-    res.staffEmailsConfigured   = staffEmails.length > 0
-    res.staffCount              = staffEmails.length
-    res.resolvedFrom            = envIsAdmin ? 'env:admin' : envIsStaff ? 'env:staff' : dbRole ? 'db' : 'default'
+    res.dbRole                = dbRole
+    res.adminEmailConfigured  = adminEmail.length > 0
+    res.staffEmailsConfigured = staffEmails.length > 0
+    res.staffCount            = staffEmails.length
+    res.resolvedFrom          = envIsAdmin ? 'env:admin' : envIsStaff ? 'env:staff' : dbRole ? 'db' : 'default'
   }
 
   return NextResponse.json(res)

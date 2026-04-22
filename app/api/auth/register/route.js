@@ -25,9 +25,18 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
+// FIXED: Previously only checked ADMIN_EMAIL, ignoring STAFF_EMAILS.
+// A staff member self-registering would get the 'customer' role instead of 'staff'.
 function getRole(email) {
-  const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase()
-  return adminEmail && email === adminEmail ? 'admin' : 'customer'
+  const adminEmail  = (process.env.ADMIN_EMAIL  || '').trim().toLowerCase()
+  const staffEmails = (process.env.STAFF_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean)
+
+  if (adminEmail && email === adminEmail) return 'admin'
+  if (staffEmails.includes(email))        return 'staff'
+  return 'customer'
 }
 
 export async function POST(request) {

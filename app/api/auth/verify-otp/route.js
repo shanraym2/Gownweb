@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import crypto from 'crypto'
 
-const MAX_ATTEMPTS    = 5
-const TRUST_DAYS      = 7
-const TRUST_MS        = TRUST_DAYS * 24 * 60 * 60 * 1000
+const MAX_ATTEMPTS = 5
+const TRUST_DAYS   = 7
+const TRUST_MS     = TRUST_DAYS * 24 * 60 * 60 * 1000
 
 const PURPOSE_MAP = {
   login:            'login',
@@ -21,6 +21,20 @@ function generateTrustToken() {
   return crypto.randomBytes(32).toString('hex')
 }
 
+// SECURITY FIX: Previously the trust cookie name was derived directly from the
+// plaintext email address: `jce_trust_${cleanEmail.replace(...)}`.
+// This leaked the user's email into cookie names visible in browser DevTools,
+// server access logs, and any proxies/CDN that log headers.
+//
+// We now hash the email (SHA-256, truncated) so the cookie name is opaque:
+//   jce_trust_<first-16-hex-chars-of-sha256(email)>
+// This is still deterministic (same email → same cookie name on re-login)
+// but reveals nothing about the underlying address.
+function trustCookieName(email) {
+  const hash = crypto.createHash('sha256').update(email).digest('hex')
+  return `jce_trust_${hash.slice(0, 16)}`
+}
+
 export async function POST(request) {
   try {
     const { email, otp, purpose } = await request.json()
@@ -32,10 +46,10 @@ export async function POST(request) {
       )
     }
 
-    const cleanEmail  = email.trim().toLowerCase()
-    const otpStr      = String(otp).trim()
-    const rawPurpose  = String(purpose || '').trim().toLowerCase()
-    const dbPurpose   = PURPOSE_MAP[rawPurpose]
+    const cleanEmail = email.trim().toLowerCase()
+    const otpStr     = String(otp).trim()
+    const rawPurpose = String(purpose || '').trim().toLowerCase()
+    const dbPurpose  = PURPOSE_MAP[rawPurpose]
 
     if (!dbPurpose) {
       return NextResponse.json(
@@ -72,7 +86,6 @@ export async function POST(request) {
       const attemptsLeft = record.max_attempts - nextAttempts
 
       if (nextAttempts >= record.max_attempts) {
-        // Consume (invalidate) after too many attempts
         await query(
           `UPDATE otp_codes SET attempts = $1, consumed_at = NOW() WHERE id = $2`,
           [nextAttempts, record.id]
@@ -104,12 +117,13 @@ export async function POST(request) {
       [nextAttempts, record.id]
     )
 
-    // Issue a "trust this device" cookie so they won't need OTP for 7 days
+    // Issue a trust cookie using an opaque (hashed) name — not the raw email
     const trustToken  = generateTrustToken()
     const trustExpiry = new Date(Date.now() + TRUST_MS)
+    const cookieName  = trustCookieName(cleanEmail)
 
     const response = NextResponse.json({ ok: true, message: 'OTP verified' })
-    response.cookies.set(`jce_trust_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`, trustToken, {
+    response.cookies.set(cookieName, trustToken, {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
       sameSite: 'lax',

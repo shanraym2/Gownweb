@@ -197,7 +197,9 @@ export default function AdminGownsPage() {
 
   // Load active gowns + archived count on mount
   const loadActive = useCallback(async () => {
-    setLoading(true); setError('')
+    setLoading(true)
+    setArcLoading(true)   // ← ADD THIS
+    setError('')
     try {
       const [activeRes, arcRes] = await Promise.all([
         fetch('/api/admin/gowns',              { headers: headers() }),
@@ -207,14 +209,17 @@ export default function AdminGownsPage() {
       const arcData    = await arcRes.json()
       if (!activeRes.ok) throw new Error(activeData.error || 'Failed to load')
       setGowns(activeData.gowns || [])
-      // Store archived count and data eagerly so count is always correct
       if (arcData.ok) {
         setArchived(arcData.gowns || [])
         setArcCount((arcData.gowns || []).length)
       }
     } catch (e) { setError(e.message) }
-    finally { setLoading(false) }
+    finally {
+      setLoading(false)
+      setArcLoading(false)   // ← ADD THIS
+    }
   }, [])
+
 
   useEffect(() => { loadActive() }, [loadActive])
 

@@ -14,6 +14,10 @@ function saveJson(o) {
   fs.writeFileSync(dataFile, JSON.stringify(o,null,2))
 }
 
+// SECURITY FIX: Both POST and GET now authenticate via x-user-id (session-bound)
+// rather than x-customer-email (unauthenticated, spoofable by any client).
+// The DB path verifies the order belongs to the user_id from the session.
+
 // POST /api/orders/upload-proof
 export async function POST(request) {
   const userId = request.headers.get('x-user-id')
@@ -62,7 +66,7 @@ export async function POST(request) {
   try {
     const { query } = await import('@/lib/db')
 
-    // Verify order exists and belongs to user
+    // Verify order exists and belongs to user (uses user_id, not email)
     const orders = await query(
       'SELECT id,user_id,payment_method,payment_status,status FROM orders WHERE id=$1',
       [orderId]
@@ -92,7 +96,6 @@ export async function POST(request) {
       [orderId, image, cleanRef]
     )
 
-    // Move order to pending_payment
     await query(
       `UPDATE orders SET payment_status='pending', status='pending_payment', updated_at=NOW() WHERE id=$1`,
       [orderId]
@@ -117,14 +120,27 @@ export async function GET(request) {
   if (!USE_DB) {
     const order = loadJson().find(o => String(o.id) === String(orderId))
     if (!order) return NextResponse.json({ ok:false, error:'Order not found' }, { status:404 })
-    return NextResponse.json({ ok:true, proofImage:order.proofImage||null, referenceNo:order.proofReferenceNo||null, uploadedAt:order.proofUploadedAt||null })
+    return NextResponse.json({
+      ok:true,
+      proofImage:  order.proofImage       || null,
+      referenceNo: order.proofReferenceNo || null,
+      uploadedAt:  order.proofUploadedAt  || null,
+    })
   }
 
   try {
     const { query } = await import('@/lib/db')
-    const rows = await query('SELECT proof_image_url,reference_no,created_at FROM payments WHERE order_id=$1',[orderId])
+    const rows = await query(
+      'SELECT proof_image_url,reference_no,created_at FROM payments WHERE order_id=$1',
+      [orderId]
+    )
     if (!rows.length) return NextResponse.json({ ok:false, error:'No proof found' }, { status:404 })
-    return NextResponse.json({ ok:true, proofImage:rows[0].proof_image_url, referenceNo:rows[0].reference_no, uploadedAt:rows[0].created_at })
+    return NextResponse.json({
+      ok:true,
+      proofImage:  rows[0].proof_image_url,
+      referenceNo: rows[0].reference_no,
+      uploadedAt:  rows[0].created_at,
+    })
   } catch(err) {
     console.error('GET upload-proof error:', err)
     return NextResponse.json({ ok:false, error:'Failed to fetch proof' }, { status:500 })

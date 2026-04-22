@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../layout'
 import { useRoleGuard } from '../../utils/useRoleGuard'
@@ -517,7 +517,6 @@ export default function AdminContentsPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const activeSlides  = slides.filter(s => s.is_active).length
-  const hiddenSlides  = slides.filter(s => !s.is_active).length
   const activeTestims = testims.filter(t => t.is_active).length
  if (!ready) return null
   return (
@@ -879,6 +878,7 @@ export default function AdminContentsPage() {
                   <p className="cms-block-desc">
                     {section.key === 'about'                && 'Controls the About section copy and image on the homepage.'}
                     {section.key === 'collection-spotlight' && 'Controls the heading above the featured gowns grid.'}
+                    {section.key === 'contact'              && 'Controls the Contact page heading, address, phone, email, hours, social links, and Google Maps embed.'}
                     {section.key === 'footer'               && 'Controls the footer brand name, social links, and copyright line.'}
                     {section.key === 'theme-config'         && 'Controls global brand colours injected into the site header.'}
                   </p>

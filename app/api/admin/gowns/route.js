@@ -45,8 +45,7 @@ function rowToGown(row) {
   }
 }
 
-// ── GET — ?tab=archived for archived, default for active ─────────────────────
-
+// ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET(request) {
   if (!checkAuth(request)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
@@ -106,7 +105,6 @@ export async function GET(request) {
 }
 
 // ── POST ──────────────────────────────────────────────────────────────────────
-
 export async function POST(request) {
   if (!checkAuth(request)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
@@ -187,8 +185,7 @@ export async function POST(request) {
   }
 }
 
-// ── PUT — update fields OR restore archived gown ──────────────────────────────
-
+// ── PUT ───────────────────────────────────────────────────────────────────────
 export async function PUT(request) {
   if (!checkAuth(request)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
@@ -197,7 +194,6 @@ export async function PUT(request) {
   const body = await request.json()
   const { id, restore } = body
 
-  // Restore archived gown
   if (restore && id) {
     if (!USE_DB) {
       const gowns = loadJson()
@@ -222,7 +218,6 @@ export async function PUT(request) {
     }
   }
 
-  // Update gown fields
   const { name, price, image, alt, color, silhouette, fabric, neckline, description, type, inventory } = body
 
   if (!id || !name || !price || !image) {
@@ -301,8 +296,11 @@ export async function PUT(request) {
   }
 }
 
-// ── DELETE — archive or permanent delete ──────────────────────────────────────
-
+// ── DELETE — archive (soft) or permanent delete ───────────────────────────────
+//
+// SECURITY FIX: The permanent delete check+delete is now wrapped in a single
+// transaction to eliminate the race condition where two concurrent requests
+// could both pass the is_active check before either executes the DELETE.
 export async function DELETE(request) {
   if (!checkAuth(request)) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
@@ -331,16 +329,42 @@ export async function DELETE(request) {
   }
 
   try {
-    const { query } = await import('@/lib/db')
+    const { getClient } = await import('@/lib/db')
 
     if (permanent) {
-      const check = await query(`SELECT is_active FROM gowns WHERE id=$1`, [id])
-      if (!check.length) return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
-      if (check[0].is_active) {
-        return NextResponse.json({ ok: false, error: 'Archive the gown before permanently deleting it.' }, { status: 400 })
+      // FIXED: Wrap the is_active check and DELETE in a transaction so concurrent
+      // requests cannot both pass the guard before either completes the delete.
+      const conn = await getClient()
+      try {
+        await conn.query('BEGIN')
+
+        // Lock the row with FOR UPDATE so concurrent requests must wait
+        const check = await conn.query(
+          `SELECT is_active FROM gowns WHERE id=$1 FOR UPDATE`,
+          [id]
+        )
+        if (!check.rows.length) {
+          await conn.query('ROLLBACK')
+          return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
+        }
+        if (check.rows[0].is_active) {
+          await conn.query('ROLLBACK')
+          return NextResponse.json(
+            { ok: false, error: 'Archive the gown before permanently deleting it.' },
+            { status: 400 }
+          )
+        }
+
+        await conn.query(`DELETE FROM gowns WHERE id=$1`, [id])
+        await conn.query('COMMIT')
+      } catch (err) {
+        await conn.query('ROLLBACK')
+        throw err
+      } finally {
+        conn.release()
       }
-      await query(`DELETE FROM gowns WHERE id=$1`, [id])
     } else {
+      const { query } = await import('@/lib/db')
       const rows = await query(`UPDATE gowns SET is_active=FALSE WHERE id=$1 RETURNING id`, [id])
       if (!rows.length) return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
     }

@@ -1,11 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../layout'
 import { useRoleGuard } from '../../utils/useRoleGuard'
- 
- 
 
 // ── Status machine ────────────────────────────────────────────────────────────
 
@@ -35,13 +33,9 @@ const ESCAPE_TRANSITIONS = {
 function getAllowedTransitions(status, paymentStatus) {
   const flow = STATUS_FLOW[status]
   if (!flow) return { next: null, prev: null, escapes: [] }
-
   let next = flow.next
   const prev = flow.prev
-
-  // Gate: can't move into payment-gated statuses without verified payment
   if (next && PAYMENT_GATED.has(next) && paymentStatus !== 'paid') next = null
-
   const escapes = ESCAPE_TRANSITIONS[status] || []
   return { next, prev, escapes }
 }
@@ -71,10 +65,7 @@ const PAYMENT_STATUS_META = {
 const PAYMENT_METHOD_LABEL = { gcash: 'GCash', bdo: 'BDO', cash: 'Cash' }
 const DELIVERY_LABEL       = { pickup: 'Store Pickup', lalamove: 'Lalamove' }
 
-function fmtPhp(n) {
-  return '₱' + Number(n || 0).toLocaleString('en-PH')
-}
-
+function fmtPhp(n) { return '₱' + Number(n || 0).toLocaleString('en-PH') }
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-PH', {
@@ -103,7 +94,6 @@ function Toast({ message, type = 'success', onDone }) {
     const t = setTimeout(onDone, 3200)
     return () => clearTimeout(t)
   }, [onDone])
-
   return (
     <div className={`adm-toast adm-toast--${type}`} role="status">
       {type === 'success'
@@ -123,7 +113,6 @@ function ConfirmModal({ title, message, confirmLabel, danger, onConfirm, onClose
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
   }, [onClose])
-
   return (
     <div className="adm-confirm-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="adm-confirm-box">
@@ -132,10 +121,7 @@ function ConfirmModal({ title, message, confirmLabel, danger, onConfirm, onClose
         {children}
         <div className="adm-confirm-actions">
           <button className="adm-btn-outline" onClick={onClose}>Cancel</button>
-          <button
-            className={danger ? 'adm-btn-danger armed' : 'adm-btn'}
-            onClick={onConfirm}
-          >
+          <button className={danger ? 'adm-btn-danger armed' : 'adm-btn'} onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>
@@ -184,7 +170,6 @@ function ProofModal({ order, onVerify, onReject, onClose }) {
   return (
     <div className="adm-confirm-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="adm-proof-modal">
-
         <div className="adm-proof-header">
           <div>
             <p className="adm-proof-eyebrow">Payment Proof</p>
@@ -195,7 +180,6 @@ function ProofModal({ order, onVerify, onReject, onClose }) {
           </div>
           <button className="adm-modal-close" onClick={onClose}>✕</button>
         </div>
-
         <div className="adm-proof-body">
           <div className="adm-proof-img-wrap">
             {fetching ? (
@@ -206,7 +190,6 @@ function ProofModal({ order, onVerify, onReject, onClose }) {
               <div className="adm-proof-no-img">No proof image uploaded yet</div>
             )}
           </div>
-
           <div className="adm-proof-details">
             <div className="adm-proof-detail-row">
               <span>Uploaded</span>
@@ -221,65 +204,39 @@ function ProofModal({ order, onVerify, onReject, onClose }) {
               <span>{proofMeta?.referenceNo || '—'}</span>
             </div>
           </div>
-
           <div className="adm-proof-refno">
             <label className="adm-label">
               Confirmed reference / transaction number
               <span className="adm-label-hint"> (optional)</span>
             </label>
-            <input
-              className="adm-input"
-              type="text"
-              value={refNo}
+            <input className="adm-input" type="text" value={refNo}
               onChange={e => setRefNo(e.target.value)}
-              placeholder="e.g. GCash ref 123456789"
-            />
+              placeholder="e.g. GCash ref 123456789" />
           </div>
-
           {proofImage && (
             <div className="adm-proof-refno">
               <label className="adm-label">
                 Rejection reason
                 <span className="adm-label-hint"> (optional — sent to customer)</span>
               </label>
-              <input
-                className="adm-input"
-                type="text"
-                value={reason}
+              <input className="adm-input" type="text" value={reason}
                 onChange={e => setReason(e.target.value)}
-                placeholder="e.g. Amount doesn't match, blurry image"
-              />
+                placeholder="e.g. Amount doesn't match, blurry image" />
             </div>
           )}
-
           <div className="adm-proof-actions">
-            <button
-              className="adm-btn"
-              disabled={loading || !proofImage}
-              onClick={async () => {
-                setLoading(true)
-                await onVerify(order.id, refNo)
-                setLoading(false)
-              }}
-            >
+            <button className="adm-btn" disabled={loading || !proofImage}
+              onClick={async () => { setLoading(true); await onVerify(order.id, refNo); setLoading(false) }}>
               {loading ? 'Verifying…' : '✓ Verify payment'}
             </button>
             {proofImage && (
-              <button
-                className="adm-btn-danger armed"
-                disabled={loading}
-                onClick={async () => {
-                  setLoading(true)
-                  await onReject(order.id, reason)
-                  setLoading(false)
-                }}
-              >
+              <button className="adm-btn-danger armed" disabled={loading}
+                onClick={async () => { setLoading(true); await onReject(order.id, reason); setLoading(false) }}>
                 ✕ Reject proof
               </button>
             )}
           </div>
         </div>
-
       </div>
     </div>
   )
@@ -296,13 +253,10 @@ function StatusControls({ order, onAction, onRefresh }) {
   const isTerminal = !next && !prev && escapes.length === 0
 
   function requestChange(toStatus) {
-    // Hard gate — never allow payment-gated status without verified payment
     if (PAYMENT_GATED.has(toStatus) && order.paymentStatus !== 'paid') return
-
     const meta       = STATUS_META[toStatus]
     const isDanger   = ['cancelled', 'refunded'].includes(toStatus)
     const isBackward = prev === toStatus
-
     setConfirm({
       toStatus,
       title:   `Change to "${meta?.label || toStatus}"?`,
@@ -339,87 +293,50 @@ function StatusControls({ order, onAction, onRefresh }) {
           onClose={() => setConfirm(null)}
         >
           {!confirm.danger && (
-            <input
-              className="adm-input"
-              placeholder="Internal note (optional)"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              style={{ marginBottom: 16 }}
-            />
+            <input className="adm-input" placeholder="Internal note (optional)"
+              value={note} onChange={e => setNote(e.target.value)}
+              style={{ marginBottom: 16 }} />
           )}
         </ConfirmModal>
       )}
-
       <p className="adm-drawer-section-title">Update Status</p>
       <p className="adm-drawer-section-hint">Customer receives an email on every change.</p>
-
       {isTerminal ? (
         <p className="adm-muted" style={{ fontStyle: 'italic', fontSize: 14 }}>
           This order is in a terminal state ({STATUS_META[order.status]?.label || order.status}) and cannot be changed.
         </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-          {/* ← Previous step */}
           {prev && (
-            <button
-              className="adm-btn-outline"
-              disabled={saving}
-              onClick={() => requestChange(prev)}
-            >
+            <button className="adm-btn-outline" disabled={saving} onClick={() => requestChange(prev)}>
               ← {STATUS_META[prev]?.label}
             </button>
           )}
-
-          {/* → Next step */}
           {next ? (
             <button
               className="adm-btn"
               disabled={saving || (PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid')}
               onClick={() => requestChange(next)}
-              title={
-                PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid'
-                  ? 'Payment must be verified before processing'
-                  : `Advance to ${STATUS_META[next]?.label}`
-              }
+              title={PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid' ? 'Payment must be verified before processing' : `Advance to ${STATUS_META[next]?.label}`}
             >
               {STATUS_META[next]?.label} →
               {PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid' && (
                 <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.85 }}>🔒 Verify payment first</span>
               )}
             </button>
-          ) : (
-            !isTerminal && (
-              <p className="adm-muted" style={{ fontSize: 13 }}>No further steps available.</p>
-            )
-          )}
-
-          {/* Escape: cancel / refund */}
+          ) : (!isTerminal && <p className="adm-muted" style={{ fontSize: 13 }}>No further steps available.</p>)}
           {escapes.length > 0 && (
-            <div style={{
-              display: 'flex', gap: 8, flexWrap: 'wrap',
-              paddingTop: 10, marginTop: 2,
-              borderTop: '1px solid var(--adm-border)',
-            }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 10, marginTop: 2, borderTop: '1px solid var(--adm-border)' }}>
               {escapes.map(s => (
-                <button
-                  key={s}
-                  className="adm-btn-danger"
-                  disabled={saving}
-                  onClick={() => requestChange(s)}
-                >
+                <button key={s} className="adm-btn-danger" disabled={saving} onClick={() => requestChange(s)}>
                   {STATUS_META[s]?.label}
                 </button>
               ))}
             </div>
           )}
-
         </div>
       )}
-
-      {saving && (
-        <p className="adm-muted" style={{ fontSize: 13, marginTop: 8 }}>Saving…</p>
-      )}
+      {saving && <p className="adm-muted" style={{ fontSize: 13, marginTop: 8 }}>Saving…</p>}
     </>
   )
 }
@@ -438,7 +355,6 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
   return (
     <div className="adm-drawer-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <aside className="adm-drawer">
-
         <div className="adm-drawer-header">
           <div>
             <p className="adm-drawer-eyebrow">Order</p>
@@ -447,132 +363,69 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
           </div>
           <button className="adm-modal-close" onClick={onClose}>✕</button>
         </div>
-
         <div className="adm-drawer-body">
-
-          {/* Status badges */}
           <div className="adm-drawer-badges">
             <StatusBadge status={order.status} />
             <StatusBadge status={order.paymentStatus} type="payment" />
             {order.proofStatus === 'pending' && (
-              <span
-                className="adm-badge adm-badge--pulse"
-                style={{ background: '#fff3cd', color: '#856404' }}
-              >
+              <span className="adm-badge adm-badge--pulse" style={{ background: '#fff3cd', color: '#856404' }}>
                 Proof pending review
               </span>
             )}
           </div>
-
-          {/* Customer */}
           <div className="adm-drawer-section">
             <p className="adm-drawer-section-title">Customer</p>
             <div className="adm-drawer-rows">
-              <div className="adm-drawer-row">
-                <span>Name</span>
-                <span>{order.customerName}</span>
-              </div>
+              <div className="adm-drawer-row"><span>Name</span><span>{order.customerName}</span></div>
               <div className="adm-drawer-row">
                 <span>Email</span>
-                <a href={`mailto:${order.customerEmail}`} className="adm-drawer-link">
-                  {order.customerEmail}
-                </a>
+                <a href={`mailto:${order.customerEmail}`} className="adm-drawer-link">{order.customerEmail}</a>
               </div>
-              {order.customerPhone && (
-                <div className="adm-drawer-row">
-                  <span>Phone</span>
-                  <span>{order.customerPhone}</span>
-                </div>
-              )}
+              {order.customerPhone && <div className="adm-drawer-row"><span>Phone</span><span>{order.customerPhone}</span></div>}
             </div>
           </div>
-
-          {/* Items */}
           <div className="adm-drawer-section">
             <p className="adm-drawer-section-title">Items ({totalItems})</p>
             <div className="adm-drawer-items">
               {(order.items || []).map((item, i) => (
                 <div key={i} className="adm-drawer-item">
-                  <span className="adm-drawer-item-name">
-                    {item.gownName}{item.sizeLabel ? ` — ${item.sizeLabel}` : ''}
-                  </span>
+                  <span className="adm-drawer-item-name">{item.gownName}{item.sizeLabel ? ` — ${item.sizeLabel}` : ''}</span>
                   <span className="adm-drawer-item-qty">×{item.quantity || 1}</span>
-                  <span className="adm-drawer-item-price">
-                    {fmtPhp(item.lineTotal || (item.unitPrice * (item.quantity || 1)))}
-                  </span>
+                  <span className="adm-drawer-item-price">{fmtPhp(item.lineTotal || (item.unitPrice * (item.quantity || 1)))}</span>
                 </div>
               ))}
             </div>
-            <div className="adm-drawer-total">
-              <span>Total</span>
-              <span>{fmtPhp(order.total)}</span>
-            </div>
+            <div className="adm-drawer-total"><span>Total</span><span>{fmtPhp(order.total)}</span></div>
           </div>
-
-          {/* Delivery */}
           <div className="adm-drawer-section">
             <p className="adm-drawer-section-title">Delivery</p>
             <div className="adm-drawer-rows">
-              <div className="adm-drawer-row">
-                <span>Method</span>
-                <span>{DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod}</span>
-              </div>
-              {order.deliveryAddress && (
-                <div className="adm-drawer-row adm-drawer-row--col">
-                  <span>Address</span>
-                  <span>{order.deliveryAddress}</span>
-                </div>
-              )}
+              <div className="adm-drawer-row"><span>Method</span><span>{DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod}</span></div>
+              {order.deliveryAddress && <div className="adm-drawer-row adm-drawer-row--col"><span>Address</span><span>{order.deliveryAddress}</span></div>}
             </div>
           </div>
-
-          {/* Payment */}
           <div className="adm-drawer-section">
             <p className="adm-drawer-section-title">Payment</p>
             <div className="adm-drawer-rows">
-              <div className="adm-drawer-row">
-                <span>Method</span>
-                <span>{PAYMENT_METHOD_LABEL[order.paymentMethod] || order.paymentMethod}</span>
-              </div>
-              <div className="adm-drawer-row">
-                <span>Status</span>
-                <StatusBadge status={order.paymentStatus} type="payment" />
-              </div>
-              {order.proofReferenceNo && (
-                <div className="adm-drawer-row">
-                  <span>Reference</span>
-                  <span>{order.proofReferenceNo}</span>
-                </div>
-              )}
+              <div className="adm-drawer-row"><span>Method</span><span>{PAYMENT_METHOD_LABEL[order.paymentMethod] || order.paymentMethod}</span></div>
+              <div className="adm-drawer-row"><span>Status</span><StatusBadge status={order.paymentStatus} type="payment" /></div>
+              {order.proofReferenceNo && <div className="adm-drawer-row"><span>Reference</span><span>{order.proofReferenceNo}</span></div>}
             </div>
             {order.proofStatus === 'pending' && (
-              <button
-                className="adm-btn-sm"
-                style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
-                onClick={() => onOpenProof(order)}
-              >
+              <button className="adm-btn-sm" style={{ marginTop: 12, width: '100%', justifyContent: 'center' }} onClick={() => onOpenProof(order)}>
                 Review payment proof →
               </button>
             )}
           </div>
-
-          {/* Notes */}
           {order.notes && (
             <div className="adm-drawer-section">
               <p className="adm-drawer-section-title">Notes</p>
               <p className="adm-drawer-note">{order.notes}</p>
             </div>
           )}
-
-          {/* Status controls */}
           <div className="adm-drawer-section adm-drawer-section--action">
-            <StatusControls
-              order={order}
-              onAction={onAction}
-              onRefresh={() => { onRefresh(); onClose() }}
-            />
+            <StatusControls order={order} onAction={onAction} onRefresh={() => { onRefresh(); onClose() }} />
           </div>
-
         </div>
       </aside>
     </div>
@@ -580,9 +433,10 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
 }
 
 // ── AdminOrdersPage ───────────────────────────────────────────────────────────
+
 export default function AdminOrdersPage() {
-  
   const { user: authUser, ready } = useRoleGuard(['admin', 'staff'], '/')
+
   const [orders,       setOrders      ] = useState([])
   const [loading,      setLoading     ] = useState(true)
   const [error,        setError       ] = useState('')
@@ -594,14 +448,22 @@ export default function AdminOrdersPage() {
   const [stats,        setStats       ] = useState(null)
   const [sortKey,      setSortKey     ] = useState('placedAt')
   const [sortDir,      setSortDir     ] = useState('desc')
- 
-  function headers() {
-    return { 'Content-Type': 'application/json', 'X-Admin-Secret': getAdminSecret() || '' }
-  }
 
-  function showToast(msg, type = 'success') {
-    setToast({ message: msg, type })
-  }
+  // FIX: Mirror filterStatus in a ref so useCallback closures always read
+  // the current value without needing it in their dependency array.
+  // This prevents the stale-closure bug where handleAction called
+  // loadOrders(filterStatus) but captured the filterStatus from when
+  // the callback was last created rather than the current value.
+  const filterStatusRef = useRef(filterStatus)
+  useEffect(() => { filterStatusRef.current = filterStatus }, [filterStatus])
+
+  // FIX: headers() moved outside render — stable reference, no closure issues.
+  const headers = useCallback(() => ({
+    'Content-Type': 'application/json',
+    'X-Admin-Secret': getAdminSecret() || '',
+  }), [])
+
+  function showToast(msg, type = 'success') { setToast({ message: msg, type }) }
 
   const loadOrders = useCallback(async (status = '') => {
     setLoading(true)
@@ -625,11 +487,14 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [headers])
 
   useEffect(() => { loadOrders() }, [loadOrders])
 
-  // ── Admin action dispatcher ──────────────────────────────────────────────
+  // FIX: handleAction now reads filterStatus from the ref (always current)
+  // rather than from the closure (potentially stale). This means calling
+  // loadOrders after verify/reject always uses the filter that is actually
+  // visible on screen, not the one captured at callback creation time.
   const handleAction = useCallback(async (orderId, action, payload = {}) => {
     try {
       const res  = await fetch('/api/admin/orders', {
@@ -642,10 +507,7 @@ export default function AdminOrdersPage() {
 
       if (action === 'status') {
         const { status } = payload
-        setOrders(p => p.map(o => o.id === orderId
-          ? { ...o, status, updatedAt: new Date().toISOString() }
-          : o
-        ))
+        setOrders(p => p.map(o => o.id === orderId ? { ...o, status, updatedAt: new Date().toISOString() } : o))
         setDrawerOrder(p => p?.id === orderId ? { ...p, status } : p)
         showToast(`Status updated to "${STATUS_META[status]?.label || status}"`)
       } else if (action === 'verify-payment') {
@@ -654,32 +516,27 @@ export default function AdminOrdersPage() {
           ? { ...o, paymentStatus: 'paid', status: 'paid', proofStatus: 'verified', proofReferenceNo: referenceNo || o.proofReferenceNo }
           : o
         ))
-        setDrawerOrder(p => p?.id === orderId
-          ? { ...p, paymentStatus: 'paid', status: 'paid', proofStatus: 'verified' }
-          : p
-        )
+        setDrawerOrder(p => p?.id === orderId ? { ...p, paymentStatus: 'paid', status: 'paid', proofStatus: 'verified' } : p)
         setProofOrder(null)
         showToast('Payment verified — customer notified')
-        loadOrders(filterStatus)
+        // Read from ref — always the current filter value
+        loadOrders(filterStatusRef.current)
       } else if (action === 'reject-payment') {
         setOrders(p => p.map(o => o.id === orderId
           ? { ...o, paymentStatus: 'unpaid', status: 'placed', proofStatus: 'rejected' }
           : o
         ))
-        setDrawerOrder(p => p?.id === orderId
-          ? { ...p, paymentStatus: 'unpaid', status: 'placed', proofStatus: 'rejected' }
-          : p
-        )
+        setDrawerOrder(p => p?.id === orderId ? { ...p, paymentStatus: 'unpaid', status: 'placed', proofStatus: 'rejected' } : p)
         setProofOrder(null)
         showToast('Proof rejected — customer notified', 'error')
-        loadOrders(filterStatus)
+        // Read from ref — always the current filter value
+        loadOrders(filterStatusRef.current)
       }
     } catch (e) {
       showToast(e.message, 'error')
     }
-  }, [filterStatus])
+  }, [headers, loadOrders])
 
-  // ── Sorting ──────────────────────────────────────────────────────────────
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
@@ -690,7 +547,6 @@ export default function AdminOrdersPage() {
     return <span style={{ marginLeft: 4, fontSize: 11 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
-  // ── Filter + search + sort ───────────────────────────────────────────────
   const filtered = orders
     .filter(o => {
       const matchStatus = !filterStatus || o.status === filterStatus
@@ -714,26 +570,17 @@ export default function AdminOrdersPage() {
 
   const pendingProofOrders = orders.filter(o => o.proofStatus === 'pending')
 
-  // Column header style
   const thStyle = {
-    fontSize: 11, fontWeight: 700,
-    color: 'var(--adm-text-3)',
-    letterSpacing: '0.07em',
-    textTransform: 'uppercase',
-    padding: '6px 18px',
-    cursor: 'pointer',
-    userSelect: 'none',
+    fontSize: 11, fontWeight: 700, color: 'var(--adm-text-3)',
+    letterSpacing: '0.07em', textTransform: 'uppercase',
+    padding: '6px 18px', cursor: 'pointer', userSelect: 'none',
   }
 
   if (!ready) return null
 
   return (
     <div className="adm-orders-page">
-
-      {toast && (
-        <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />
-      )}
-
+      {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
       {proofOrder && (
         <ProofModal
           order={proofOrder}
@@ -742,50 +589,31 @@ export default function AdminOrdersPage() {
           onClose={() => setProofOrder(null)}
         />
       )}
-
       {drawerOrder && (
         <OrderDrawer
           order={drawerOrder}
           onAction={handleAction}
           onOpenProof={o => { setDrawerOrder(null); setProofOrder(o) }}
           onClose={() => setDrawerOrder(null)}
-          onRefresh={() => loadOrders(filterStatus)}
+          onRefresh={() => loadOrders(filterStatusRef.current)}
         />
       )}
 
-      {/* Header */}
       <div className="adm-topbar">
         <h1 className="adm-page-title">Orders</h1>
         <button className="adm-btn-sm" onClick={() => loadOrders(filterStatus)}>↻ Refresh</button>
       </div>
 
-      {/* Stats */}
       {stats && (
         <div className="adm-stats-row">
-          <div className="adm-stat">
-            <div className="adm-stat-val">{stats.total}</div>
-            <div className="adm-stat-lbl">Total orders</div>
-          </div>
-          <div className={`adm-stat${stats.pendingProof > 0 ? ' warn' : ''}`}>
-            <div className="adm-stat-val">{stats.pendingProof}</div>
-            <div className="adm-stat-lbl">Proofs to review</div>
-          </div>
-          <div className={`adm-stat${stats.pendingPayment > 0 ? ' warn' : ''}`}>
-            <div className="adm-stat-val">{stats.pendingPayment}</div>
-            <div className="adm-stat-lbl">Awaiting payment</div>
-          </div>
-          <div className="adm-stat">
-            <div className="adm-stat-val">{stats.processing}</div>
-            <div className="adm-stat-lbl">In progress</div>
-          </div>
-          <div className="adm-stat">
-            <div className="adm-stat-val">{fmtPhp(stats.revenue)}</div>
-            <div className="adm-stat-lbl">Verified revenue</div>
-          </div>
+          <div className="adm-stat"><div className="adm-stat-val">{stats.total}</div><div className="adm-stat-lbl">Total orders</div></div>
+          <div className={`adm-stat${stats.pendingProof > 0 ? ' warn' : ''}`}><div className="adm-stat-val">{stats.pendingProof}</div><div className="adm-stat-lbl">Proofs to review</div></div>
+          <div className={`adm-stat${stats.pendingPayment > 0 ? ' warn' : ''}`}><div className="adm-stat-val">{stats.pendingPayment}</div><div className="adm-stat-lbl">Awaiting payment</div></div>
+          <div className="adm-stat"><div className="adm-stat-val">{stats.processing}</div><div className="adm-stat-lbl">In progress</div></div>
+          <div className="adm-stat"><div className="adm-stat-val">{fmtPhp(stats.revenue)}</div><div className="adm-stat-lbl">Verified revenue</div></div>
         </div>
       )}
 
-      {/* Pending proof alert */}
       {pendingProofOrders.length > 0 && (
         <div className="adm-proof-alert">
           <p className="adm-proof-alert-title">
@@ -796,41 +624,26 @@ export default function AdminOrdersPage() {
               <div key={o.id} className="adm-proof-alert-item">
                 <span className="adm-proof-alert-name">{o.orderNumber} · {o.customerName}</span>
                 <span style={{ fontWeight: 700, color: 'var(--adm-text)' }}>{fmtPhp(o.total)}</span>
-                <button className="adm-proof-alert-btn" onClick={() => setProofOrder(o)}>
-                  Review
-                </button>
+                <button className="adm-proof-alert-btn" onClick={() => setProofOrder(o)}>Review</button>
               </div>
             ))}
             {pendingProofOrders.length > 4 && (
-              <p className="adm-muted" style={{ fontSize: 13 }}>
-                +{pendingProofOrders.length - 4} more — use filters below
-              </p>
+              <p className="adm-muted" style={{ fontSize: 13 }}>+{pendingProofOrders.length - 4} more — use filters below</p>
             )}
           </div>
         </div>
       )}
 
-      {/* Filters */}
       <div className="adm-filter-row">
-        <input
-          className="adm-search"
-          placeholder="Search by order no., name, or email…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+        <input className="adm-search" placeholder="Search by order no., name, or email…"
+          value={search} onChange={e => setSearch(e.target.value)} />
         <div className="adm-filter-status">
-          <button
-            className={`adm-filter-pill${!filterStatus ? ' active' : ''}`}
-            onClick={() => { setFilterStatus(''); loadOrders('') }}
-          >
-            All
-          </button>
+          <button className={`adm-filter-pill${!filterStatus ? ' active' : ''}`}
+            onClick={() => { setFilterStatus(''); loadOrders('') }}>All</button>
           {['pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled'].map(s => (
-            <button
-              key={s}
+            <button key={s}
               className={`adm-filter-pill${filterStatus === s ? ' active' : ''}`}
-              onClick={() => { setFilterStatus(s); loadOrders(s) }}
-            >
+              onClick={() => { setFilterStatus(s); loadOrders(s) }}>
               {STATUS_META[s]?.label || s}
             </button>
           ))}
@@ -839,75 +652,42 @@ export default function AdminOrdersPage() {
 
       {error && <p className="adm-error-msg">{error}</p>}
 
-      {/* Order list */}
       {loading ? (
         <p className="adm-muted">Loading orders…</p>
       ) : filtered.length === 0 ? (
         <p className="adm-muted">No orders found.</p>
       ) : (
         <div>
-          {/* Sortable header row */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '150px 1fr 140px 110px 110px 90px',
-            gap: 14,
-          }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 140px 110px 110px 90px', gap: 14 }}>
             <div style={thStyle}>Order</div>
-            <div style={thStyle} onClick={() => toggleSort('customerName')}>
-              Customer {sortIcon('customerName')}
-            </div>
-            <div style={thStyle} onClick={() => toggleSort('status')}>
-              Status {sortIcon('status')}
-            </div>
+            <div style={thStyle} onClick={() => toggleSort('customerName')}>Customer {sortIcon('customerName')}</div>
+            <div style={thStyle} onClick={() => toggleSort('status')}>Status {sortIcon('status')}</div>
             <div style={{ ...thStyle, cursor: 'default' }}>Payment</div>
-            <div style={{ ...thStyle, textAlign: 'right' }} onClick={() => toggleSort('total')}>
-              Total {sortIcon('total')}
-            </div>
-            <div style={thStyle} onClick={() => toggleSort('placedAt')}>
-              Date {sortIcon('placedAt')}
-            </div>
+            <div style={{ ...thStyle, textAlign: 'right' }} onClick={() => toggleSort('total')}>Total {sortIcon('total')}</div>
+            <div style={thStyle} onClick={() => toggleSort('placedAt')}>Date {sortIcon('placedAt')}</div>
           </div>
-
-          {/* Order rows */}
           {filtered.map(order => (
-            <div
-              key={order.id}
+            <div key={order.id}
               className={`adm-order-row${order.proofStatus === 'pending' ? ' has-proof' : ''}`}
-              onClick={() => setDrawerOrder(order)}
-            >
+              onClick={() => setDrawerOrder(order)}>
               <div className="adm-order-num">
                 {order.orderNumber}
                 {order.proofStatus === 'pending' && (
-                  <span style={{
-                    marginLeft: 6,
-                    fontSize: 9,
-                    background: '#fff3cd',
-                    color: '#856404',
-                    padding: '1px 5px',
-                    borderRadius: 3,
-                    fontWeight: 700,
-                    letterSpacing: '0.04em',
-                  }}>
+                  <span style={{ marginLeft: 6, fontSize: 9, background: '#fff3cd', color: '#856404', padding: '1px 5px', borderRadius: 3, fontWeight: 700, letterSpacing: '0.04em' }}>
                     PROOF
                   </span>
                 )}
               </div>
-
               <div className="adm-order-customer">
                 <div className="adm-order-customer-name">{order.customerName}</div>
                 <div className="adm-order-customer-email">{order.customerEmail}</div>
               </div>
-
               <div><StatusBadge status={order.status} /></div>
               <div><StatusBadge status={order.paymentStatus} type="payment" /></div>
-
               <div className="adm-order-total">{fmtPhp(order.total)}</div>
-
               <div className="adm-order-actions" onClick={e => e.stopPropagation()}>
                 {order.proofStatus === 'pending' && (
-                  <button className="adm-btn-sm" onClick={() => setProofOrder(order)}>
-                    Verify
-                  </button>
+                  <button className="adm-btn-sm" onClick={() => setProofOrder(order)}>Verify</button>
                 )}
               </div>
             </div>
