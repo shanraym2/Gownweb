@@ -257,7 +257,7 @@ export default function GownDetailPage() {
         <p className="dp-404-n">404</p>
         <h1 className="dp-404-h">Gown not found</h1>
         <p className="dp-404-s">{error || 'This piece may no longer be available.'}</p>
-        <Link href="/gowns" className="dp-404-btn">Back to collection</Link>
+        <Link href="/gowns" className="dp-404-btn">Back to Catalogue</Link>
       </div>
       <Footer />
     </main>
@@ -276,7 +276,7 @@ export default function GownDetailPage() {
       <nav className="dp-bc container">
         <Link href="/">Home</Link>
         <span>/</span>
-        <Link href="/gowns">Collection</Link>
+        <Link href="/gowns">Catalogue</Link>
         <span>/</span>
         <span>{gown.name}</span>
       </nav>

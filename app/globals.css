@@ -10,6 +10,7 @@
 @import url("checkout-orders.css");
 @import url("recommender.css");
 @import url("virtual.css");
+@import url("myorders.css");
 :root {
     --color-bg: #FFFBFF; /* Very light off-white background */
     --color-text: #2C2C2C;
@@ -585,4 +586,5 @@ footer {
         .profile-page .btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
         .profile-page .btn-outline { background:transparent; color:var(--charcoal); border:1px solid rgba(44,36,32,0.25); }
         .profile-page .btn-outline:hover { border-color:var(--charcoal); background:rgba(44,36,32,0.04); }
-     
+
+        

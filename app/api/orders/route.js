@@ -15,7 +15,17 @@ function saveJson(orders) {
 }
 
 // ── Order number generator ────────────────────────────────────────────────────
-function makeOrderNumber(existing = []) {
+//
+// DB path: uses order_seq sequence — no race condition.
+// JSON path: falls back to MAX-based approach (acceptable for dev/JSON mode).
+
+async function makeOrderNumberDb(conn) {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const { rows } = await conn.query(`SELECT nextval('order_seq') AS n`)
+  return `JCE-${date}-${String(rows[0].n).padStart(4, '0')}`
+}
+
+function makeOrderNumberJson(existing = []) {
   const date   = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const prefix = `JCE-${date}-`
   const used   = existing
@@ -26,16 +36,10 @@ function makeOrderNumber(existing = []) {
 }
 
 // ── GET — fetch orders for a user only; admin must use /api/admin/orders ──────
-//
-// SECURITY: This endpoint is scoped strictly to the authenticated user.
-// The userId comes from x-user-id which must be set server-side by middleware
-// (or a session layer). We never allow listing all orders here — admins use
-// the dedicated /api/admin/orders endpoint which enforces x-admin-secret.
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const userId = searchParams.get('userId')
 
-  // Require a userId — no anonymous or wildcard access
   if (!userId) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
@@ -94,9 +98,6 @@ export async function GET(request) {
 export async function POST(request) {
   const userId = request.headers.get('x-user-id')
 
-  // FIXED: removed debug console.log statements that exposed USE_DB, userId,
-  // and DATABASE_URL presence on every order creation in production.
-
   if (!userId) {
     return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
   }
@@ -111,24 +112,25 @@ export async function POST(request) {
     items, subtotal, total, notes,
   } = body
 
-  if (!customerEmail)          return NextResponse.json({ ok: false, error: 'Email required' },          { status: 400 })
-  if (!paymentMethod)          return NextResponse.json({ ok: false, error: 'Payment method required' }, { status: 400 })
-  if (!deliveryMethod)         return NextResponse.json({ ok: false, error: 'Delivery method required' }, { status: 400 })
-  if (!items?.length)          return NextResponse.json({ ok: false, error: 'No items in order' },       { status: 400 })
-  if (!['gcash','bdo','cash'].includes(paymentMethod)) {
+  if (!customerEmail)  return NextResponse.json({ ok: false, error: 'Email required' },           { status: 400 })
+  if (!paymentMethod)  return NextResponse.json({ ok: false, error: 'Payment method required' },  { status: 400 })
+  if (!deliveryMethod) return NextResponse.json({ ok: false, error: 'Delivery method required' }, { status: 400 })
+  if (!items?.length)  return NextResponse.json({ ok: false, error: 'No items in order' },        { status: 400 })
+
+  if (!['gcash', 'bdo', 'cash'].includes(paymentMethod)) {
     return NextResponse.json({ ok: false, error: 'Invalid payment method' }, { status: 400 })
   }
-  if (!['pickup','lalamove'].includes(deliveryMethod)) {
+  if (!['pickup', 'lalamove'].includes(deliveryMethod)) {
     return NextResponse.json({ ok: false, error: 'Invalid delivery method' }, { status: 400 })
   }
   if (deliveryMethod === 'lalamove' && !deliveryAddress?.trim()) {
     return NextResponse.json({ ok: false, error: 'Delivery address required for Lalamove' }, { status: 400 })
   }
 
-  // ── JSON path ────────────────────────────────────────────────────────────────
+  // ── JSON path ─────────────────────────────────────────────────────────────
   if (!USE_DB) {
     const all         = loadJson()
-    const orderNumber = makeOrderNumber(all)
+    const orderNumber = makeOrderNumberJson(all)   // ← JSON-specific generator
     const newOrder = {
       id:              Date.now(),
       orderNumber,
@@ -161,58 +163,81 @@ export async function POST(request) {
     return NextResponse.json({ ok: true, orderId: newOrder.id, orderNumber })
   }
 
-  // ── DB path ──────────────────────────────────────────────────────────────────
+  // ── DB path ───────────────────────────────────────────────────────────────
   try {
-    const { query, getClient } = await import('@/lib/db')
+    const { getClient } = await import('@/lib/db')
 
-    const recent = await query(
-      `SELECT order_number FROM orders WHERE placed_at > NOW() - INTERVAL '1 day'`
-    )
-    const orderNumber = makeOrderNumber(recent.map(r => ({ orderNumber: r.order_number })))
-
+    // FIX: conn must be obtained BEFORE makeOrderNumberDb is called,
+    // since makeOrderNumberDb needs the connection to call nextval().
+    // The previous version called makeOrderNumber(conn) before `conn` was
+    // declared, which threw: ReferenceError: Cannot access 'conn' before
+    // initialization.
     const conn = await getClient()
-    let orderId
+
     try {
       await conn.query('BEGIN')
+
+      // Generate order number inside the transaction using the DB sequence
+      const orderNumber = await makeOrderNumberDb(conn)
 
       const { rows: [order] } = await conn.query(
         `INSERT INTO orders
           (order_number, user_id, customer_email, customer_name,
-            status, payment_method, payment_status,
-            delivery_method, delivery_address,
-            subtotal, discount_total, shipping_fee, total, notes)
-        VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,0,$9,$10)
-        RETURNING *`,
+           status, payment_method, payment_status,
+           delivery_method, delivery_address,
+           subtotal, discount_total, shipping_fee, total, notes)
+         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,0,$9,$10)
+         RETURNING *`,
         [
           orderNumber, userId,
           customerEmail.trim().toLowerCase(), (customerName || '').trim(),
           paymentMethod,
           deliveryMethod, (deliveryAddress || '').trim() || null,
           Number(subtotal) || 0,
-          Number(total) || 0,
+          Number(total)    || 0,
           (notes || '').trim(),
         ]
       )
-      orderId = order.id
 
       for (const item of items) {
-        const lineTotal = (Number(item.unitPrice) || 0) * (item.quantity || 1)
+        const qty       = item.quantity || 1
+        const lineTotal = (Number(item.unitPrice) || 0) * qty
+
         await conn.query(
           `INSERT INTO order_items
             (order_id, gown_id, gown_name, size_label, quantity, unit_price, line_total)
-          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [order.id, item.gownId || null, item.gownName,
-          item.sizeLabel || null, item.quantity || 1,
-          Number(item.unitPrice) || 0, lineTotal]
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            order.id, item.gownId || null, item.gownName,
+            item.sizeLabel || null, qty,
+            Number(item.unitPrice) || 0, lineTotal,
+          ]
         )
+
         if (item.gownId && item.sizeLabel) {
-          await conn.query(
+          const { rowCount } = await conn.query(
             `UPDATE gown_inventory
-            SET reserved_qty = reserved_qty + $1
-            WHERE gown_id = $2 AND size_label = $3
-              AND (stock_qty - reserved_qty) >= $1`,
-            [item.quantity || 1, item.gownId, item.sizeLabel]
+             SET reserved_qty = reserved_qty + $1
+             WHERE gown_id    = $2
+               AND size_label = $3
+               AND (stock_qty - reserved_qty) >= $1`,
+            [qty, item.gownId, item.sizeLabel]
           )
+
+          // rowCount === 0 means insufficient available stock — roll back
+          // and return a clear, customer-facing error instead of silently
+          // placing an order that can't be fulfilled.
+          if (rowCount === 0) {
+            await conn.query('ROLLBACK')
+            return NextResponse.json(
+              {
+                ok:         false,
+                error:      `"${item.gownName}"${item.sizeLabel ? ` (size ${item.sizeLabel})` : ''} is no longer available in the requested quantity. Please update your cart.`,
+                outOfStock: true,
+              },
+              { status: 409 }
+            )
+          }
         }
       }
 
@@ -248,11 +273,15 @@ export async function PATCH(request) {
   const { orderId, status, paymentStatus } = body
   if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
 
-  const VALID_STATUSES = ['placed','pending_payment','paid','processing','ready','shipped','completed','cancelled','refunded']
+  const VALID_STATUSES = [
+    'placed', 'pending_payment', 'paid', 'processing',
+    'ready', 'shipped', 'completed', 'cancelled', 'refunded',
+  ]
   if (status && !VALID_STATUSES.includes(status)) {
     return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 })
   }
 
+  // Customers can only mark as 'completed' (confirm receipt)
   if (!isAdmin && status && status !== 'completed') {
     return NextResponse.json({ ok: false, error: 'Unauthorized status change' }, { status: 403 })
   }
@@ -293,6 +322,7 @@ export async function PATCH(request) {
 }
 
 // ── Email helpers ─────────────────────────────────────────────────────────────
+
 async function sendOrderEmail(order) {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return
   const { default: nodemailer } = await import('nodemailer')
@@ -307,7 +337,28 @@ async function sendOrderEmail(order) {
     from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
     to:      order.customerEmail || order.customer_email,
     subject: `Order confirmed — ${order.orderNumber || order.order_number}`,
-    text: `Hi ${order.customerName || order.customer_name || 'there'},\n\nThank you for your order at JCE Bridal Boutique!\n\nOrder number: ${order.orderNumber || order.order_number}\nStatus: Placed — awaiting payment confirmation\n\nItems:\n${itemLines}\n\nTotal: ₱${Number(order.total).toLocaleString('en-PH')}\n\nPayment method: ${order.paymentMethod || order.payment_method}\n${(order.paymentMethod || order.payment_method) !== 'cash' ? 'Please upload your proof of payment within 24 hours to avoid cancellation.' : ''}\n\nDelivery: ${order.deliveryMethod || order.delivery_method}\n${order.deliveryAddress || order.delivery_address ? `Address: ${order.deliveryAddress || order.delivery_address}` : ''}\n\nYou can track your order on your profile page.\n\nThank you,\nJCE Bridal Boutique`.trim(),
+    text: `Hi ${order.customerName || order.customer_name || 'there'},
+
+Thank you for your order at JCE Bridal Boutique!
+
+Order number: ${order.orderNumber || order.order_number}
+Status: Placed — awaiting payment confirmation
+
+Items:
+${itemLines}
+
+Total: ₱${Number(order.total).toLocaleString('en-PH')}
+
+Payment method: ${order.paymentMethod || order.payment_method}
+${(order.paymentMethod || order.payment_method) !== 'cash' ? 'Please upload your proof of payment within 24 hours to avoid cancellation.' : ''}
+
+Delivery: ${order.deliveryMethod || order.delivery_method}
+${order.deliveryAddress || order.delivery_address ? `Address: ${order.deliveryAddress || order.delivery_address}` : ''}
+
+You can track your order on your profile page.
+
+Thank you,
+JCE Bridal Boutique`.trim(),
   })
 }
 

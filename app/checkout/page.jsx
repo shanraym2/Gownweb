@@ -318,19 +318,21 @@
       !m.onlyWith || m.onlyWith === delivery
     )
 
-    // If current paymentMethod is no longer available (e.g. switched away from pickup), clear it
+    // Clear payment method when it's no longer available for the chosen delivery
     useEffect(() => {
-      if (paymentMethod && !available.find(m => m.id === paymentMethod)) {
+      if (paymentMethod && !available.some(m => m.id === paymentMethod)) {
         setPaymentMethod('')
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [delivery])
+    }, [delivery, paymentMethod, setPaymentMethod])
 
     const handleNext = () => {
       if (!paymentMethod) { setError('Please select a payment method.'); return }
       setError('')
       onNext()
     }
+
+ 
 
     return (
       <div className="ck-step-body">
@@ -671,10 +673,8 @@
       }
     }
 
-    // Don't render until we've confirmed user status
-    if (!userChecked) return null
-    if (!user)        return null
-
+    const isLoadingUser = !userChecked
+    const isLoggedOut = userChecked && !user
     // Sidebar should render whenever: user is set, items exist, gowns are loaded
     const showSidebar = items.length > 0 && !loadingGowns
 
@@ -682,7 +682,12 @@
       <main className="ck-page">
         <Header solid />
         <div className="ck-spacer" />
-
+         {isLoadingUser ? (
+        <div className="ck-loading">Checking session…</div>
+      ) : isLoggedOut ? (
+        <div className="ck-loading">Redirecting…</div>
+      ) : (
+        <>
         {/* Hero */}
         <section className="ck-hero">
           <h1 className="ck-hero-title">Checkout</h1>
@@ -762,7 +767,7 @@
             />
           )}
         </div>
-
+        </>)}
         <Footer />
       </main>
     )

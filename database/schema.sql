@@ -1,112 +1,150 @@
 -- =============================================================
--- FitMatcher – FINAL CLEAN SCHEMA
--- JCE Bridal Boutique E-Commerce
+-- JCE Bridal Boutique — Canonical Schema
+-- Matches live DB as of dump (PostgreSQL 18.3)
+-- =============================================================
+-- Run order matters — tables with FK dependencies come after
+-- the tables they reference.
 -- =============================================================
 
 -- EXTENSIONS
-create extension if not exists "pgcrypto";
-create extension if not exists "citext";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS "citext"   WITH SCHEMA public;
+
+
+-- =============================================================
+-- FUNCTION: auto-update updated_at on row change
+-- =============================================================
+
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
 
 
 -- =============================================================
 -- USERS
 -- =============================================================
 
-create table public.users (
-  id uuid primary key default gen_random_uuid(),
-  email citext not null unique,
-  first_name text not null,
-  last_name text not null,
-  phone text,
-  password_hash text not null,
-  role text not null default 'customer' check (role in ('customer','admin')),
-  is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+CREATE TABLE public.users (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         citext      NOT NULL UNIQUE,
+  first_name    text        NOT NULL,
+  last_name     text        NOT NULL,
+  phone         text,
+  password_hash text        NOT NULL,
+  role          text        NOT NULL DEFAULT 'customer'
+                            CHECK (role IN ('customer', 'staff', 'admin')),
+  is_active     boolean     NOT NULL DEFAULT true,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TRIGGER trg_users_updated_at
+  BEFORE UPDATE ON public.users
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+-- =============================================================
+-- DEVICE TOKENS  (trust-this-device after OTP)
+-- =============================================================
+
+CREATE TABLE public.device_tokens (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  token_hash text        NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_device_tokens_hash    ON public.device_tokens(token_hash);
+CREATE INDEX idx_device_tokens_user_id ON public.device_tokens(user_id);
 
 
 -- =============================================================
 -- USER ADDRESSES
 -- =============================================================
 
-create table public.user_addresses (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.users(id) on delete cascade,
-  label text,
-  recipient_name text not null,
-  line1 text not null,
-  line2 text,
-  city text not null,
-  province text,
-  postal_code text,
-  country text not null default 'PH',
-  phone text,
-  is_default boolean not null default false,
-  created_at timestamptz not null default now()
+CREATE TABLE public.user_addresses (
+  id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  label          text,
+  recipient_name text        NOT NULL,
+  line1          text        NOT NULL,
+  line2          text,
+  city           text        NOT NULL,
+  province       text,
+  postal_code    text,
+  country        text        NOT NULL DEFAULT 'PH',
+  phone          text,
+  is_default     boolean     NOT NULL DEFAULT false,
+  created_at     timestamptz NOT NULL DEFAULT now()
 );
 
-create index idx_user_addresses_user_id on public.user_addresses(user_id);
+CREATE INDEX idx_user_addresses_user_id ON public.user_addresses(user_id);
 
 
 -- =============================================================
--- OTP
+-- OTP CODES
 -- =============================================================
 
-create table public.otp_codes (
-  id uuid primary key default gen_random_uuid(),
-  email citext not null,
-  purpose text not null check (purpose in ('login','signup','password_reset')),
-  code_hash text not null,
-  attempts int not null default 0,
-  max_attempts int not null default 5,
-  expires_at timestamptz not null,
-  consumed_at timestamptz,
-  created_at timestamptz not null default now()
+CREATE TABLE public.otp_codes (
+  id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  email        citext      NOT NULL,
+  purpose      text        NOT NULL
+               CHECK (purpose IN ('login', 'signup', 'password_reset')),
+  code_hash    text        NOT NULL,
+  attempts     int         NOT NULL DEFAULT 0,
+  max_attempts int         NOT NULL DEFAULT 5,
+  expires_at   timestamptz NOT NULL,
+  consumed_at  timestamptz,
+  created_at   timestamptz NOT NULL DEFAULT now()
 );
 
-create index idx_otp_email_purpose on public.otp_codes(email, purpose);
+CREATE INDEX idx_otp_email_purpose ON public.otp_codes(email, purpose);
+CREATE INDEX idx_otp_expires_at    ON public.otp_codes(expires_at);
 
 
 -- =============================================================
 -- CATEGORIES
 -- =============================================================
 
-create table public.categories (
-  id uuid primary key default gen_random_uuid(),
-  slug text not null unique,
-  name text not null,
-  created_at timestamptz not null default now()
+CREATE TABLE public.categories (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug       text        NOT NULL UNIQUE,
+  name       text        NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 
 
 -- =============================================================
--- SUPPLIERS (MUST COME BEFORE GOWNS)
+-- SUPPLIERS
 -- =============================================================
 
-create table public.suppliers (
-  id uuid primary key default gen_random_uuid(),
-  name text not null unique,
-  contact_name text,
+CREATE TABLE public.suppliers (
+  id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          text        NOT NULL UNIQUE,
+  contact_name  text,
   contact_email text,
   contact_phone text,
-  notes text,
-  is_active boolean not null default true,
-  created_at timestamptz not null default now()
+  notes         text,
+  is_active     boolean     NOT NULL DEFAULT true,
+  created_at    timestamptz NOT NULL DEFAULT now()
 );
 
-
-create table public.supplier_size_metrics (
-  id uuid primary key default gen_random_uuid(),
-  supplier_id uuid not null references public.suppliers(id) on delete cascade,
-  size_label text not null,
-  bust_min numeric(5,2),
-  bust_max numeric(5,2),
-  waist_min numeric(5,2),
-  waist_max numeric(5,2),
-  hip_min numeric(5,2),
-  hip_max numeric(5,2),
-  unique (supplier_id, size_label)
+CREATE TABLE public.supplier_size_metrics (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  supplier_id uuid        NOT NULL REFERENCES public.suppliers(id) ON DELETE CASCADE,
+  size_label  text        NOT NULL,
+  bust_min    numeric(5,2),
+  bust_max    numeric(5,2),
+  waist_min   numeric(5,2),
+  waist_max   numeric(5,2),
+  hip_min     numeric(5,2),
+  hip_max     numeric(5,2),
+  UNIQUE (supplier_id, size_label)
 );
 
 
@@ -114,265 +152,329 @@ create table public.supplier_size_metrics (
 -- GOWNS
 -- =============================================================
 
-create table public.gowns (
-  id uuid primary key default gen_random_uuid(),
-  supplier_id uuid references public.suppliers(id) on delete set null,
-  category_id uuid references public.categories(id) on delete set null,
-  sku text not null unique,
-  name text not null,
-  description text,
-  color text,
-  silhouette text,
-  fabric text,
-  neckline text,
-  embellishment text,
-  size_chart jsonb,
-  sale_price numeric(12,2) not null check (sale_price >= 0),
-  is_active boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+CREATE TABLE public.gowns (
+  id                uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
+  supplier_id       uuid         REFERENCES public.suppliers(id)  ON DELETE SET NULL,
+  category_id       uuid         REFERENCES public.categories(id) ON DELETE SET NULL,
+  sku               text         NOT NULL UNIQUE,
+  name              text         NOT NULL,
+  description       text,
+  color             text,
+  silhouette        text,
+  fabric            text,
+  neckline          text,
+  embellishment     text,
+  size_chart        jsonb,
+  sale_price        numeric(12,2) NOT NULL CHECK (sale_price >= 0),
+  is_active         boolean       NOT NULL DEFAULT true,
+  -- Product type displayed in admin UI
+  type              text          NOT NULL DEFAULT 'Gowns',
+  -- Optional calibration hints for the Virtual Try-On overlay.
+  -- Fields: necklineY (0–0.3), waistY (0.2–0.7), hemY (0.7–1),
+  --         shoulderPad (1–2.5), skirtFlare (1–2).
+  -- NULL = use frontend defaults.
+  tryon_calibration jsonb         DEFAULT NULL,
+  created_at        timestamptz   NOT NULL DEFAULT now(),
+  updated_at        timestamptz   NOT NULL DEFAULT now()
 );
 
-create index idx_gowns_category on public.gowns(category_id);
-create index idx_gowns_active on public.gowns(is_active);
+CREATE INDEX idx_gowns_category ON public.gowns(category_id);
+CREATE INDEX idx_gowns_active   ON public.gowns(is_active);
+
+CREATE TRIGGER trg_gowns_updated_at
+  BEFORE UPDATE ON public.gowns
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 -- =============================================================
 -- GOWN IMAGES
 -- =============================================================
 
-create table public.gown_images (
-  id uuid primary key default gen_random_uuid(),
-  gown_id uuid not null references public.gowns(id) on delete cascade,
-  image_url text not null,
-  alt text,
-  sort_order int not null default 0,
-  is_primary boolean not null default false,
-  is_tryon_asset boolean not null default false
+CREATE TABLE public.gown_images (
+  id             uuid    PRIMARY KEY DEFAULT gen_random_uuid(),
+  gown_id        uuid    NOT NULL REFERENCES public.gowns(id) ON DELETE CASCADE,
+  image_url      text    NOT NULL,
+  alt            text,
+  sort_order     int     NOT NULL DEFAULT 0,
+  is_primary     boolean NOT NULL DEFAULT false,
+  -- When true, this image is used exclusively for the Virtual Try-On overlay
+  -- (ideally a transparent PNG of the isolated gown).
+  is_tryon_asset boolean NOT NULL DEFAULT false
 );
 
-create index idx_gown_images_gown on public.gown_images(gown_id);
+CREATE INDEX idx_gown_images_gown  ON public.gown_images(gown_id);
+-- Partial index — only indexes the (typically one) try-on asset per gown
+CREATE INDEX idx_gown_images_tryon ON public.gown_images(gown_id)
+  WHERE is_tryon_asset = true;
 
 
 -- =============================================================
--- INVENTORY
+-- GOWN INVENTORY
 -- =============================================================
 
-create table public.gown_inventory (
-  id uuid primary key default gen_random_uuid(),
-  gown_id uuid not null references public.gowns(id) on delete cascade,
-  size_label text not null,
-  stock_qty int not null default 0 check (stock_qty >= 0),
-  reserved_qty int not null default 0 check (reserved_qty >= 0),
-  unique (gown_id, size_label)
+CREATE TABLE public.gown_inventory (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  gown_id     uuid NOT NULL REFERENCES public.gowns(id) ON DELETE CASCADE,
+  size_label  text NOT NULL,
+  stock_qty   int  NOT NULL DEFAULT 0 CHECK (stock_qty   >= 0),
+  reserved_qty int NOT NULL DEFAULT 0 CHECK (reserved_qty >= 0),
+  UNIQUE (gown_id, size_label)
 );
+
+-- =============================================================
+-- GOWN INVENTORY LOG  (stock adjustment history)
+-- =============================================================
+
+CREATE TABLE public.gown_inventory_log (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  gown_id    uuid        NOT NULL REFERENCES public.gowns(id)  ON DELETE CASCADE,
+  size_label text        NOT NULL,
+  old_stock  int         NOT NULL,
+  new_stock  int         NOT NULL,
+  -- Computed delta — never write this column directly
+  delta      int         GENERATED ALWAYS AS (new_stock - old_stock) STORED,
+  changed_by uuid        REFERENCES public.users(id) ON DELETE SET NULL,
+  note       text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_inventory_log_gown
+  ON public.gown_inventory_log(gown_id, created_at DESC);
 
 
 -- =============================================================
 -- ORDERS
 -- =============================================================
 
-create table public.orders (
-  id uuid primary key default gen_random_uuid(),
-  order_number text not null unique,
-  user_id uuid references public.users(id) on delete set null,
-  customer_email citext not null,
-  customer_name text not null,
-  customer_phone text,
+-- Sequence replaces the MAX() query approach — eliminates race condition
+-- when two orders are placed simultaneously.
+-- Usage: SELECT nextval('order_seq') AS n  →  JCE-YYYYMMDD-{n padded to 4}
+CREATE SEQUENCE IF NOT EXISTS public.order_seq
+  START 1 INCREMENT 1 MINVALUE 1 NO MAXVALUE CACHE 1;
 
-  status text not null default 'placed'
-    check (status in ('placed','pending_payment','paid','processing','ready','shipped','completed','cancelled','refunded')),
+CREATE TABLE public.orders (
+  id               uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_number     text         NOT NULL UNIQUE,
+  user_id          uuid         REFERENCES public.users(id) ON DELETE SET NULL,
+  customer_email   citext       NOT NULL,
+  customer_name    text         NOT NULL,
+  customer_phone   text,
 
-  payment_method text not null check (payment_method in ('gcash','bdo','cash')),
-  payment_status text not null default 'unpaid'
-    check (payment_status in ('unpaid','pending','paid','failed','refunded')),
+  status           text         NOT NULL DEFAULT 'placed'
+                   CHECK (status IN (
+                     'placed', 'pending_payment', 'paid', 'processing',
+                     'ready', 'shipped', 'completed', 'cancelled', 'refunded'
+                   )),
 
-  delivery_method text not null default 'pickup'
-    check (delivery_method in ('pickup','lalamove')),
+  payment_method   text         NOT NULL
+                   CHECK (payment_method IN ('gcash', 'bdo', 'cash')),
+
+  payment_status   text         NOT NULL DEFAULT 'unpaid'
+                   CHECK (payment_status IN (
+                     'unpaid', 'pending', 'paid', 'failed', 'refunded'
+                   )),
+
+  delivery_method  text         NOT NULL DEFAULT 'pickup'
+                   CHECK (delivery_method IN ('pickup', 'lalamove')),
   delivery_address text,
 
-  subtotal numeric(12,2) not null check (subtotal >= 0),
-  discount_total numeric(12,2) not null default 0,
-  shipping_fee numeric(12,2) not null default 0,
-  total numeric(12,2) not null check (total >= 0),
+  subtotal         numeric(12,2) NOT NULL CHECK (subtotal      >= 0),
+  discount_total   numeric(12,2) NOT NULL DEFAULT 0 CHECK (discount_total >= 0),
+  shipping_fee     numeric(12,2) NOT NULL DEFAULT 0 CHECK (shipping_fee   >= 0),
+  total            numeric(12,2) NOT NULL CHECK (total          >= 0),
 
-  notes text,
-  placed_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  notes            text,
+  placed_at        timestamptz  NOT NULL DEFAULT now(),
+  updated_at       timestamptz  NOT NULL DEFAULT now()
 );
 
-create index idx_orders_user_id on public.orders(user_id);
-create index idx_orders_email on public.orders(customer_email);
+CREATE INDEX idx_orders_user_id ON public.orders(user_id);
+CREATE INDEX idx_orders_email   ON public.orders(customer_email);
+CREATE INDEX idx_orders_status  ON public.orders(status);
+
+CREATE TRIGGER trg_orders_updated_at
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 -- =============================================================
 -- ORDER ITEMS
 -- =============================================================
 
-create table public.order_items (
-  id uuid primary key default gen_random_uuid(),
-  order_id uuid not null references public.orders(id) on delete cascade,
-  gown_id uuid references public.gowns(id) on delete set null,
-  gown_name text not null,
+CREATE TABLE public.order_items (
+  id         uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id   uuid         NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  gown_id    uuid         REFERENCES public.gowns(id) ON DELETE SET NULL,
+  gown_name  text         NOT NULL,
   size_label text,
-  quantity int not null check (quantity > 0),
-  unit_price numeric(12,2) not null check (unit_price >= 0),
-  line_total numeric(12,2) not null check (line_total >= 0)
+  quantity   int          NOT NULL CHECK (quantity   > 0),
+  unit_price numeric(12,2) NOT NULL CHECK (unit_price >= 0),
+  line_total numeric(12,2) NOT NULL CHECK (line_total >= 0)
 );
 
-create index idx_order_items_order on public.order_items(order_id);
+CREATE INDEX idx_order_items_order ON public.order_items(order_id);
 
 
 -- =============================================================
 -- PAYMENTS
 -- =============================================================
 
-create table public.payments (
-  id uuid primary key default gen_random_uuid(),
-  order_id uuid not null unique references public.orders(id) on delete cascade,
-  method text not null check (method in ('gcash','bdo','cash')),
-  amount numeric(12,2) not null check (amount >= 0),
-  reference_no text,
+CREATE TABLE public.payments (
+  id              uuid         PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id        uuid         NOT NULL UNIQUE REFERENCES public.orders(id) ON DELETE CASCADE,
+  method          text         NOT NULL CHECK (method IN ('gcash', 'bdo', 'cash')),
+  amount          numeric(12,2) NOT NULL CHECK (amount >= 0),
+  reference_no    text,
+  -- NOTE: proof_image_url currently stores base64 data URLs.
+  -- TODO: migrate to disk/object storage and store only the URL path.
   proof_image_url text,
-  paid_at timestamptz,
-  status text not null default 'pending'
-    check (status in ('pending','verified','rejected','refunded')),
-  created_at timestamptz not null default now()
+  paid_at         timestamptz,
+  status          text         NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'verified', 'rejected', 'refunded')),
+  created_at      timestamptz  NOT NULL DEFAULT now()
 );
+
+CREATE INDEX idx_payments_order ON public.payments(order_id);
 
 
 -- =============================================================
 -- FAVORITES
 -- =============================================================
 
-create table public.favorites (
-  user_id uuid not null references public.users(id) on delete cascade,
-  gown_id uuid not null references public.gowns(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  primary key (user_id, gown_id)
+CREATE TABLE public.favorites (
+  user_id    uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  gown_id    uuid        NOT NULL REFERENCES public.gowns(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, gown_id)
 );
 
 
 -- =============================================================
--- USER MEASUREMENTS (SIZE RECOMMENDER)
+-- USER MEASUREMENTS  (size recommender)
 -- =============================================================
 
-create table public.user_measurements (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null unique references public.users(id) on delete cascade,
-  height_cm numeric(5,1),
-  weight_kg numeric(5,1),
-  bust_cm numeric(5,1),
-  waist_cm numeric(5,1),
-  hips_cm numeric(5,1),
-  source text not null default 'manual'
-    check (source in ('camera','manual','tape')),
-  measured_at timestamptz not null default now()
+CREATE TABLE public.user_measurements (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid        NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+  height_cm   numeric(5,1),
+  weight_kg   numeric(5,1),
+  bust_cm     numeric(5,1),
+  waist_cm    numeric(5,1),
+  hips_cm     numeric(5,1),
+  source      text        NOT NULL DEFAULT 'manual'
+              CHECK (source IN ('camera', 'manual', 'tape')),
+  measured_at timestamptz NOT NULL DEFAULT now()
 );
 
 
 -- =============================================================
--- STYLE PREFERENCES
+-- USER STYLE PREFERENCES
 -- =============================================================
 
-create table public.user_style_preferences (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null unique references public.users(id) on delete cascade,
-  body_type text,
-  skin_tone text,
-  style_tags jsonb not null default '[]',
-  preferred_silhouettes jsonb not null default '[]',
-  preferred_colors jsonb not null default '[]',
-  updated_at timestamptz not null default now()
+CREATE TABLE public.user_style_preferences (
+  id                   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id              uuid        NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+  body_type            text,
+  skin_tone            text,
+  style_tags           jsonb       NOT NULL DEFAULT '[]',
+  preferred_silhouettes jsonb      NOT NULL DEFAULT '[]',
+  preferred_colors     jsonb       NOT NULL DEFAULT '[]',
+  updated_at           timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TRIGGER trg_style_prefs_updated_at
+  BEFORE UPDATE ON public.user_style_preferences
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 -- =============================================================
 -- AR FIT PROFILES
 -- =============================================================
 
-create table public.ar_fit_profiles (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null unique references public.users(id) on delete cascade,
-  profile jsonb not null default '{}'::jsonb,
-  updated_at timestamptz not null default now()
+CREATE TABLE public.ar_fit_profiles (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid        NOT NULL UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+  profile    jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TRIGGER trg_ar_profiles_updated_at
+  BEFORE UPDATE ON public.ar_fit_profiles
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- =============================================================
--- AUTO updated_at TRIGGER
--- =============================================================
-
-create or replace function set_updated_at()
-returns trigger as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$ language plpgsql;
-
-create trigger trg_users_updated
-before update on public.users
-for each row execute function set_updated_at();
-
-create trigger trg_gowns_updated
-before update on public.gowns
-for each row execute function set_updated_at();
-
-create trigger trg_orders_updated
-before update on public.orders
-for each row execute function set_updated_at();
 
 -- =============================================================
 -- CMS: HERO SLIDES
 -- =============================================================
-create table public.cms_hero_slides (
-  id         uuid primary key default gen_random_uuid(),
-  image_url  text not null,
-  subtitle   text not null default '',
-  heading    text not null default '',
-  body       text not null default '',
-  sort_order int not null default 0,
-  is_active  boolean not null default true,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+
+CREATE TABLE public.cms_hero_slides (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  image_url  text        NOT NULL,
+  subtitle   text        NOT NULL DEFAULT '',
+  heading    text        NOT NULL DEFAULT '',
+  body       text        NOT NULL DEFAULT '',
+  sort_order int         NOT NULL DEFAULT 0,
+  is_active  boolean     NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-create trigger trg_cms_hero_updated
-before update on public.cms_hero_slides
-for each row execute function set_updated_at();
+CREATE TRIGGER trg_cms_hero_updated
+  BEFORE UPDATE ON public.cms_hero_slides
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- Default slides (matches original hardcoded hero carousel)
+INSERT INTO public.cms_hero_slides (image_url, subtitle, heading, body, sort_order) VALUES
+  ('/images/weds.jpg',   'DESIGNER COLLECTION', 'Your New\nDream Look.',
+   'JCE Bridal Boutique is your destination for designer and comfortable wedding gowns for your special day.', 0),
+  ('/images/image1.png', 'LUXURY GOWNS',        'Timeless\nElegance.',
+   'From classic silhouettes to modern couture — discover the gown that was made for you.', 1),
+  ('/images/image2.png', 'BRIDAL READY',         'Walk Down\nIn Style.',
+   'Every stitch crafted with love. Every detail designed to make you shine on your most beautiful day.', 2)
+ON CONFLICT DO NOTHING;
+
 
 -- =============================================================
 -- CMS: TESTIMONIALS
 -- =============================================================
-create table public.cms_testimonials (
-  id          uuid primary key default gen_random_uuid(),
-  quote_text  text not null,
-  author_name text not null,
+
+CREATE TABLE public.cms_testimonials (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote_text  text        NOT NULL,
+  author_name text        NOT NULL,
   image_url   text,
-  sort_order  int not null default 0,
-  is_active   boolean not null default true,
-  created_at  timestamptz not null default now()
+  sort_order  int         NOT NULL DEFAULT 0,
+  is_active   boolean     NOT NULL DEFAULT true,
+  created_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- Default testimonial
+INSERT INTO public.cms_testimonials (quote_text, author_name, image_url, sort_order) VALUES
+  ('I have always had difficulties with buying clothes for every-day wear. Therefore, together with Linda, we decided to create our own brand.',
+   'Karina Ayacocho', '/images/image2.png', 0)
+ON CONFLICT DO NOTHING;
+
+
 -- =============================================================
--- CMS: CONTENT BLOCKS (About, Collection, Footer, Theme)
+-- CMS: CONTENT BLOCKS  (About, Collection Spotlight, Contact, Footer, Theme)
 -- =============================================================
-create table public.cms_content_blocks (
-  id         uuid primary key default gen_random_uuid(),
-  section    text not null unique check (section in (
-               'about', 'collection-spotlight', 'footer', 'theme-config'
+
+CREATE TABLE public.cms_content_blocks (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  section    text        NOT NULL UNIQUE
+             CHECK (section IN (
+               'about', 'collection-spotlight', 'contact', 'footer', 'theme-config'
              )),
-  fields     jsonb not null default '{}'::jsonb,
-  updated_at timestamptz not null default now()
+  fields     jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-create trigger trg_cms_blocks_updated
-before update on public.cms_content_blocks
-for each row execute function set_updated_at();
+CREATE TRIGGER trg_cms_blocks_updated
+  BEFORE UPDATE ON public.cms_content_blocks
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- Seed default content blocks so they always exist
-insert into public.cms_content_blocks (section, fields) values
+-- Default content
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('about', '{
     "eyebrow_label": "ABOUT US",
     "heading": "Comfort and Quality Come First.",
@@ -383,6 +485,17 @@ insert into public.cms_content_blocks (section, fields) values
   ('collection-spotlight', '{
     "eyebrow_label": "THE COLLECTION",
     "heading": "Handpicked Elegance"
+  }'::jsonb),
+  ('contact', '{
+    "heading": "Get in Touch",
+    "subheading": "We''d love to hear from you.",
+    "address": "4I-19 Soler Wing 168 Mall Recto Mla, Manila, Philippines",
+    "phone": "0917 843 2531",
+    "email": "jceboutique@gmail.com",
+    "hours": "Mon - Sat  10:00 AM - 7:00 PM\nPhilippine Standard Time",
+    "facebook": "https://www.facebook.com/JCEbridalboutique",
+    "instagram": "#",
+    "map_embed_url": ""
   }'::jsonb),
   ('footer', '{
     "brand_name": "JCE Bridal.",
@@ -395,43 +508,76 @@ insert into public.cms_content_blocks (section, fields) values
     "colors": { "navBg": "#1a1a2e", "primary": "#c8a96e" },
     "fonts":  { "body": "Jost, sans-serif" }
   }'::jsonb)
-on conflict (section) do nothing;
-
--- Seed default hero slides from current hardcoded values
-insert into public.cms_hero_slides (image_url, subtitle, heading, body, sort_order) values
-  ('/images/weds.jpg',  'DESIGNER COLLECTION', 'Your New\nDream Look.',   'JCE Bridal Boutique is your destination for designer and comfortable wedding gowns for your special day.', 0),
-  ('/images/image1.png','LUXURY GOWNS',        'Timeless\nElegance.',     'From classic silhouettes to modern couture — discover the gown that was made for you.',                    1),
-  ('/images/image2.png','BRIDAL READY',         'Walk Down\nIn Style.',    'Every stitch crafted with love. Every detail designed to make you shine on your most beautiful day.',       2);
-
--- Seed default testimonial
-insert into public.cms_testimonials (quote_text, author_name, image_url, sort_order) values
-  ('I have always had difficulties with buying clothes for every-day wear. Therefore, together with Linda, we decided to create our own brand.',
-   'Karina Ayacocho', '/images/image2.png', 0);
-
-   ALTER TABLE public.cms_content_blocks
-DROP CONSTRAINT cms_content_blocks_section_check;
-
-ALTER TABLE public.cms_content_blocks
-ADD CONSTRAINT cms_content_blocks_section_check
-CHECK (section IN ('about','collection-spotlight','footer','theme-config','contact'));
-
-INSERT INTO public.cms_content_blocks (section, fields) VALUES
-  ('contact', '{
-    "heading": "Get in Touch",
-    "subheading": "We''d love to hear from you.",
-    "address": "4I-19 Soler Wing 168 Mall Recto Mla, Manila, Philippines",
-    "phone": "0917 843 2531",
-    "email": "jceboutique@gmail.com",
-    "hours": "Mon - Sat  10:00 AM - 7:00 PM\nPhilippine Standard Time",
-    "facebook": "https://www.facebook.com/JCEbridalboutique",
-    "instagram": "#",
-    "map_embed_url": ""
-  }'::JSONB)
 ON CONFLICT (section) DO NOTHING;
 
-ALTER TABLE public.users
-DROP CONSTRAINT users_role_check;
 
-ALTER TABLE public.users
-ADD CONSTRAINT users_role_check
-CHECK (role IN ('customer', 'staff', 'admin'));
+-- =============================================================
+-- Migration: fix tryon-asset uniqueness + performance index
+-- Apply BEFORE deploying the updated admin gowns route.
+-- =============================================================
+
+-- FIX #9 ─────────────────────────────────────────────────────
+-- Add a unique partial index on gown_images so that each gown
+-- can have at most ONE is_tryon_asset = TRUE row.
+-- This makes the ON CONFLICT (gown_id, is_tryon_asset) WHERE
+-- is_tryon_asset = TRUE clause in the PUT route work correctly.
+--
+-- IMPORTANT: if any gown already has duplicate tryon rows,
+-- deduplicate first:
+--
+--   DELETE FROM gown_images
+--   WHERE id NOT IN (
+--     SELECT DISTINCT ON (gown_id) id
+--     FROM gown_images
+--     WHERE is_tryon_asset = TRUE
+--     ORDER BY gown_id, sort_order, id
+--   )
+--   AND is_tryon_asset = TRUE;
+--
+-- Then create the index:
+
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_gown_images_tryon_asset
+  ON public.gown_images (gown_id)
+  WHERE is_tryon_asset = TRUE;
+
+-- FIX: Performance index on gowns.updated_at ─────────────────
+-- The admin GET query uses ORDER BY g.updated_at DESC.
+-- Without an index this is a full sequential scan.
+
+CREATE INDEX IF NOT EXISTS idx_gowns_updated_at
+  ON public.gowns (updated_at DESC);
+
+  -- =============================================================
+-- Migration: fix tryon-asset uniqueness + performance index
+-- Apply BEFORE deploying the updated admin gowns route.
+-- =============================================================
+
+-- FIX #9 ─────────────────────────────────────────────────────
+-- Add is_tryon_back column to gown_images for back-view try-on asset.
+-- Run this first so the route can insert/query it.
+
+ALTER TABLE public.gown_images
+  ADD COLUMN IF NOT EXISTS is_tryon_back boolean NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS idx_gown_images_tryon_back ON public.gown_images(gown_id)
+  WHERE is_tryon_back = TRUE;
+
+-- Unique partial index for front tryon asset (one per gown)
+-- First deduplicate if needed:
+--
+--   DELETE FROM gown_images
+--   WHERE id NOT IN (
+--     SELECT DISTINCT ON (gown_id) id
+--     FROM gown_images
+--     WHERE is_tryon_asset = TRUE
+--     ORDER BY gown_id, sort_order, id
+--   )
+--   AND is_tryon_asset = TRUE;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_gown_images_tryon_asset
+  ON public.gown_images (gown_id)
+  WHERE is_tryon_asset = TRUE;
+
+-- Performance index on gowns.updated_at
+CREATE INDEX IF NOT EXISTS idx_gowns_updated_at
+  ON public.gowns (updated_at DESC);

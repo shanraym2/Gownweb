@@ -129,7 +129,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
 
           {/* Nav links */}
           <nav className="hdr-nav">
-            <Link href="/gowns">Gowns</Link>
+            <Link href="/gowns">Catalogue</Link>
             <Link href="/virtual-try-on">Virtual Try-On</Link>
             <Link href="/style-recommender">Style Recommender</Link>
             <Link href="/contact">Contact</Link>
@@ -233,7 +233,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
                 type="search"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search gowns…"
+                placeholder="Search catalogue…"
                 autoComplete="off"
               />
               <button type="submit" className="search-submit">Search</button>
@@ -264,7 +264,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
             </div>
           </Link>
 
-          <Link href="/gowns"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Gowns</Link>
+          <Link href="/gowns"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Catalogue</Link>
           <Link href="/virtual-try-on"    className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link>
           <Link href="/style-recommender" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Style Recommender</Link>
           <Link href="/about"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
@@ -288,7 +288,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
               type="search"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search gowns…"
+              placeholder="Search catalogue..."
               autoComplete="off"
               style={{
                 flex: 1, padding: '10px 14px', borderRadius: 10,

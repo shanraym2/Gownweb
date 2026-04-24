@@ -3,11 +3,15 @@ import nodemailer from 'nodemailer'
 import { query } from '@/lib/db'
 import crypto from 'crypto'
 
-const OTP_EXPIRY_MS        = 10 * 60 * 1000  // 10 minutes
-const OTP_RESEND_COOLDOWN  = 30              // seconds
+const OTP_EXPIRY_MS       = 10 * 60 * 1000  // 10 minutes
+const OTP_RESEND_COOLDOWN = 30               // seconds
 
+// FIX: Math.random() is not cryptographically secure — a sufficiently motivated
+// attacker with knowledge of the PRNG state could predict OTP values.
+// crypto.randomInt() uses the OS CSPRNG (same source as crypto.randomBytes)
+// and is the correct primitive for security-sensitive random numbers.
 function generateOtp() {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(crypto.randomInt(100000, 1000000)) // 100000–999999 inclusive
 }
 
 function hashOtp(otp) {
@@ -16,9 +20,9 @@ function hashOtp(otp) {
 
 // Map frontend purpose → DB CHECK constraint values
 const PURPOSE_MAP = {
-  login:           'login',
-  signup:          'signup',
-  auth:            'login',
+  login:            'login',
+  signup:           'signup',
+  auth:             'login',
   'reset-password': 'password_reset',
 }
 
@@ -30,9 +34,9 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'Email is required' }, { status: 400 })
     }
 
-    const cleanEmail   = email.trim().toLowerCase()
-    const rawPurpose   = String(purpose || 'login').trim().toLowerCase()
-    const dbPurpose    = PURPOSE_MAP[rawPurpose]
+    const cleanEmail = email.trim().toLowerCase()
+    const rawPurpose = String(purpose || 'login').trim().toLowerCase()
+    const dbPurpose  = PURPOSE_MAP[rawPurpose]
 
     if (!dbPurpose) {
       return NextResponse.json({ ok: false, error: 'Invalid OTP purpose' }, { status: 400 })
@@ -65,11 +69,11 @@ export async function POST(request) {
       }
     }
 
-    const otp      = generateOtp()
-    const codeHash = hashOtp(otp)
+    const otp       = generateOtp()
+    const codeHash  = hashOtp(otp)
     const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS)
 
-    // Invalidate old OTPs for this email+purpose first
+    // Invalidate old OTPs for this email+purpose
     await query(
       `UPDATE otp_codes SET consumed_at = NOW()
        WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL`,
@@ -96,7 +100,6 @@ export async function POST(request) {
       console.log(`║  Code    : ${otp.padEnd(27)}║`)
       console.log(`║  Expires : ${expiresAt.toLocaleTimeString().padEnd(27)}║`)
       console.log('╚══════════════════════════════════════╝\n')
-
       return NextResponse.json({ ok: true, devMode: true, message: 'Dev mode: OTP printed to terminal' })
     }
 

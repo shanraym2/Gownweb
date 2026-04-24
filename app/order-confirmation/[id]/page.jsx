@@ -10,54 +10,84 @@ import { getCurrentUser } from '../../utils/authClient'
 // ─── Proof upload ─────────────────────────────────────────────────────────────
 
 function ProofUpload({ orderId, paymentMethod, onUploaded }) {
-  const [image,     setImage    ] = useState(null)
-  const [preview,   setPreview  ] = useState(null)
-  const [refNo,     setRefNo    ] = useState('')
+  const [image, setImage] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [refNo, setRefNo] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [done,      setDone     ] = useState(false)
-  const [error,     setError    ] = useState('')
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const fileRef = useRef(null)
-  const user    = getCurrentUser()
 
-  const handleFile = useCallback(file => {
+  const fileRef = useRef(null)
+  const user = getCurrentUser()
+
+  const handleFile = useCallback((file) => {
     if (!file) return
-    if (!file.type.startsWith('image/')) { setError('Please select a JPEG or PNG image.'); return }
-    if (file.size > 5_000_000) { setError('File too large — max 5 MB.'); return }
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a JPEG or PNG image.')
+      return
+    }
+    if (file.size > 5_000_000) {
+      setError('File too large — max 5 MB.')
+      return
+    }
     setError('')
     const reader = new FileReader()
-    reader.onload = e => { setImage(e.target.result); setPreview(e.target.result) }
+    reader.onload = (e) => {
+      setImage(e.target.result)
+      setPreview(e.target.result)
+    }
     reader.readAsDataURL(file)
   }, [])
 
-  const handleDrop = useCallback(e => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]) }, [handleFile])
-
+  const handleDrop = useCallback((e) => {
+    e.preventDefault()
+    handleFile(e.dataTransfer.files?.[0])
+  }, [handleFile])
+  
   const handleUpload = async () => {
-    if (!image) { setError('Please select your proof of payment image.'); return }
-    if (!user)  { setError('You must be logged in.'); return }
-    setUploading(true); setError('')
-    try {
-      const res  = await fetch('/api/orders/upload-proof', {
-        method:  'POST',
-        headers: { 'Content-Type':'application/json', 'x-user-id': user.id },
-        body:    JSON.stringify({ orderId, image, referenceNo: refNo }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data.ok) { setError(data.error||'Upload failed.'); return }
-      setDone(true); onUploaded?.()
-    } catch { setError('Could not connect. Please try again.') }
-    finally { setUploading(false) }
-  }
+    if (!image) {
+      setError('Please select your proof of payment image.')
+      return
+    }
 
-  if (paymentMethod === 'cash') return null
-  if (done) return (
-    <div className="conf-proof-done">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <polyline points="20 6 9 17 4 12"/>
-      </svg>
-      <p>Proof uploaded — our team will verify it shortly.</p>
-    </div>
-  )
+    if (!user) {
+      setError('You must be logged in.')
+      return
+    }
+
+    setUploading(true)
+    setError('')
+
+    try {
+      const res = await fetch('/api/orders/upload-proof', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id,
+        },
+        body: JSON.stringify({
+          orderId,
+          image,
+          referenceNo: refNo,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        setError(data.error || 'Upload failed.')
+        return
+      }
+
+      setDone(true)
+      onUploaded?.()
+    } catch {
+      setError('Could not connect. Please try again.')
+    } finally {
+      setUploading(false)
+    }
+  }
   const fetchOrder = useCallback(() => {
     if (!orderId || !user) return
     fetch(`/api/orders?userId=${user.id}`, {
@@ -65,10 +95,12 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
     })
       .then(r => r.json())
       .then(d => {
-        if (!d.ok) { setError('Could not load order.'); return }
+        if (!d.ok) {
+          setError('Could not load order.')
+          return
+        }
         const found = (d.orders || []).find(o => String(o.id) === String(orderId))
         if (!found) setError('Order not found.')
-        else setOrder(found)
       })
       .catch(() => setError('Could not connect.'))
       .finally(() => setLoading(false))
@@ -77,6 +109,16 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
   useEffect(() => {
     fetchOrder()
   }, [fetchOrder])
+
+  // ✅ SAFE: return AFTER hooks
+  if (paymentMethod === 'cash') return null
+
+  if (done) return (
+    <div className="conf-proof-done">
+      ✔ Proof uploaded
+    </div>
+  )
+
   return (
     <div className="conf-proof">
       <p className="conf-proof-title">Upload proof of payment</p>

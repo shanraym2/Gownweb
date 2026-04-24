@@ -52,20 +52,33 @@ export default function MyOrdersPage() {
   const [loading, setLoading] = useState(true)
   const [error,   setError  ] = useState('')
   const [open,    setOpen   ] = useState(null)  // expanded order id
+  
 
-  const user = typeof window !== 'undefined' ? getCurrentUser() : null
+  const [user, setUser] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
 
   useEffect(() => {
-    if (!user) return
-    fetch(`/api/orders?userId=${user.id}`, { headers: { 'x-user-id': user.id } })
-      .then(r => r.json())
-      .then(d => {
-        if (d.ok) setOrders(d.orders || [])
-        else setError(d.error || 'Could not load orders.')
-      })
-      .catch(() => setError('Could not connect.'))
-      .finally(() => setLoading(false))
+    setUser(getCurrentUser())
+    setAuthReady(true)
   }, [])
+
+  useEffect(() => {
+  if (!authReady) return
+  if (!user) {
+    setLoading(false)  // no user, nothing to fetch
+    return
+  }
+  fetch(`/api/orders?userId=${user.id}`, { headers: { 'x-user-id': user.id } })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) setOrders(d.orders || [])
+      else setError(d.error || 'Could not load orders.')
+    })
+    .catch(() => setError('Could not connect.'))
+    .finally(() => setLoading(false))
+}, [user, authReady])
+
+  
 
   const handleConfirmReceipt = async orderId => {
     if (!user) return
@@ -78,9 +91,10 @@ export default function MyOrdersPage() {
     if (data.ok) setOrders(p => p.map(o => o.id === orderId ? { ...o, status: 'completed' } : o))
   }
 
+  if (!authReady) return null  // or a loading spinner
+
   if (!user) return (
     <main className="mo-page">
-      <style>{CSS}</style>
       <Header solid />
       <div className="mo-spacer" />
       <div className="mo-empty">
@@ -92,7 +106,6 @@ export default function MyOrdersPage() {
 
   return (
     <main className="mo-page">
-      <style suppressHydrationWarning>{CSS}</style>
       <Header solid />
       <div className="mo-spacer" />
 
@@ -243,59 +256,3 @@ export default function MyOrdersPage() {
     </main>
   )
 }
-
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400;500&display=swap');
-.mo-page{--iv:#faf7f4;--ch:#f0e6d3;--es:#2c1a10;--wb:#6b3f2a;--mu:#9b8880;--go:#c9a96e;background:var(--iv);font-family:'Jost',sans-serif;color:var(--es);min-height:100vh;}
-.mo-spacer{height:80px;}
-.mo-hero{background:var(--es);padding:48px clamp(1.5rem,6vw,5rem) 40px;}
-.mo-eyebrow{font-size:9px;letter-spacing:.45em;text-transform:uppercase;color:var(--go);display:block;margin-bottom:12px;}
-.mo-h1{font-family:'Cormorant Garamond',serif;font-size:clamp(2rem,4vw,3rem);font-weight:300;color:var(--iv);margin:0 0 10px;}
-.mo-sub{font-size:13px;color:rgba(250,247,244,.45);margin:0;}
-.mo-content{max-width:780px;margin:0 auto;padding:40px 24px 80px;}
-.mo-muted{font-size:13px;color:var(--mu);}
-.mo-error{font-size:13px;color:#a32d2d;}
-.mo-empty{text-align:center;padding:60px 0;}
-.mo-empty-title{font-family:'Cormorant Garamond',serif;font-size:1.8rem;font-weight:300;margin-bottom:8px;}
-.mo-empty-sub{font-size:13px;color:var(--mu);margin-bottom:20px;}
-.mo-btn{display:inline-block;padding:11px 24px;background:var(--es);color:var(--iv);font-family:'Jost',sans-serif;font-size:10px;letter-spacing:.25em;text-transform:uppercase;text-decoration:none;border:none;cursor:pointer;transition:background .2s;}
-.mo-btn:hover{background:var(--wb);}
-.mo-btn--sm{padding:8px 16px;font-size:9px;}
-
-.mo-list{display:flex;flex-direction:column;gap:10px;}
-.mo-order{border:1px solid var(--ch);background:var(--iv);}
-.mo-order-head{display:flex;align-items:center;gap:12px;padding:16px 18px;cursor:pointer;user-select:none;}
-.mo-order-head:hover{background:var(--ch);}
-.mo-order-meta{flex:1;min-width:0;}
-.mo-order-num{font-size:13px;font-weight:500;letter-spacing:.04em;}
-.mo-order-date{font-size:11px;color:var(--mu);}
-.mo-order-badges{display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;}
-.mo-order-total{font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0;}
-.mo-chevron{flex-shrink:0;color:var(--mu);transition:transform .2s;}
-.mo-chevron.open{transform:rotate(180deg);}
-
-.mo-order-body{border-top:1px solid var(--ch);padding:0 18px;}
-.mo-order-section{padding:16px 0;border-bottom:1px solid var(--ch);}
-.mo-order-section:last-child{border-bottom:none;}
-.mo-section-title{font-size:9px;letter-spacing:.3em;text-transform:uppercase;color:var(--mu);margin-bottom:10px;}
-
-.mo-items{display:flex;flex-direction:column;gap:6px;}
-.mo-item{display:flex;gap:8px;font-size:13px;align-items:baseline;}
-.mo-item-name{flex:1;}
-.mo-item-qty{font-size:11px;color:var(--mu);}
-.mo-item-price{font-weight:500;}
-.mo-items-total{display:flex;justify-content:space-between;font-size:13px;font-weight:500;padding-top:8px;border-top:1px solid var(--ch);margin-top:4px;}
-
-.mo-detail-rows{display:flex;flex-direction:column;gap:6px;}
-.mo-detail-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;gap:8px;}
-.mo-detail-row span:first-child{color:var(--mu);}
-
-.mo-proof-cta{margin-top:12px;padding:12px;background:var(--ch);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
-.mo-proof-hint{font-size:12px;color:var(--wb);}
-
-.mo-receipt-section{background:var(--ch);padding:16px;margin:0 -18px;}
-.mo-receipt-hint{font-size:12px;color:var(--mu);margin-bottom:12px;}
-
-.mo-order-links{display:flex;gap:16px;}
-.mo-link{font-size:12px;color:var(--wb);text-decoration:underline;text-underline-offset:3px;}
-`

@@ -69,9 +69,9 @@ export async function GET(request) {
       ORDER BY o.placed_at DESC
     `)
     orders = rows.map(r => ({
-      id:            r.id,
-      order_number:  r.order_number,
-      status:        r.status,
+      id:             r.id,
+      order_number:   r.order_number,
+      status:         r.status,
       payment_method: r.payment_method,
       payment_status: r.payment_status,
       customer_name:  r.customer_name,
@@ -87,9 +87,15 @@ export async function GET(request) {
     }))
   }
 
-  const now     = new Date().toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })
-  const paid    = orders.filter(o => o.status !== 'cancelled')
-  const revenue = paid.reduce((s, o) => s + Number(o.subtotal || o.total || 0), 0)
+  const now = new Date().toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })
+
+  // FIX: Use `total` exclusively and exclude cancelled + refunded — consistent
+  // with the sales dashboard and admin dashboard snapshot. Previously this used
+  // `subtotal || total` which could double-count shipping or pick up the wrong
+  // field, and it didn't exclude refunded orders.
+  const NON_REVENUE = new Set(['cancelled', 'refunded'])
+  const paid    = orders.filter(o => !NON_REVENUE.has(o.status))
+  const revenue = paid.reduce((s, o) => s + Number(o.total || 0), 0)
 
   let csv = ''
   let filename = ''
@@ -108,6 +114,9 @@ export async function GET(request) {
 
     const topItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
 
+    const completedCount = orders.filter(o => o.status === 'completed').length
+    const fulfillRate    = orders.length ? Math.round(completedCount / orders.length * 100) : 0
+
     const lines = [
       ['JCE Bridal Boutique — Sales Summary Report'],
       [`Generated: ${now}`],
@@ -115,10 +124,11 @@ export async function GET(request) {
       ['OVERVIEW'],
       ['Metric', 'Value'],
       ['Total orders', orders.length],
-      ['Active orders (excl. cancelled)', paid.length],
+      ['Revenue-counting orders (excl. cancelled & refunded)', paid.length],
       ['Total revenue', fmtPhp(revenue)],
       ['Average order value', fmtPhp(paid.length ? revenue / paid.length : 0)],
-      ['Delivered', orders.filter(o => o.status === 'delivered').length],
+      ['Completed orders', completedCount],
+      ['Fulfillment rate', `${fulfillRate}%`],
       [],
       ['ORDERS BY STATUS'],
       ['Status', 'Count'],
@@ -182,7 +192,8 @@ export async function GET(request) {
       fmtPhp(o.subtotal || 0),
       fmtPhp(o.discount_total || 0),
       fmtPhp(o.shipping_fee   || 0),
-      fmtPhp(o.total || o.subtotal || 0),
+      // FIX: Use total field only — not (total || subtotal) fallback
+      fmtPhp(o.total || 0),
       (o.items || []).map(it => `${it.name || it.gown_name} x${it.qty || it.quantity || 1}`).join(' | '),
       o.notes || o.note || '',
     ]))
