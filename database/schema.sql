@@ -581,3 +581,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS uidx_gown_images_tryon_asset
 -- Performance index on gowns.updated_at
 CREATE INDEX IF NOT EXISTS idx_gowns_updated_at
   ON public.gowns (updated_at DESC);
+
+  -- =============================================================
+-- Migration: order_status_log
+-- Tracks every order status change with timestamp + optional note.
+-- Apply this before deploying the updated admin orders PATCH handler.
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS public.order_status_log (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id   uuid        NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+  status     text        NOT NULL,
+  note       text,
+  changed_by uuid        REFERENCES public.users(id) ON DELETE SET NULL,
+  changed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_status_log_order
+  ON public.order_status_log(order_id, changed_at DESC);
+
+-- Backfill: seed a "placed" event for all existing orders using placed_at.
+-- Run once after creating the table.
+INSERT INTO public.order_status_log (order_id, status, changed_at)
+SELECT id, 'placed', placed_at
+FROM   public.orders
+ON CONFLICT DO NOTHING;
+
+-- Backfill: seed a "paid" event for paid orders using the payments.paid_at timestamp.
+INSERT INTO public.order_status_log (order_id, status, changed_at)
+SELECT o.id, 'paid', COALESCE(p.paid_at, o.updated_at)
+FROM   public.orders  o
+JOIN   public.payments p ON p.order_id = o.id
+WHERE  o.status IN ('paid','processing','ready','shipped','completed')
+  AND  p.status = 'verified'
+ON CONFLICT DO NOTHING;
