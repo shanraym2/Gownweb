@@ -24,6 +24,9 @@ const SORT_OPTIONS = [
   { value:'stock-desc',label:'Stock High→Low' },
 ]
 
+const PRESET_SIZES = ['XS','S','M','L','XL','2XL','3XL','4XL','6','8','10','12','14','16']
+const CUSTOM_SIZE_VALUE = '__custom__'
+
 function numericPrice(p) {
   return parseInt(String(p||'').replace(/[^\d]/g,'')) || 0
 }
@@ -33,9 +36,97 @@ function totalAvail(g) {
 function headers() { return {'Content-Type':'application/json','X-Admin-Secret':getAdminSecret()||''} }
 
 /* ─────────────────────────────────────────────
+   SizePicker
+───────────────────────────────────────────── */
+function SizePicker({ inventory, onAdd, error, onClearErr }) {
+  const taken       = new Set((inventory||[]).map(i => i.size))
+  const available   = PRESET_SIZES.filter(s => !taken.has(s))
+  const [custom, setCustom]     = useState('')
+  const [showCustom, setShowCustom] = useState(false)
+
+  function validateCustom(val) {
+    const v = val.trim().toUpperCase()
+    if (!v)                           return 'Enter a size label.'
+    if (v.length > 8)                 return 'Max 8 characters.'
+    if (/\s/.test(v))                 return 'No spaces allowed.'
+    if (taken.has(v))                 return `"${v}" already added.`
+    if (PRESET_SIZES.includes(v))     return `Use the "${v}" button above.`
+    return null
+  }
+
+  const handleCustomAdd = () => {
+    const err = validateCustom(custom)
+    if (err) { onClearErr(); return }
+    onAdd(custom.trim().toUpperCase())
+    setCustom('')
+    setShowCustom(false)
+  }
+
+  const allPresetTaken = available.length === 0
+
+  return (
+    <div className="sp-root">
+      {!allPresetTaken && (
+        <div className="sp-grid">
+          {PRESET_SIZES.map(size => {
+            const isTaken = taken.has(size)
+            return (
+              <button
+                key={size}
+                type="button"
+                className={`sp-btn${isTaken ? ' sp-btn--taken' : ''}`}
+                disabled={isTaken}
+                title={isTaken ? `${size} already added` : `Add ${size}`}
+                onClick={() => { onClearErr(); onAdd(size) }}
+              >
+                {size}
+                {isTaken && <span className="sp-check" aria-hidden="true">✓</span>}
+              </button>
+            )
+          })}
+          <button
+            type="button"
+            className={`sp-btn sp-btn--custom${showCustom ? ' sp-btn--custom-active' : ''}`}
+            onClick={() => { setShowCustom(v => !v); onClearErr() }}
+            title="Add a size not in the list"
+          >
+            + Custom
+          </button>
+        </div>
+      )}
+
+      {(showCustom || allPresetTaken) && (
+        <div className="sp-custom-row">
+          <input
+            type="text"
+            maxLength={8}
+            value={custom}
+            onChange={e => { setCustom(e.target.value); onClearErr() }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCustomAdd() } }}
+            placeholder="e.g. 0, 2, 28, 34…"
+            className="sp-custom-input"
+            autoFocus={showCustom}
+          />
+          <button type="button" className="btn-sm" onClick={handleCustomAdd} disabled={!custom.trim()}>
+            Add
+          </button>
+          {!allPresetTaken && (
+            <button type="button" className="btn-xs" onClick={() => { setShowCustom(false); setCustom(''); onClearErr() }}>
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+
+      {error && <p className="field-error" style={{margin:'4px 0 0'}}>{error}</p>}
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────
    Image uploader
 ───────────────────────────────────────────── */
-function ImageUploader({ label, hint, value, onChange, onError, error, badge, slot }) {
+function ImageUploader({ label, hint, value, onChange, onError, error, badge }) {
   const inputRef   = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [uploading,setUploading]= useState(false)
@@ -107,7 +198,10 @@ function removeBg(imgSrc, tolerance=32) {
       const w=img.naturalWidth,h=img.naturalHeight
       const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h
       const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0)
-      const data=ctx.getImageData(0,0,w,h),d=data.data
+      let data
+      try { data=ctx.getImageData(0,0,w,h) }
+      catch(e) { reject(new Error('Image is cross-origin or tainted. Host it on the same origin.')); return }
+      const d=data.data
       const seeds=[]
       const pts=[[0,0],[w-1,0],[0,h-1],[w-1,h-1],[Math.floor(w/2),0],[Math.floor(w/2),h-1],[0,Math.floor(h/2)],[w-1,Math.floor(h/2)]]
       pts.forEach(([x,y])=>{ const i=(y*w+x)*4; seeds.push({r:d[i],g:d[i+1],b:d[i+2]}) })
@@ -297,7 +391,6 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
         </div>
         <div className="modal-body">
           <div className="detail-layout">
-            {/* Images */}
             <div className="detail-images">
               {gown.image&&gown.image!=='/images/'&&<img src={gown.image} alt={gown.alt||gown.name} className="detail-main-img"/>}
               <div className="detail-thumb-row">
@@ -305,7 +398,6 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
                 {gown.tryonImageBack&&<div className="detail-thumb-wrap"><img src={gown.tryonImageBack} alt="Back try-on" className="detail-thumb"/><span className="detail-thumb-label">Back</span></div>}
               </div>
             </div>
-            {/* Info */}
             <div className="detail-info">
               <div className="detail-price">{gown.price}</div>
               <div className="detail-badges">
@@ -319,7 +411,6 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
                 {gown.alt&&<div className="detail-attr"><span className="detail-attr-key">Alt text</span><span>{gown.alt}</span></div>}
               </div>
               {gown.description&&<p className="detail-desc">{gown.description}</p>}
-              {/* Inventory */}
               {inv.length>0&&(
                 <div className="detail-inventory">
                   <p className="detail-section-label">Inventory — {totalAvailable} units available</p>
@@ -336,7 +427,10 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
               )}
               <div className="detail-links">
                 <Link href={`/gowns/${gown.id}`} target="_blank" rel="noopener noreferrer" className="btn-ghost btn-sm">Open product page ↗</Link>
-                <Link href={`/virtual-try-on?gown=${gown.id}`} target="_blank" rel="noopener noreferrer" className="btn-info btn-sm">Virtual try-on ↗</Link>
+                {gown.tryonImage
+                  ? <Link href={`/virtual-try-on?gown=${gown.id}`} target="_blank" rel="noopener noreferrer" className="btn-info btn-sm">Virtual try-on ↗</Link>
+                  : <span className="btn-sm btn-sm--disabled" title="No try-on image set">Virtual try-on ↗</span>
+                }
               </div>
             </div>
           </div>
@@ -347,75 +441,119 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
 }
 
 /* ─────────────────────────────────────────────
-   Stock Quick-Edit Modal
+   Stock Dropdown
 ───────────────────────────────────────────── */
-function StockModal({ gown, onSave, onClose }) {
-  const [inventory, setInventory] = useState(JSON.parse(JSON.stringify(gown.inventory||[])))
-  const [newSize,setNewSize]=useState(''); const [newStock,setNewStock]=useState(''); const [saving,setSaving]=useState(false); const [err,setErr]=useState('')
+function StockDropdown({ gown, onSave }) {
+  const [open, setOpen] = useState(false)
+  const [inventory, setInventory] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const wrapRef = useRef(null)
 
-  const handleAdd=()=>{
-    const size=newSize.trim().toUpperCase(), stock=Math.max(0,parseInt(newStock)||0)
-    if(!size)return; if(inventory.some(i=>i.size===size)){setErr(`Size "${size}" already exists`);return}
-    setInventory(p=>[...p,{size,stock}]); setNewSize(''); setNewStock(''); setErr('')
+  useEffect(() => {
+    if (open) setInventory(JSON.parse(JSON.stringify(gown.inventory || [])))
+  }, [open, gown])
+
+  useEffect(() => {
+    if (!open) return
+    const fn = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', fn)
+    return () => document.removeEventListener('mousedown', fn)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const fn = e => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [open])
+
+  const handleAdd = (size) => {
+    if (inventory.some(i => i.size === size)) { setErr(`Size "${size}" already exists`); return }
+    setInventory(p => [...p, { size, stock: 1 }])
+    setErr('')
   }
-  const handleSave=async()=>{
+
+  const handleSave = async () => {
     setSaving(true); setErr('')
-    try { await onSave(gown.id, inventory) } catch(e){ setErr(e.message) } finally{ setSaving(false) }
+    try {
+      await onSave(gown.id, inventory)
+      setOpen(false)
+    } catch(e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
-  return(
-    <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)onClose()}}>
-      <div className="modal-box" style={{maxWidth:440}}>
-        <div className="modal-header">
-          <div>
-            <span className="modal-title">Stock — {gown.name}</span>
-            <p style={{fontSize:11,color:'var(--muted)',margin:'2px 0 0',fontWeight:400}}>Edit sizes and quantities</p>
+  return (
+    <div className="stock-dropdown-wrap" ref={wrapRef}>
+      <button
+        className="btn-sm btn-stock"
+        onClick={() => setOpen(v => !v)}
+        title="Manage stock"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+        Stock
+        <span style={{fontSize:9,opacity:.55,marginLeft:1}}>{open?'▲':'▼'}</span>
+      </button>
+
+      {open && (
+        <div className="stock-dropdown-panel">
+          <div className="stock-dropdown-header">
+            <span className="stock-dropdown-title">{gown.name}</span>
+            <button className="modal-close" style={{fontSize:16,lineHeight:1}} onClick={() => setOpen(false)}>×</button>
           </div>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-        <div className="modal-body">
-          {/* Inventory table */}
-          {inventory.length>0&&(
+
+          {inventory.length > 0 && (
             <div className="stock-table">
               <div className="stock-header">
-                <span>Size</span><span>Stock</span><span>Reserved</span><span>Available</span><span/>
+                <span>Size</span><span>Stock</span><span>Res.</span><span>Avail</span><span/>
               </div>
-              {inventory.map(inv=>{
-                const avail=Math.max(0,(inv.stock||0)-(inv.reserved||0))
-                return(
+              {inventory.map(inv => {
+                const avail = Math.max(0, (inv.stock || 0) - (inv.reserved || 0))
+                return (
                   <div key={inv.size} className="stock-row">
                     <span className="stock-size">{inv.size}</span>
-                    <input type="number" min="0" value={inv.stock} className="stock-input"
-                      onChange={e=>setInventory(p=>p.map(i=>i.size===inv.size?{...i,stock:Math.max(0,parseInt(e.target.value)||0)}:i))}/>
-                    <span className="stock-res">{inv.reserved||0}</span>
-                    <span className={`stock-avail${avail<=0?' out':avail<=2?' low':''}`}>{avail<=0?'Out':avail}</span>
-                    <button className="stock-remove" onClick={()=>setInventory(p=>p.filter(i=>i.size!==inv.size))}>×</button>
+                    <input
+                      type="number" min="0" value={inv.stock} className="stock-input"
+                      onChange={e => setInventory(p => p.map(i =>
+                        i.size === inv.size ? { ...i, stock: Math.max(0, parseInt(e.target.value) || 0) } : i
+                      ))}
+                    />
+                    <span className="stock-res">{inv.reserved || 0}</span>
+                    <span className={`stock-avail${avail <= 0 ? ' out' : avail <= 2 ? ' low' : ''}`}>
+                      {avail <= 0 ? 'Out' : avail}
+                    </span>
+                    <button className="stock-remove" onClick={() => setInventory(p => p.filter(i => i.size !== inv.size))}>×</button>
                   </div>
                 )
               })}
             </div>
           )}
-          {/* Add new size */}
-          <div className="stock-add-row">
-            <input
-              type="text" placeholder="Size (S, M, XL, 42…)" value={newSize}
-              onChange={e=>setNewSize(e.target.value)} className="stock-size-input"
-              onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();handleAdd()}}}
+
+          <div style={{marginTop: inventory.length ? 10 : 0}}>
+            <p className="sp-section-label">Add size</p>
+            <SizePicker
+              inventory={inventory}
+              onAdd={handleAdd}
+              error={err}
+              onClearErr={() => setErr('')}
             />
-            <input
-              type="number" min="0" placeholder="Qty" value={newStock}
-              onChange={e=>setNewStock(e.target.value)} className="stock-qty-input"
-              onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();handleAdd()}}}
-            />
-            <button className="btn-sm" onClick={handleAdd}>Add size</button>
           </div>
-          {err&&<p className="field-error">{err}</p>}
+
+          {inventory.length === 0 && !err && (
+            <p className="field-hint" style={{margin:'6px 0 0'}}>No sizes yet. Select one above.</p>
+          )}
+
+          <div className="stock-dropdown-footer">
+            <button className="btn-ghost" style={{padding:'6px 12px',fontSize:12}} onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn-primary" style={{padding:'6px 14px',fontSize:12}} onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
-        <div className="modal-footer">
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>{saving?'Saving…':'Save inventory'}</button>
-        </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -428,8 +566,11 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
   const [inventory,setInventory]=useState([])
   const [saving,setSaving]=useState(false)
   const [formError,setFormError]=useState('')
-  const [imgError,setImgError]=useState(false); const [tryonImgError,setTryonImgError]=useState(false); const [tryonBackImgError,setTryonBackImgError]=useState(false)
-  const [bgRemoverSrc,setBgRemoverSrc]=useState(null); const [bgRemoverTarget,setBgRemoverTarget]=useState('front')
+  const [imgError,setImgError]=useState(false)
+  const [tryonImgError,setTryonImgError]=useState(false)
+  const [tryonBackImgError,setTryonBackImgError]=useState(false)
+  const [bgRemoverSrc,setBgRemoverSrc]=useState(null)
+  const [bgRemoverTarget,setBgRemoverTarget]=useState('front')
   const [confirm,setConfirm]=useState(null)
   const isEdit=!!editingGown
 
@@ -437,12 +578,19 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
     if(editingGown){
       const raw=String(editingGown.price||'').replace(/[^\d]/g,'')
       setForm({
-        name:editingGown.name||'', price:'₱'+(raw?Number(raw).toLocaleString('en-PH'):''),
-        image:editingGown.image||'/images/', alt:editingGown.alt||'',
-        tryonImage:editingGown.tryonImage||'', tryonImageBack:editingGown.tryonImageBack||'',
+        name:editingGown.name||'',
+        price:'₱'+(raw?Number(raw).toLocaleString('en-PH'):''),
+        image:editingGown.image||'/images/',
+        alt:editingGown.alt||'',
+        tryonImage:editingGown.tryonImage||'',
+        tryonImageBack:editingGown.tryonImageBack||'',
         tryonCalibration:editingGown.tryonCalibration||null,
-        type:editingGown.type||'Gowns', color:editingGown.color||'', silhouette:editingGown.silhouette||'',
-        fabric:editingGown.fabric||'', neckline:editingGown.neckline||'', description:editingGown.description||'',
+        type:editingGown.type||'Gowns',
+        color:editingGown.color||'',
+        silhouette:editingGown.silhouette||'',
+        fabric:editingGown.fabric||'',
+        neckline:editingGown.neckline||'',
+        description:editingGown.description||'',
       })
       setInventory(editingGown.inventory||[])
     } else {
@@ -465,7 +613,7 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
   const handleSubmit=e=>{
     e.preventDefault(); setFormError('')
     if(!form.name.trim()){setFormError('Name is required.');return}
-    if(!form.price.trim()||form.price==='₱'){setFormError('Price is required.');return}
+    if(!form.price.trim()||form.price==='₱'||numericPrice(form.price)===0){setFormError('Price is required.');return}
     if(!form.image.trim()){setFormError('Image path is required.');return}
     const detail=isEdit?(
       <div>
@@ -505,21 +653,20 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
   return(
     <>
       {bgRemoverSrc&&(
-        <BgRemover src={bgRemoverSrc}
+        <BgRemover
+          src={bgRemoverSrc}
           onDone={path=>{
             if(bgRemoverTarget==='back'){setForm(p=>({...p,tryonImageBack:path}));setTryonBackImgError(false)}
             else{setForm(p=>({...p,tryonImage:path}));setTryonImgError(false)}
-            setBgRemoverSrc(null); showToast(`Background removed`)
+            setBgRemoverSrc(null); showToast('Background removed')
           }}
           onClose={()=>setBgRemoverSrc(null)}
         />
       )}
       {confirm&&<ConfirmModal {...confirm} onClose={()=>setConfirm(null)}/>}
 
-      {/* Backdrop */}
       <div className={`sidebar-backdrop${open?' sidebar-backdrop--open':''}`} onClick={onClose}/>
 
-      {/* Drawer */}
       <aside className={`sidebar${open?' sidebar--open':''}`}>
         <div className="sidebar-header">
           <div>
@@ -530,7 +677,6 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
         </div>
 
         <form onSubmit={handleSubmit} className="sidebar-body">
-          {/* Basic info */}
           <div className="form-section">
             <p className="form-section-label">Basic Info</p>
             <div className="form-grid-2">
@@ -577,27 +723,47 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
             </div>
           </div>
 
-          {/* Images */}
           <div className="form-section">
             <p className="form-section-label">Images</p>
             <div className="form-images-grid">
-              <ImageUploader label="Display image" badge={<span className="badge badge--neutral">Catalog</span>} hint="Shown in catalog & product pages."
-                value={form.image} onChange={v=>{setForm(p=>({...p,image:v}));setImgError(false)}} onError={()=>setImgError(true)} error={imgError} slot="display"/>
+              <ImageUploader
+                label="Display image"
+                badge={<span className="badge badge--neutral">Catalog</span>}
+                hint="Shown in catalog & product pages. Not used for try-on."
+                value={form.image}
+                onChange={v=>{setForm(p=>({...p,image:v}));setImgError(false)}}
+                onError={()=>setImgError(true)}
+                error={imgError}
+              />
               <div>
-                <ImageUploader label="Try-on — front" badge={<span className="badge badge--gold">Front</span>} hint="Transparent PNG, front view."
-                  value={form.tryonImage} onChange={v=>{setForm(p=>({...p,tryonImage:v}));setTryonImgError(false)}} onError={()=>setTryonImgError(true)} error={tryonImgError} slot="front"/>
+                <ImageUploader
+                  label="Try-on — front"
+                  badge={<span className="badge badge--gold">Front</span>}
+                  hint="Transparent PNG, front view. Upload separately from display image."
+                  value={form.tryonImage}
+                  onChange={v=>{setForm(p=>({...p,tryonImage:v}));setTryonImgError(false)}}
+                  onError={()=>setTryonImgError(true)}
+                  error={tryonImgError}
+                />
                 <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
-                  disabled={!form.image||form.image==='/images/'}
-                  onClick={()=>{setBgRemoverTarget('front');setBgRemoverSrc(form.tryonImage||form.image)}}>
+                  disabled={!form.tryonImage}
+                  onClick={()=>{ setBgRemoverTarget('front'); setBgRemoverSrc(form.tryonImage) }}>
                   ✂ Remove background…
                 </button>
               </div>
               <div>
-                <ImageUploader label="Try-on — back" badge={<span className="badge badge--blue">Back</span>} hint="Back view, transparent PNG."
-                  value={form.tryonImageBack||''} onChange={v=>{setForm(p=>({...p,tryonImageBack:v}));setTryonBackImgError(false)}} onError={()=>setTryonBackImgError(true)} error={tryonBackImgError} slot="back"/>
+                <ImageUploader
+                  label="Try-on — back"
+                  badge={<span className="badge badge--blue">Back</span>}
+                  hint="Back view, transparent PNG."
+                  value={form.tryonImageBack||''}
+                  onChange={v=>{setForm(p=>({...p,tryonImageBack:v}));setTryonBackImgError(false)}}
+                  onError={()=>setTryonBackImgError(true)}
+                  error={tryonBackImgError}
+                />
                 <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
                   disabled={!form.tryonImageBack}
-                  onClick={()=>{setBgRemoverTarget('back');setBgRemoverSrc(form.tryonImageBack)}}>
+                  onClick={()=>{ setBgRemoverTarget('back'); setBgRemoverSrc(form.tryonImageBack) }}>
                   ✂ Remove background…
                 </button>
               </div>
@@ -605,7 +771,6 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
             <CalibrationEditor calibration={form.tryonCalibration} onChange={cal=>setForm(p=>({...p,tryonCalibration:cal}))}/>
           </div>
 
-          {/* Inventory */}
           <div className="form-section">
             <p className="form-section-label">Inventory</p>
             <InlineInventoryEditor inventory={inventory} onChange={setInventory}/>
@@ -624,67 +789,80 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
 }
 
 /* ─────────────────────────────────────────────
-   Inline Inventory Editor (in sidebar)
+   Inline Inventory Editor
 ───────────────────────────────────────────── */
 function InlineInventoryEditor({ inventory, onChange }) {
-  const [newSize,setNewSize]=useState(''); const [newStock,setNewStock]=useState(''); const [err,setErr]=useState('')
-  const handleAdd=()=>{
-    const size=newSize.trim().toUpperCase(), stock=Math.max(0,parseInt(newStock)||0)
-    if(!size){setErr('Enter a size label.');return}
-    if(inventory.some(i=>i.size===size)){setErr(`Size "${size}" already exists`);return}
-    onChange([...inventory,{size,stock}]); setNewSize(''); setNewStock(''); setErr('')
+  const [err, setErr] = useState('')
+
+  const handleAdd = (size) => {
+    if (inventory.some(i => i.size === size)) { setErr(`Size "${size}" already added.`); return }
+    onChange([...inventory, { size, stock: 1 }])
+    setErr('')
   }
-  return(
+
+  return (
     <div className="inv-editor">
-      {inventory.length>0&&(
-        <div className="stock-table">
-          <div className="stock-header"><span>Size</span><span>Stock</span><span>Reserved</span><span>Avail</span><span/></div>
-          {inventory.map(inv=>{
-            const avail=Math.max(0,(inv.stock||0)-(inv.reserved||0))
-            return(
+      {inventory.length > 0 && (
+        <div className="stock-table" style={{marginBottom:12}}>
+          <div className="stock-header">
+            <span>Size</span><span>Stock</span><span>Reserved</span><span>Avail</span><span/>
+          </div>
+          {inventory.map(inv => {
+            const avail = Math.max(0, (inv.stock||0) - (inv.reserved||0))
+            return (
               <div key={inv.size} className="stock-row">
                 <span className="stock-size">{inv.size}</span>
                 <input type="number" min="0" value={inv.stock} className="stock-input"
-                  onChange={e=>onChange(inventory.map(i=>i.size===inv.size?{...i,stock:Math.max(0,parseInt(e.target.value)||0)}:i))}/>
+                  onChange={e => onChange(inventory.map(i =>
+                    i.size === inv.size ? { ...i, stock: Math.max(0, parseInt(e.target.value)||0) } : i
+                  ))}
+                />
                 <span className="stock-res">{inv.reserved||0}</span>
-                <span className={`stock-avail${avail<=0?' out':avail<=2?' low':''}`}>{avail<=0?'Out':avail}</span>
-                <button type="button" className="stock-remove" onClick={()=>onChange(inventory.filter(i=>i.size!==inv.size))}>×</button>
+                <span className={`stock-avail${avail<=0?' out':avail<=2?' low':''}`}>
+                  {avail<=0 ? 'Out' : avail}
+                </span>
+                <button type="button" className="stock-remove"
+                  onClick={() => onChange(inventory.filter(i => i.size !== inv.size))}>×</button>
               </div>
             )
           })}
         </div>
       )}
-      <div className="stock-add-row">
-        <input type="text" placeholder="Size (S, M, XL, 42…)" value={newSize} onChange={e=>{setNewSize(e.target.value);setErr('')}} className="stock-size-input"
-          onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();handleAdd()}}}/>
-        <input type="number" min="0" placeholder="Qty" value={newStock} onChange={e=>setNewStock(e.target.value)} className="stock-qty-input"
-          onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();handleAdd()}}}/>
-        <button type="button" className="btn-sm" onClick={handleAdd}>Add size</button>
-      </div>
-      {err&&<p className="field-error">{err}</p>}
-      {inventory.length===0&&<p className="field-hint">No sizes yet. Add at least one size and quantity.</p>}
+
+      <p className="sp-section-label" style={{marginBottom:6}}>
+        {inventory.length === 0 ? 'Select sizes to add' : 'Add another size'}
+      </p>
+      <SizePicker
+        inventory={inventory}
+        onAdd={handleAdd}
+        error={err}
+        onClearErr={() => setErr('')}
+      />
+
+      {inventory.length === 0 && (
+        <p className="field-hint" style={{marginTop:8}}>
+          Add at least one size and set its stock quantity above.
+        </p>
+      )}
     </div>
   )
 }
 
 /* ─────────────────────────────────────────────
-   Gown Card (list item)
+   Gown Card
 ───────────────────────────────────────────── */
-function GownCard({ g, onEdit, onView, onStock, onArchive, onPermanentDelete, archived=false }) {
+function GownCard({ g, onEdit, onView, onSaveStock, onArchive, onPermanentDelete, archived=false }) {
   const inv=g.inventory||[]
-  const totalQty=inv.reduce((s,i)=>s+(i.stock||0),0)
   const avail=inv.reduce((s,i)=>s+Math.max(0,(i.stock||0)-(i.reserved||0)),0)
   const outSizes=inv.filter(i=>(i.stock-(i.reserved||0))<=0)
   const lowSizes=inv.filter(i=>{const a=i.stock-(i.reserved||0);return a>0&&a<=2})
   return(
     <div className={`gown-card${archived?' gown-card--archived':''}`}>
-      {/* Thumbnail */}
       <div className="gown-card-img">
         <img src={g.image} alt={g.alt||g.name} onError={e=>{e.target.style.display='none'}}/>
-        {g.tryonImage&&g.tryonImage!==g.image&&<div className="vto-badge">VTO</div>}
+        {g.tryonImage&&<div className="vto-badge">VTO</div>}
         {g.tryonImageBack&&<div className="vto-badge vto-badge--back">↩</div>}
       </div>
-      {/* Info */}
       <div className="gown-card-body">
         <div className="gown-card-name">
           {g.name}
@@ -692,7 +870,6 @@ function GownCard({ g, onEdit, onView, onStock, onArchive, onPermanentDelete, ar
           {g.tryonCalibration&&<span className="badge badge--neutral">⚙ Cal</span>}
         </div>
         <div className="gown-card-meta">{g.price}{g.silhouette?` · ${g.silhouette}`:''}{g.color?` · ${g.color}`:''}{g.type?` · ${g.type}`:''}</div>
-        {/* Stock summary chips */}
         <div className="gown-card-stock">
           {inv.length===0
             ?<span className="stock-chip stock-chip--none">No inventory</span>
@@ -704,7 +881,6 @@ function GownCard({ g, onEdit, onView, onStock, onArchive, onPermanentDelete, ar
           }
         </div>
       </div>
-      {/* Actions */}
       <div className="gown-card-actions">
         {!archived&&(
           <>
@@ -712,10 +888,7 @@ function GownCard({ g, onEdit, onView, onStock, onArchive, onPermanentDelete, ar
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               Edit
             </button>
-            <button className="btn-sm btn-stock" onClick={()=>onStock(g)} title="Manage stock">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-              Stock
-            </button>
+            <StockDropdown gown={g} onSave={onSaveStock}/>
           </>
         )}
         <button className="btn-sm btn-view" onClick={()=>onView(g)} title="View details">
@@ -747,7 +920,7 @@ export default function AdminGownsPage() {
   const [search,setSearch]=useState(''); const [sort,setSort]=useState('name-asc')
   const [toast,setToast]=useState(null); const [confirm,setConfirm]=useState(null)
   const [sidebarOpen,setSidebarOpen]=useState(false); const [editingGown,setEditingGown]=useState(null)
-  const [viewingGown,setViewingGown]=useState(null); const [stockGown,setStockGown]=useState(null)
+  const [viewingGown,setViewingGown]=useState(null)
 
   function showToast(m,t='success'){setToast({message:m,type:t})}
   function askConfirm(opts){setConfirm(opts)}
@@ -755,7 +928,10 @@ export default function AdminGownsPage() {
   const loadActive=useCallback(async()=>{
     setLoading(true); setError('')
     try{
-      const [aRes,rRes]=await Promise.all([fetch('/api/admin/gowns',{headers:headers()}),fetch('/api/admin/gowns?tab=archived',{headers:headers()})])
+      const [aRes,rRes]=await Promise.all([
+        fetch('/api/admin/gowns',{headers:headers()}),
+        fetch('/api/admin/gowns?tab=archived',{headers:headers()})
+      ])
       const aData=await aRes.json(), rData=await rRes.json()
       if(!aRes.ok)throw new Error(aData.error||'Failed to load')
       setGowns(aData.gowns||[])
@@ -766,7 +942,6 @@ export default function AdminGownsPage() {
 
   useEffect(()=>{loadActive()},[loadActive])
 
-  // Filter + sort
   const filteredActive = useMemo(()=>{
     let list=[...gowns]
     if(search.trim()){const q=search.toLowerCase(); list=list.filter(g=>[g.name,g.color,g.silhouette,g.fabric,g.neckline,g.type].some(v=>(v||'').toLowerCase().includes(q)))}
@@ -788,7 +963,6 @@ export default function AdminGownsPage() {
     return archived.filter(g=>[g.name,g.color,g.silhouette].some(v=>(v||'').toLowerCase().includes(q)))
   },[archived,search])
 
-  // Sidebar handlers
   const openAdd=()=>{ setEditingGown(null); setSidebarOpen(true) }
   const openEdit=g=>{ setEditingGown(g); setSidebarOpen(true) }
   const closeSidebar=()=>{ setSidebarOpen(false); setTimeout(()=>setEditingGown(null),300) }
@@ -803,7 +977,7 @@ export default function AdminGownsPage() {
     const res=await fetch('/api/admin/gowns',{method:'PUT',headers:headers(),body:JSON.stringify({id,inventory})})
     const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
     setGowns(p=>p.map(g=>String(g.id)===String(id)?{...g,inventory}:g))
-    setStockGown(null); showToast('Inventory updated')
+    showToast('Inventory updated')
   }
 
   const handleArchive=(id,archive)=>{
@@ -840,7 +1014,6 @@ export default function AdminGownsPage() {
     }catch(e){setError(e.message);showToast(e.message,'error')}
   }
 
-  // Stats
   const allInv=gowns.flatMap(g=>g.inventory||[])
   const totalUnits=allInv.reduce((s,i)=>s+Math.max(0,(i.stock||0)-(i.reserved||0)),0)
   const lowCount=allInv.filter(i=>{const a=(i.stock||0)-(i.reserved||0);return a>0&&a<=2}).length
@@ -852,111 +1025,40 @@ export default function AdminGownsPage() {
 
   return(
     <>
+      {/*
+        ── NO :root or @media tokens here ──────────────────────────────────────
+        All CSS custom properties (--c-bg, --c-surface, etc.) are defined in
+        layout.js with three-layer priority:
+          1. :root                       dark default
+          2. @media prefers-color-scheme OS light (with dark-override guard)
+          3. [data-adm-theme]            manual toggle, always wins
+        This style block contains only component-scoped rules.
+      */}
       <style>{`
-       /* ── Variables: default dark ── */
-      :root {
-        --c-bg:          #0f0f11;
-        --c-surface:     #18181c;
-        --c-surface2:    #1e1e23;
-        --c-border:      #2a2a32;
-        --c-border2:     #333340;
-        --c-text:        #e8e6e3;
-        --c-muted:       #7c7a85;
-        --c-subtle:      #4a4856;
-        --c-gold:        #c8a96e;
-        --c-gold-dim:    rgba(200,169,110,.15);
-        --c-gold-border: rgba(200,169,110,.25);
-        --c-blue:        #4a7fd4;
-        --c-blue-dim:    rgba(74,127,212,.12);
-        --c-blue-border: rgba(74,127,212,.25);
-        --c-green:       #4caf82;
-        --c-green-dim:   rgba(76,175,130,.12);
-        --c-red:         #c45c5c;
-        --c-red-dim:     rgba(196,92,92,.12);
-        --c-red-border:  rgba(196,92,92,.25);
-        --c-warn:        #d4943a;
-        --c-warn-dim:    rgba(212,148,58,.12);
-        --radius:8px; --radius-lg:12px; --radius-xl:16px;
-        --sidebar-w:480px;
-        --font:'DM Sans',system-ui,sans-serif;
-      }
-
-      /* ── System light preference (no forced override) ── */
-      @media (prefers-color-scheme: light) {
-        :root {
-          --c-bg:          #f5f4f0;
-          --c-surface:     #ffffff;
-          --c-surface2:    #f0eeea;
-          --c-border:      rgba(0,0,0,.10);
-          --c-border2:     rgba(0,0,0,.18);
-          --c-text:        #111111;
-          --c-muted:       #555555;
-          --c-subtle:      #999999;
-          --c-gold:        #9a6f2e;
-          --c-gold-dim:    rgba(154,111,46,.10);
-          --c-gold-border: rgba(154,111,46,.25);
-          --c-blue:        #2d62b8;
-          --c-blue-dim:    rgba(45,98,184,.08);
-          --c-blue-border: rgba(45,98,184,.22);
-          --c-green:       #1e7a4e;
-          --c-green-dim:   rgba(30,122,78,.09);
-          --c-red:         #b33030;
-          --c-red-dim:     rgba(179,48,48,.08);
-          --c-red-border:  rgba(179,48,48,.22);
-          --c-warn:        #9a5a10;
-          --c-warn-dim:    rgba(154,90,16,.09);
+        /* ── SizePicker ── */
+        .sp-root{display:flex;flex-direction:column;gap:8px;}
+        .sp-section-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-subtle);}
+        .sp-grid{display:flex;flex-wrap:wrap;gap:5px;}
+        .sp-btn{
+          padding:5px 11px;border-radius:6px;font-size:12px;font-weight:500;
+          border:1px solid var(--c-border);background:var(--c-surface2);
+          color:var(--c-text);cursor:pointer;transition:all .13s;
+          display:inline-flex;align-items:center;gap:4px;
+          white-space:nowrap;user-select:none;
         }
-      }
-
-      /* ── Forced light (data-adm-theme="light") ── */
-      [data-adm-theme="light"] {
-        --c-bg:          #f5f4f0;
-        --c-surface:     #ffffff;
-        --c-surface2:    #f0eeea;
-        --c-border:      rgba(0,0,0,.10);
-        --c-border2:     rgba(0,0,0,.18);
-        --c-text:        #111111;
-        --c-muted:       #555555;
-        --c-subtle:      #999999;
-        --c-gold:        #9a6f2e;
-        --c-gold-dim:    rgba(154,111,46,.10);
-        --c-gold-border: rgba(154,111,46,.25);
-        --c-blue:        #2d62b8;
-        --c-blue-dim:    rgba(45,98,184,.08);
-        --c-blue-border: rgba(45,98,184,.22);
-        --c-green:       #1e7a4e;
-        --c-green-dim:   rgba(30,122,78,.09);
-        --c-red:         #b33030;
-        --c-red-dim:     rgba(179,48,48,.08);
-        --c-red-border:  rgba(179,48,48,.22);
-        --c-warn:        #9a5a10;
-        --c-warn-dim:    rgba(154,90,16,.09);
-      }
-
-      /* ── Forced dark (data-adm-theme="dark") ── */
-      [data-adm-theme="dark"] {
-        --c-bg:          #0f0f11;
-        --c-surface:     #18181c;
-        --c-surface2:    #1e1e23;
-        --c-border:      #2a2a32;
-        --c-border2:     #333340;
-        --c-text:        #e8e6e3;
-        --c-muted:       #7c7a85;
-        --c-subtle:      #4a4856;
-        --c-gold:        #c8a96e;
-        --c-gold-dim:    rgba(200,169,110,.15);
-        --c-gold-border: rgba(200,169,110,.25);
-        --c-blue:        #4a7fd4;
-        --c-blue-dim:    rgba(74,127,212,.12);
-        --c-blue-border: rgba(74,127,212,.25);
-        --c-green:       #4caf82;
-        --c-green-dim:   rgba(76,175,130,.12);
-        --c-red:         #c45c5c;
-        --c-red-dim:     rgba(196,92,92,.12);
-        --c-red-border:  rgba(196,92,92,.25);
-        --c-warn:        #d4943a;
-        --c-warn-dim:    rgba(212,148,58,.12);
-      }
+        .sp-btn:not(:disabled):hover{border-color:var(--c-gold);background:var(--c-gold-dim);color:var(--c-gold);}
+        .sp-btn--taken{opacity:.38;cursor:not-allowed;background:var(--c-surface);}
+        .sp-btn--custom{border-style:dashed;color:var(--c-muted);}
+        .sp-btn--custom:not(:disabled):hover{border-color:var(--c-blue);background:var(--c-blue-dim);color:var(--c-blue);}
+        .sp-btn--custom-active{border-color:var(--c-blue);background:var(--c-blue-dim);color:var(--c-blue);}
+        .sp-check{font-size:9px;color:var(--c-green);}
+        .sp-custom-row{display:flex;gap:7px;align-items:center;}
+        .sp-custom-input{
+          flex:1;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--radius);
+          font-size:13px;background:var(--c-surface2);color:var(--c-text);min-width:0;
+        }
+        .sp-custom-input:focus{outline:none;border-color:var(--c-gold);}
+        .sp-custom-input::placeholder{color:var(--c-subtle);}
 
         /* ── Toast ── */
         .toast{position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:var(--radius-lg);font-size:13px;font-weight:500;box-shadow:0 4px 24px rgba(0,0,0,.3);animation:toastIn .22s ease;}
@@ -981,7 +1083,7 @@ export default function AdminGownsPage() {
         .confirm-row span:first-child{color:var(--c-muted);}
         .confirm-row span:last-child{font-weight:500;}
 
-        /* ── Sidebar / Drawer ── */
+        /* ── Sidebar ── */
         .sidebar-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:8000;opacity:0;pointer-events:none;transition:opacity .25s;backdrop-filter:blur(2px);}
         .sidebar-backdrop--open{opacity:1;pointer-events:all;}
         .sidebar{position:fixed;top:0;right:0;bottom:0;width:var(--sidebar-w);max-width:100vw;background:var(--c-surface);border-left:1px solid var(--c-border);z-index:8001;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);box-shadow:-16px 0 48px rgba(0,0,0,.25);}
@@ -1056,11 +1158,13 @@ export default function AdminGownsPage() {
         .stock-avail.out{color:var(--c-red);}
         .stock-remove{background:none;border:none;font-size:17px;color:var(--c-subtle);cursor:pointer;line-height:1;padding:0 4px;transition:color .12s;}
         .stock-remove:hover{color:var(--c-red);}
-        .stock-add-row{display:flex;gap:8px;align-items:center;}
-        .stock-size-input{flex:1;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--radius);font-size:13px;background:var(--c-surface2);color:var(--c-text);}
-        .stock-size-input:focus{outline:none;border-color:var(--c-gold);}
-        .stock-qty-input{width:72px;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--radius);font-size:13px;background:var(--c-surface2);color:var(--c-text);}
-        .stock-qty-input:focus{outline:none;border-color:var(--c-gold);}
+
+        /* ── Stock Dropdown ── */
+        .stock-dropdown-wrap{position:relative;}
+        .stock-dropdown-panel{position:absolute;right:0;top:calc(100% + 6px);width:360px;background:var(--c-surface);border:1px solid var(--c-border2);border-radius:var(--radius-lg);box-shadow:0 8px 32px rgba(0,0,0,.35);z-index:500;padding:14px;}
+        .stock-dropdown-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--c-border);}
+        .stock-dropdown-title{font-size:12px;font-weight:600;color:var(--c-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px;}
+        .stock-dropdown-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;padding-top:10px;border-top:1px solid var(--c-border);}
 
         /* ── Buttons ── */
         .btn-primary{background:var(--c-gold);color:#1a1408;border:none;border-radius:var(--radius);padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .12s;}
@@ -1073,6 +1177,7 @@ export default function AdminGownsPage() {
         .btn-danger:hover:not(:disabled){background:rgba(196,92,92,.2);}
         .btn-sm{display:inline-flex;align-items:center;gap:5px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:6px;padding:5px 10px;font-size:12px;font-weight:500;color:var(--c-text);cursor:pointer;text-decoration:none;transition:background .12s,border-color .12s;white-space:nowrap;}
         .btn-sm:hover{background:var(--c-surface);border-color:var(--c-border2);}
+        .btn-sm--disabled{opacity:.35;cursor:not-allowed;pointer-events:none;}
         .btn-xs{display:inline-flex;align-items:center;gap:4px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:5px;padding:4px 8px;font-size:11px;color:var(--c-muted);cursor:pointer;transition:background .12s;text-decoration:none;}
         .btn-xs:hover:not(:disabled){background:var(--c-surface);color:var(--c-text);}
         .btn-xs:disabled{opacity:.35;cursor:not-allowed;}
@@ -1142,21 +1247,17 @@ export default function AdminGownsPage() {
         .tol-val{font-weight:700;color:var(--c-gold);min-width:24px;text-align:right;}
         .spin{display:inline-block;width:20px;height:20px;border:2px solid var(--c-border);border-top-color:var(--c-gold);border-radius:50%;animation:spin .7s linear infinite;}
 
-        /* ── Page layout ── */
+        /* ── Page ── */
         .page{padding:28px 32px;max-width:900px;margin:0 auto;}
         .page-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;}
         .page-title{font-size:22px;font-weight:700;letter-spacing:-.3px;}
         .page-meta{font-size:12px;color:var(--c-muted);}
-
-        /* ── Stats ── */
         .stats-bar{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;}
         .stat-card{flex:1;min-width:100px;padding:12px 16px;border:1px solid var(--c-border);border-radius:var(--radius-lg);background:var(--c-surface);}
         .stat-card.warn{border-color:rgba(212,148,58,.35);background:var(--c-warn-dim);}
         .stat-card.danger{border-color:var(--c-red-border);background:var(--c-red-dim);}
         .stat-val{font-size:20px;font-weight:700;}
         .stat-lbl{font-size:11px;color:var(--c-muted);margin-top:2px;}
-
-        /* ── Toolbar ── */
         .toolbar{display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap;}
         .search-wrap{position:relative;flex:1;min-width:180px;}
         .search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--c-subtle);pointer-events:none;}
@@ -1165,14 +1266,10 @@ export default function AdminGownsPage() {
         .search-input::placeholder{color:var(--c-subtle);}
         .sort-select{padding:8px 12px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:var(--radius);font-size:12px;color:var(--c-text);cursor:pointer;}
         .sort-select:focus{outline:none;border-color:var(--c-gold);}
-
-        /* ── Tabs ── */
         .tabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--c-border);}
         .tab{background:none;border:none;border-bottom:2px solid transparent;padding:8px 16px;font-size:13px;font-weight:500;color:var(--c-muted);cursor:pointer;margin-bottom:-1px;transition:color .15s,border-color .15s;display:flex;align-items:center;gap:6px;}
         .tab.active{color:var(--c-text);border-bottom-color:var(--c-gold);}
         .tab-count{font-size:10px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:10px;padding:1px 6px;}
-
-        /* ── Gown list ── */
         .gown-list{display:flex;flex-direction:column;gap:8px;}
         .empty-state{text-align:center;padding:40px;color:var(--c-subtle);font-size:13px;}
         .archive-note{font-size:12px;color:var(--c-muted);margin-bottom:14px;padding:9px 12px;background:var(--c-surface2);border-radius:var(--radius);border:1px solid var(--c-border);}
@@ -1190,13 +1287,15 @@ export default function AdminGownsPage() {
           .detail-layout{grid-template-columns:1fr;}
           .sidebar{max-width:100vw;}
           .stock-header,.stock-row{grid-template-columns:60px 70px 60px 50px 28px;}
+          .stock-dropdown-panel{width:calc(100vw - 32px);right:auto;left:0;}
+          .sp-grid{gap:4px;}
+          .sp-btn{padding:5px 8px;font-size:11px;}
         }
       `}</style>
 
       {toast&&<Toast message={toast.message} type={toast.type} onDone={()=>setToast(null)}/>}
       {confirm&&<ConfirmModal {...confirm} onClose={()=>setConfirm(null)}/>}
       {viewingGown&&<ProductDetailModal gown={viewingGown} onClose={()=>setViewingGown(null)} onEdit={g=>{setViewingGown(null);openEdit(g)}}/>}
-      {stockGown&&<StockModal gown={stockGown} onSave={handleSaveStock} onClose={()=>setStockGown(null)}/>}
 
       <GownFormSidebar
         open={sidebarOpen}
@@ -1207,7 +1306,6 @@ export default function AdminGownsPage() {
       />
 
       <div className="page">
-        {/* Top bar */}
         <div className="page-topbar">
           <div>
             <h1 className="page-title">Catalogue</h1>
@@ -1219,7 +1317,6 @@ export default function AdminGownsPage() {
           </button>
         </div>
 
-        {/* Stats */}
         {!loading&&(
           <div className="stats-bar">
             <div className="stat-card"><div className="stat-val">{gowns.length}</div><div className="stat-lbl">Active Products</div></div>
@@ -1231,13 +1328,11 @@ export default function AdminGownsPage() {
 
         {error&&<p className="err-msg">{error}</p>}
 
-        {/* Tabs */}
         <div className="tabs">
           <button className={`tab${tab==='active'?' active':''}`} onClick={()=>setTab('active')}>Active <span className="tab-count">{gowns.length}</span></button>
           <button className={`tab${tab==='archived'?' active':''}`} onClick={()=>setTab('archived')}>Archived <span className="tab-count">{arcCount}</span></button>
         </div>
 
-        {/* Toolbar: Search + Sort */}
         <div className="toolbar">
           <div className="search-wrap">
             <svg className="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1248,7 +1343,6 @@ export default function AdminGownsPage() {
           </select>
         </div>
 
-        {/* List */}
         <div className="gown-list">
           {loading
             ?<p className="empty-state">Loading gowns…</p>
@@ -1260,7 +1354,7 @@ export default function AdminGownsPage() {
                   <GownCard key={g.id} g={g} archived={tab==='archived'}
                     onEdit={openEdit}
                     onView={setViewingGown}
-                    onStock={setStockGown}
+                    onSaveStock={handleSaveStock}
                     onArchive={handleArchive}
                     onPermanentDelete={handlePermanentDelete}
                   />

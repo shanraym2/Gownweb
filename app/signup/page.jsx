@@ -197,7 +197,7 @@ export default function SignupPage() {
 
   return (
     <main className="auth-page">
-      <Header />
+      <Header solid/>
       <section className="gowns-header-spacer" />
       <section className="auth-section">
         <div className="container auth-layout">

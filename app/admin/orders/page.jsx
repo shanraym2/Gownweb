@@ -30,14 +30,28 @@ const ESCAPE_TRANSITIONS = {
   shipped:         ['refunded'],
 }
 
-function getAllowedTransitions(status, paymentStatus) {
+function getAllowedTransitions(status, paymentStatus, deliveryMethod, proofStatus, paymentMethod) {
   const flow = STATUS_FLOW[status]
   if (!flow) return { next: null, prev: null, escapes: [] }
   let next = flow.next
   const prev = flow.prev
+
+  // Store pickup orders skip the "shipped" step entirely
+  if (next === 'shipped' && deliveryMethod === 'pickup') next = 'completed'
+
+  // PAYMENT_GATED statuses still require paid payment status
   if (next && PAYMENT_GATED.has(next) && paymentStatus !== 'paid') next = null
+
   const escapes = ESCAPE_TRANSITIONS[status] || []
   return { next, prev, escapes }
+}
+
+// Returns true if the order can advance to "paid" status
+function canAdvanceToPaid(proofStatus, deliveryMethod, paymentMethod) {
+  // Cash on pickup (store pickup + cash) bypasses proof requirement
+  if (deliveryMethod === 'pickup' && paymentMethod === 'cash') return true
+  // All other orders require verified proof
+  return proofStatus === 'verified'
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -249,11 +263,21 @@ function StatusControls({ order, onAction, onRefresh }) {
   const [confirm, setConfirm] = useState(null)
   const [saving,  setSaving ] = useState(false)
 
-  const { next, prev, escapes } = getAllowedTransitions(order.status, order.paymentStatus)
+  const { next, prev, escapes } = getAllowedTransitions(
+    order.status,
+    order.paymentStatus,
+    order.deliveryMethod,
+    order.proofStatus,
+    order.paymentMethod,
+  )
   const isTerminal = !next && !prev && escapes.length === 0
+
+  // Whether advancing to "paid" is currently blocked by unverified proof
+  const paidBlocked = next === 'paid' && !canAdvanceToPaid(order.proofStatus, order.deliveryMethod, order.paymentMethod)
 
   function requestChange(toStatus) {
     if (PAYMENT_GATED.has(toStatus) && order.paymentStatus !== 'paid') return
+    if (toStatus === 'paid' && paidBlocked) return
     const meta       = STATUS_META[toStatus]
     const isDanger   = ['cancelled', 'refunded'].includes(toStatus)
     const isBackward = prev === toStatus
@@ -315,13 +339,22 @@ function StatusControls({ order, onAction, onRefresh }) {
           {next ? (
             <button
               className="adm-btn"
-              disabled={saving || (PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid')}
+              disabled={saving || (PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid') || (next === 'paid' && paidBlocked)}
               onClick={() => requestChange(next)}
-              title={PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid' ? 'Payment must be verified before processing' : `Advance to ${STATUS_META[next]?.label}`}
+              title={
+                PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid'
+                  ? 'Payment must be verified before processing'
+                  : next === 'paid' && paidBlocked
+                    ? 'Payment proof must be verified before marking as paid'
+                    : `Advance to ${STATUS_META[next]?.label}`
+              }
             >
               {STATUS_META[next]?.label} →
               {PAYMENT_GATED.has(next) && order.paymentStatus !== 'paid' && (
                 <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.85 }}>🔒 Verify payment first</span>
+              )}
+              {next === 'paid' && paidBlocked && (
+                <span style={{ marginLeft: 6, fontSize: 12, opacity: 0.85 }}>🔒 Verify proof first</span>
               )}
             </button>
           ) : (!isTerminal && <p className="adm-muted" style={{ fontSize: 13 }}>No further steps available.</p>)}
@@ -449,15 +482,9 @@ export default function AdminOrdersPage() {
   const [sortKey,      setSortKey     ] = useState('placedAt')
   const [sortDir,      setSortDir     ] = useState('desc')
 
-  // FIX: Mirror filterStatus in a ref so useCallback closures always read
-  // the current value without needing it in their dependency array.
-  // This prevents the stale-closure bug where handleAction called
-  // loadOrders(filterStatus) but captured the filterStatus from when
-  // the callback was last created rather than the current value.
   const filterStatusRef = useRef(filterStatus)
   useEffect(() => { filterStatusRef.current = filterStatus }, [filterStatus])
 
-  // FIX: headers() moved outside render — stable reference, no closure issues.
   const headers = useCallback(() => ({
     'Content-Type': 'application/json',
     'X-Admin-Secret': getAdminSecret() || '',
@@ -491,10 +518,6 @@ export default function AdminOrdersPage() {
 
   useEffect(() => { loadOrders() }, [loadOrders])
 
-  // FIX: handleAction now reads filterStatus from the ref (always current)
-  // rather than from the closure (potentially stale). This means calling
-  // loadOrders after verify/reject always uses the filter that is actually
-  // visible on screen, not the one captured at callback creation time.
   const handleAction = useCallback(async (orderId, action, payload = {}) => {
     try {
       const res  = await fetch('/api/admin/orders', {
@@ -519,7 +542,6 @@ export default function AdminOrdersPage() {
         setDrawerOrder(p => p?.id === orderId ? { ...p, paymentStatus: 'paid', status: 'paid', proofStatus: 'verified' } : p)
         setProofOrder(null)
         showToast('Payment verified — customer notified')
-        // Read from ref — always the current filter value
         loadOrders(filterStatusRef.current)
       } else if (action === 'reject-payment') {
         setOrders(p => p.map(o => o.id === orderId
@@ -529,7 +551,6 @@ export default function AdminOrdersPage() {
         setDrawerOrder(p => p?.id === orderId ? { ...p, paymentStatus: 'unpaid', status: 'placed', proofStatus: 'rejected' } : p)
         setProofOrder(null)
         showToast('Proof rejected — customer notified', 'error')
-        // Read from ref — always the current filter value
         loadOrders(filterStatusRef.current)
       }
     } catch (e) {

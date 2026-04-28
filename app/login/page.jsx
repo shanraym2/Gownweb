@@ -205,8 +205,8 @@ export default function LoginPage() {
 
   return (
     <main className="auth-page">
-      <Header />
-      <section className="gowns-header-spacer" />
+      <Header solid/>
+      <section className="login-header-spacer" />
       <section className="auth-section">
         <div className="container auth-layout">
           <div className="auth-copy">

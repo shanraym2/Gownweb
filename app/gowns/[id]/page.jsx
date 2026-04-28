@@ -9,6 +9,7 @@ import { useGowns, getGownById } from '@/hooks/useGowns'
 import ProductCard from '../../components/ProductCard'
 import { addToCart, loadCart } from '../../utils/cartClient'
 import { getCurrentUser } from '../../utils/authClient'
+import { useSizeRecommender } from '@/hooks/useSizeRecommender'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,135 @@ function stockLabel(stock) {
   if (stock === 1) return { text: 'Last piece', cls: 'low' }
   if (stock <= 2)  return { text: `${stock} left`, cls: 'low' }
   return { text: `${stock} in stock`, cls: 'ok' }
+}
+
+// ─── FitMatcher Badge ─────────────────────────────────────────────────────────
+// Replaces the old static FitMatcher CTA with a live recommendation when
+// the user has saved measurements on file.
+
+function FitMatcherSection({ gown, user }) {
+  const supplierId = gown?.supplierId ?? null
+  const userId     = user?.id         ?? null
+
+  const { recommendation, loading } = useSizeRecommender({ supplierId, userId })
+
+  // ── No user: show generic CTA ─────────────────────────────────────────────
+  if (!userId) {
+    return (
+      <div className="dp-fm">
+        <div className="dp-fm-content">
+          <p className="dp-fm-eye">FitMatcher AI</p>
+          <p className="dp-fm-title">Not sure which size to pick?</p>
+          <p className="dp-fm-desc">
+            Enter your measurements and our AI will match you to the best available
+            size for this dress — and suggest alterations if needed.
+          </p>
+          <Link href={`/size-recommender?gown=${gown.id}`} className="dp-fm-btn">
+            Get my size recommendation →
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="dp-fm dp-fm--loading">
+        <div className="dp-fm-content">
+          <p className="dp-fm-eye">FitMatcher AI</p>
+          <p className="dp-fm-title dp-fm-skeleton">Checking your measurements…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Has recommendation ────────────────────────────────────────────────────
+  if (recommendation) {
+    const conf    = Math.min(Math.round(100 - recommendation.score * 3), 95)
+    const confClr = conf >= 75 ? '#1D9E75' : conf >= 55 ? '#EF9F27' : '#E24B4A'
+    const borderline = recommendation.score > 5
+
+    return (
+      <div className="dp-fm dp-fm--result">
+        <div className="dp-fm-content">
+          <p className="dp-fm-eye">FitMatcher AI · Your measurements on file</p>
+
+          <div className="dp-fm-result-row">
+            <div>
+              <p className="dp-fm-result-label">Recommended size</p>
+              <p className="dp-fm-result-size">{recommendation.size?.label}</p>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p className="dp-fm-result-label">Match</p>
+              <p className="dp-fm-result-conf" style={{ color: confClr }}>{conf}%</p>
+            </div>
+          </div>
+
+          {/* Confidence bar */}
+          <div className="dp-fm-conf-track">
+            <div className="dp-fm-conf-fill" style={{ width: `${conf}%`, background: confClr }}/>
+          </div>
+
+          {/* Adjacent sizes */}
+          {recommendation.adjacent?.length > 1 && (
+            <div className="dp-fm-pills">
+              {recommendation.adjacent.map(sz => (
+                <span
+                  key={sz.label}
+                  className={`dp-fm-pill${sz.label === recommendation.size?.label ? ' dp-fm-pill--match' : ''}`}
+                >
+                  {sz.label}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Measurements used */}
+          <div className="dp-fm-meas-row">
+            {[
+              { label: 'Bust',  val: recommendation.measurements?.bust_cm  },
+              { label: 'Waist', val: recommendation.measurements?.waist_cm },
+              { label: 'Hips',  val: recommendation.measurements?.hips_cm  },
+            ].filter(f => f.val != null).map(f => (
+              <span key={f.label} className="dp-fm-meas-chip">
+                {f.label} {f.val} cm
+              </span>
+            ))}
+          </div>
+
+          {borderline && (
+            <p className="dp-fm-border-note">
+              You're near a size boundary. We recommend sizing up — our alteration service can tailor it perfectly.
+            </p>
+          )}
+
+          <div className="dp-fm-actions">
+            <Link href={`/size-recommender?gown=${gown.id}`} className="dp-fm-btn dp-fm-btn--ghost">
+              Update measurements
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Logged in but no measurements saved yet ───────────────────────────────
+  return (
+    <div className="dp-fm dp-fm--cta">
+      <div className="dp-fm-content">
+        <p className="dp-fm-eye">FitMatcher AI</p>
+        <p className="dp-fm-title">Get a personalised size recommendation</p>
+        <p className="dp-fm-desc">
+          Use your camera or enter your measurements. We'll tell you exactly which
+          size fits this dress — and flag if alterations might be needed.
+        </p>
+        <Link href={`/size-recommender?gown=${gown.id}`} className="dp-fm-btn">
+          Find my size →
+        </Link>
+      </div>
+    </div>
+  )
 }
 
 // ─── Size Guide Modal ─────────────────────────────────────────────────────────
@@ -88,8 +218,8 @@ function SizeGuideModal({ onClose }) {
             ))}
           </tbody>
         </table>
-        <Link href="/fit-matcher" className="sg-fm" onClick={onClose}>
-          Use FitMatcher for a personalised recommendation
+        <Link href="/size-recommender" className="sg-fm" onClick={onClose}>
+          Use FitMatcher for a personalised recommendation →
         </Link>
       </div>
     </div>
@@ -160,24 +290,23 @@ export default function GownDetailPage() {
   const { gowns, loading, error } = useGowns()
   const gown = id != null ? getGownById(gowns, id) : null
 
+  const [user,         setUser        ] = useState(null)
   const [cart,         setCart        ] = useState([])
   const [selectedSize, setSelectedSize] = useState(null)
   const [qty,          setQty         ] = useState(1)
   const [sizeErr,      setSizeErr     ] = useState(false)
   const [showGuide,    setShowGuide   ] = useState(false)
   const [showAuth,     setShowAuth    ] = useState(false)
-  const [addedToast,   setAddedToast  ] = useState(null) // { name, size, qty }
+  const [addedToast,   setAddedToast  ] = useState(null)
   const [activeImg,    setActiveImg   ] = useState(0)
 
-  // Sync cart state
+  useEffect(() => { setUser(getCurrentUser()) }, [])
+
   const refreshCart = () => setCart(loadCart())
 
-  // Reset state when navigating to a different gown
   useEffect(() => {
     if (id == null) return
-    setSelectedSize(null)
-    setQty(1)
-    setSizeErr(false)
+    setSelectedSize(null); setQty(1); setSizeErr(false)
     refreshCart()
     try {
       const rv = JSON.parse(localStorage.getItem('jce_recently_viewed') || '[]')
@@ -187,10 +316,7 @@ export default function GownDetailPage() {
     } catch {}
   }, [id])
 
-  // Re-check cart whenever size changes
-  useEffect(() => {
-    refreshCart()
-  }, [selectedSize])
+  useEffect(() => { refreshCart() }, [selectedSize])
 
   const thisInCart   = isInCart(cart, id, selectedSize)
   const totalInCart  = countInCart(cart, id)
@@ -203,11 +329,9 @@ export default function GownDetailPage() {
     addToCart(gown.id, qty, { size: selectedSize })
     refreshCart()
     setAddedToast({ name: gown.name, size: selectedSize, qty })
-    // Reset qty to 1 after adding, keep size selected
     setQty(1)
   }
 
-  // ── untouched recommender logic ────────────────────────────────────────────
   const recs = gown
     ? [...gowns]
         .filter(g => String(g.id) !== String(gown.id))
@@ -294,7 +418,6 @@ export default function GownDetailPage() {
             {(gown.category || gown.type) && (
               <span className="dp-img-cat">{gown.category || gown.type}</span>
             )}
-            {/* Cart badge on image */}
             {totalInCart > 0 && (
               <Link href="/cart" className="dp-cart-badge" aria-label={`${totalInCart} in cart`}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -409,7 +532,6 @@ export default function GownDetailPage() {
                   })}
                 </div>
 
-                {/* Cart indicator for selected size */}
                 {selectedSize && thisInCart && (
                   <p className="dp-size-incart-note">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -443,20 +565,9 @@ export default function GownDetailPage() {
             )}
           </div>
 
-          {/* ── FitMatcher ── */}
+          {/* ── FitMatcher (live recommendation or CTA) ── */}
           <div className="dp-section">
-            <div className="dp-fm">
-              <div className="dp-fm-content">
-                <p className="dp-fm-eye">FitMatcher AI</p>
-                <p className="dp-fm-title">Not sure which size to pick?</p>
-                <p className="dp-fm-desc">
-                  Enter your measurements and our AI will match you to the best available size for this dress — and suggest alterations if needed.
-                </p>
-                <Link href={`/fit-matcher?gown=${gown.id}`} className="dp-fm-btn">
-                  Get my size recommendation →
-                </Link>
-              </div>
-            </div>
+            <FitMatcherSection gown={gown} user={user} />
           </div>
 
           {/* ── Actions ── */}
@@ -476,9 +587,7 @@ export default function GownDetailPage() {
               </>
             ) : (
               <>
-                {/* Quantity + Add to Cart row */}
                 <div className="dp-add-row">
-                  {/* Qty stepper */}
                   <div className="dp-qty">
                     <button
                       type="button"
@@ -495,7 +604,6 @@ export default function GownDetailPage() {
                     >+</button>
                   </div>
 
-                  {/* Add to cart button with icon */}
                   <button
                     className="dp-btn-add"
                     onClick={handleAdd}
@@ -510,7 +618,6 @@ export default function GownDetailPage() {
                     {thisInCart ? 'Add more to cart' : 'Add to cart'}
                   </button>
 
-                  {/* Quick cart link if anything in cart */}
                   {totalInCart > 0 && (
                     <Link href="/cart" className="dp-btn-cart-icon" aria-label="View cart">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -553,6 +660,46 @@ export default function GownDetailPage() {
       )}
 
       <Footer />
+
+      {/* FitMatcher result styles — scoped inline to avoid global CSS changes */}
+      <style>{`
+        .dp-fm--result {
+          background: linear-gradient(135deg, #f5f0ff 0%, #eef8f3 100%);
+          border: 0.5px solid #AFA9EC;
+        }
+        .dp-fm--loading { opacity: .6; }
+        .dp-fm-skeleton { color: #bbb; animation: shimmer 1.2s ease-in-out infinite; }
+        @keyframes shimmer { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+
+        .dp-fm-result-row {
+          display: flex; align-items: flex-end; justify-content: space-between;
+          margin-bottom: 10px;
+        }
+        .dp-fm-result-label { font-size: 10px; color: #7F77DD; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
+        .dp-fm-result-size  { font-size: 2.2rem; font-weight: 400; color: #3C3489; line-height: 1; }
+        .dp-fm-result-conf  { font-size: 1.1rem; font-weight: 500; line-height: 1; }
+
+        .dp-fm-conf-track { height: 3px; background: rgba(0,0,0,.08); border-radius: 2px; overflow: hidden; margin-bottom: 12px; }
+        .dp-fm-conf-fill  { height: 100%; border-radius: 2px; transition: width .5s ease; }
+
+        .dp-fm-pills { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+        .dp-fm-pill  { padding: 3px 12px; border-radius: 20px; font-size: 12px; border: 0.5px solid #ddd; color: #888; background: #fff; }
+        .dp-fm-pill--match { background: #EEEDFE; border-color: #AFA9EC; color: #3C3489; font-weight: 500; }
+
+        .dp-fm-meas-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+        .dp-fm-meas-chip { font-size: 11px; padding: 3px 9px; background: rgba(255,255,255,.7); border-radius: 20px; color: #555; border: 0.5px solid rgba(0,0,0,.08); }
+
+        .dp-fm-border-note {
+          font-size: 11px; color: #7A5200; background: #FDF3DC;
+          border: 0.5px solid #F5CC79; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;
+        }
+        .dp-fm-actions { display: flex; gap: 8px; }
+        .dp-fm-btn--ghost {
+          background: transparent; border-color: #AFA9EC; color: #534AB7;
+          font-size: 12px; padding: 7px 14px;
+        }
+        .dp-fm-btn--ghost:hover { background: rgba(127,119,221,.08); }
+      `}</style>
     </main>
   )
 }

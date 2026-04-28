@@ -24,7 +24,7 @@ export function clearAdminSecret() {
 
 const ADMIN_NAV_LINKS = [
   { href: '/admin',           label: 'Dashboard', exact: true },
-  { href: '/admin/gowns',     label: 'Gowns'                 },
+  { href: '/admin/gowns',     label: 'Catalogue'                 },
   { href: '/admin/orders',    label: 'Orders'                },
   { href: '/admin/dashboard', label: 'Sales'                 },
   { href: '/admin/users',     label: 'Users'                 },
@@ -33,7 +33,7 @@ const ADMIN_NAV_LINKS = [
 
 const STAFF_NAV_LINKS = [
   { href: '/staff',           label: 'Dashboard', exact: true },
-  { href: '/admin/gowns',     label: 'Products'              },
+  { href: '/admin/gowns',     label: 'Catalogue'              },
   { href: '/admin/orders',    label: 'Orders'                },
   { href: '/admin/dashboard', label: 'Sales'                 },
   { href: '/admin/users',     label: 'Customers'             },
@@ -70,8 +70,6 @@ function useAdminTheme() {
 }
 
 // ── Secret gate ───────────────────────────────────────────────────────────────
-// Validates the secret against a dedicated lightweight endpoint instead of
-// piggybacking on the gowns list route.
 
 function SecretGate({ onSuccess }) {
   const [secret,     setSecret    ] = useState('')
@@ -88,7 +86,6 @@ function SecretGate({ onSuccess }) {
     if (!trimmed) { setError('Enter the admin secret.'); return }
     setValidating(true); setError('')
     try {
-      // Use the dedicated ping endpoint — no side effects
       const res = await fetch('/api/admin/ping', {
         headers: { 'X-Admin-Secret': trimmed },
       })
@@ -97,11 +94,9 @@ function SecretGate({ onSuccess }) {
         setError('Incorrect secret. Check ADMIN_SECRET in your .env.local.')
         return
       }
-      // Any 2xx (or even network-level success on other codes) — accept
       if (store) setAdminSecret(trimmed)
       onSuccess()
     } catch {
-      // Server unreachable — still store and proceed so offline dev works
       if (store) setAdminSecret(trimmed)
       onSuccess()
     } finally {
@@ -217,7 +212,6 @@ export default function AdminLayout({ children }) {
     return () => { document.body.style.overflow = '' }
   }, [sidebarOpen])
 
-  // ── Re-check role from server then refresh local state ────────────────────
   const handleRefreshRole = async () => {
     const u = getCurrentUser()
     if (!u?.email) { setRoleError('You are not logged in.'); return }
@@ -228,7 +222,6 @@ export default function AdminLayout({ children }) {
       if (data.ok && data.role) {
         setCurrentUserRole(data.role)
         if (['admin', 'staff'].includes(data.role)) { window.location.reload(); return }
-        // Still not elevated — show a helpful error
         setRoleError(
           data.adminEmailConfigured === false
             ? `ADMIN_EMAIL not set. Add ADMIN_EMAIL=${u.email} to .env.local and restart.`
@@ -250,7 +243,6 @@ export default function AdminLayout({ children }) {
     </div>
   )
 
-  // ── Not logged in or wrong role ───────────────────────────────────────────
   if (!user || !['admin', 'staff'].includes(user.role)) return (
     <div className="adm-access-screen">
       <div className="adm-access-card">
@@ -281,12 +273,75 @@ export default function AdminLayout({ children }) {
     </div>
   )
 
-  // ── Authed ────────────────────────────────────────────────────────────────
   const isAdmin  = user.role === 'admin'
   const navLinks = isAdmin ? ADMIN_NAV_LINKS : STAFF_NAV_LINKS
 
   return (
     <div className="adm-layout">
+
+      {/*
+        ── GLOBAL THEME TOKENS ──────────────────────────────────────────────────
+        Three layers, in ascending specificity so the manual toggle always wins:
+
+        1. :root                          — dark default (specificity 0,0,1)
+        2. @media prefers-color-scheme    — OS light preference, guarded so it
+                                           cannot override a manual dark choice
+        3. [data-adm-theme="light|dark"]  — explicit toggle (specificity 0,1,0)
+                                           beats both layers above
+
+        applyTheme() in useAdminTheme sets/removes data-adm-theme on <html>,
+        which is an ancestor of every admin page, so all pages inherit correctly.
+      */}
+      <style>{`
+        /* 1 ── Dark default */
+        :root {
+          --c-bg:#0f0f11; --c-surface:#18181c; --c-surface2:#1e1e23;
+          --c-border:#2a2a32; --c-border2:#333340; --c-text:#e8e6e3;
+          --c-muted:#7c7a85; --c-subtle:#4a4856;
+          --c-gold:#c8a96e; --c-gold-dim:rgba(200,169,110,.15); --c-gold-border:rgba(200,169,110,.25);
+          --c-blue:#4a7fd4; --c-blue-dim:rgba(74,127,212,.12); --c-blue-border:rgba(74,127,212,.25);
+          --c-green:#4caf82; --c-green-dim:rgba(76,175,130,.12);
+          --c-red:#c45c5c; --c-red-dim:rgba(196,92,92,.12); --c-red-border:rgba(196,92,92,.25);
+          --c-warn:#d4943a; --c-warn-dim:rgba(212,148,58,.12);
+          --radius:8px; --radius-lg:12px; --radius-xl:16px; --sidebar-w:480px;
+        }
+
+        /* 2 ── OS light preference — only when no manual override is set */
+        @media (prefers-color-scheme: light) {
+          :root:not([data-adm-theme="dark"]) {
+            --c-bg:#f5f4f0; --c-surface:#ffffff; --c-surface2:#f0eeea;
+            --c-border:rgba(0,0,0,.10); --c-border2:rgba(0,0,0,.18);
+            --c-text:#111111; --c-muted:#555555; --c-subtle:#999999;
+            --c-gold:#9a6f2e; --c-gold-dim:rgba(154,111,46,.10); --c-gold-border:rgba(154,111,46,.25);
+            --c-blue:#2d62b8; --c-blue-dim:rgba(45,98,184,.08); --c-blue-border:rgba(45,98,184,.22);
+            --c-green:#1e7a4e; --c-green-dim:rgba(30,122,78,.09);
+            --c-red:#b33030; --c-red-dim:rgba(179,48,48,.08); --c-red-border:rgba(179,48,48,.22);
+            --c-warn:#9a5a10; --c-warn-dim:rgba(154,90,16,.09);
+          }
+        }
+
+        /* 3 ── Manual toggle: highest specificity, always wins */
+        [data-adm-theme="light"] {
+          --c-bg:#f5f4f0; --c-surface:#ffffff; --c-surface2:#f0eeea;
+          --c-border:rgba(0,0,0,.10); --c-border2:rgba(0,0,0,.18);
+          --c-text:#111111; --c-muted:#555555; --c-subtle:#999999;
+          --c-gold:#9a6f2e; --c-gold-dim:rgba(154,111,46,.10); --c-gold-border:rgba(154,111,46,.25);
+          --c-blue:#2d62b8; --c-blue-dim:rgba(45,98,184,.08); --c-blue-border:rgba(45,98,184,.22);
+          --c-green:#1e7a4e; --c-green-dim:rgba(30,122,78,.09);
+          --c-red:#b33030; --c-red-dim:rgba(179,48,48,.08); --c-red-border:rgba(179,48,48,.22);
+          --c-warn:#9a5a10; --c-warn-dim:rgba(154,90,16,.09);
+        }
+        [data-adm-theme="dark"] {
+          --c-bg:#0f0f11; --c-surface:#18181c; --c-surface2:#1e1e23;
+          --c-border:#2a2a32; --c-border2:#333340; --c-text:#e8e6e3;
+          --c-muted:#7c7a85; --c-subtle:#4a4856;
+          --c-gold:#c8a96e; --c-gold-dim:rgba(200,169,110,.15); --c-gold-border:rgba(200,169,110,.25);
+          --c-blue:#4a7fd4; --c-blue-dim:rgba(74,127,212,.12); --c-blue-border:rgba(74,127,212,.25);
+          --c-green:#4caf82; --c-green-dim:rgba(76,175,130,.12);
+          --c-red:#c45c5c; --c-red-dim:rgba(196,92,92,.12); --c-red-border:rgba(196,92,92,.25);
+          --c-warn:#d4943a; --c-warn-dim:rgba(212,148,58,.12);
+        }
+      `}</style>
 
       {/* Mobile top bar */}
       <div className="adm-topnav">

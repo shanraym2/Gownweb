@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Header from '../components/Header'
@@ -71,6 +71,304 @@ function StatCard({ label, value, icon }) {
       <span className="profile-stat-icon" aria-hidden="true">{icon}</span>
       <span className="profile-stat-value">{value}</span>
       <span className="profile-stat-label">{label}</span>
+    </div>
+  )
+}
+
+// ─── Measurements Card ────────────────────────────────────────────────────────
+// Shows saved measurements and recommended size, with a quick-edit form.
+// Calls GET/POST /api/measurements and GET /api/size-chart.
+
+function MeasurementsCard({ userId }) {
+  const [meas,         setMeas        ] = useState(null)
+  const [sizes,        setSizes       ] = useState([])
+  const [supplierName, setSupplierName] = useState('')
+  const [loading,      setLoading     ] = useState(true)
+  const [editing,      setEditing     ] = useState(false)
+  const [saving,       setSaving      ] = useState(false)
+  const [deleting,     setDeleting    ] = useState(false)
+  const [msg,          setMsg         ] = useState(null)   // { text, type }
+  const [form, setForm] = useState({ bust: '', waist: '', hips: '', height: '', weight: '' })
+
+  // Load saved measurements + size chart in parallel
+  useEffect(() => {
+    if (!userId) { setLoading(false); return }
+    Promise.all([
+      fetch('/api/measurements', { headers: { 'x-user-id': userId } }).then(r => r.json()),
+      fetch('/api/size-chart').then(r => r.json()),
+    ])
+      .then(([mData, cData]) => {
+        if (mData.ok && mData.measurements) {
+          setMeas(mData.measurements)
+          setForm({
+            bust:   String(mData.measurements.bust_cm  ?? ''),
+            waist:  String(mData.measurements.waist_cm ?? ''),
+            hips:   String(mData.measurements.hips_cm  ?? ''),
+            height: String(mData.measurements.height_cm ?? ''),
+            weight: String(mData.measurements.weight_kg ?? ''),
+          })
+        }
+        if (cData.ok) { setSizes(cData.sizes); setSupplierName(cData.supplierName || '') }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [userId])
+
+  // Derive recommendation from saved measurements + size chart
+  const recommendation = useMemo(() => {
+    if (!meas || !sizes.length) return null
+    const bust = meas.bust_cm, waist = meas.waist_cm, hips = meas.hips_cm
+    let best = null, bestScore = Infinity
+    for (const sz of sizes) {
+      let score = 0, hits = 0
+      if (bust  && sz.bust_min  != null) { score += Math.abs(bust  - (sz.bust_min  + sz.bust_max)  / 2); hits++ }
+      if (waist && sz.waist_min != null) { score += Math.abs(waist - (sz.waist_min + sz.waist_max) / 2); hits++ }
+      if (hips  && sz.hip_min   != null) { score += Math.abs(hips  - (sz.hip_min   + sz.hip_max)   / 2); hits++ }
+      if (hits === 0) continue
+      score /= hits
+      if (score < bestScore) { bestScore = score; best = sz }
+    }
+    if (!best) return null
+    const idx  = sizes.findIndex(s => s.label === best.label)
+    const conf = Math.min(Math.round(100 - bestScore * 3), 95)
+    return {
+      size:     best,
+      score:    bestScore,
+      conf,
+      adjacent: sizes.slice(Math.max(0, idx - 1), Math.min(sizes.length, idx + 2)),
+    }
+  }, [meas, sizes])
+
+  const handleSave = async () => {
+    setSaving(true); setMsg(null)
+    try {
+      const body = {
+        bust_cm:   form.bust   ? Number(form.bust)   : null,
+        waist_cm:  form.waist  ? Number(form.waist)  : null,
+        hips_cm:   form.hips   ? Number(form.hips)   : null,
+        height_cm: form.height ? Number(form.height) : null,
+        weight_kg: form.weight ? Number(form.weight) : null,
+        source:    'manual',
+      }
+      // Require at least one real measurement
+      if (!body.bust_cm && !body.waist_cm && !body.hips_cm) {
+        setMsg({ text: 'Enter at least one of bust, waist, or hips.', type: 'error' }); setSaving(false); return
+      }
+      const res  = await fetch('/api/measurements', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body:    JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setMeas(data.measurements); setEditing(false)
+        setMsg({ text: '✓ Measurements saved', type: 'success' })
+        setTimeout(() => setMsg(null), 3000)
+      } else {
+        setMsg({ text: data.error || 'Save failed.', type: 'error' })
+      }
+    } catch {
+      setMsg({ text: 'Network error. Try again.', type: 'error' })
+    } finally { setSaving(false) }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Remove your saved measurements?')) return
+    setDeleting(true)
+    try {
+      await fetch('/api/measurements', { method: 'DELETE', headers: { 'x-user-id': userId } })
+      setMeas(null); setForm({ bust: '', waist: '', hips: '', height: '', weight: '' })
+      setMsg({ text: 'Measurements cleared.', type: 'success' })
+      setTimeout(() => setMsg(null), 3000)
+    } catch {
+      setMsg({ text: 'Could not clear. Try again.', type: 'error' })
+    } finally { setDeleting(false) }
+  }
+
+  const confColor = recommendation
+    ? (recommendation.conf >= 75 ? '#1D9E75' : recommendation.conf >= 55 ? '#EF9F27' : '#E24B4A')
+    : '#999'
+
+  if (loading) return (
+    <div className="profile-card profile-card--sm profile-meas-card">
+      <h2 className="profile-card-title">My measurements</h2>
+      <p className="profile-card-sub">Loading…</p>
+    </div>
+  )
+
+  return (
+    <div className="profile-card profile-meas-card">
+      <div className="profile-card-header">
+        <div>
+          <h2 className="profile-card-title">My measurements</h2>
+          <p className="profile-card-sub">
+            Used by FitMatcher to recommend your size on every gown page.
+          </p>
+        </div>
+        {!editing && meas && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-outline profile-meas-edit-btn" onClick={() => setEditing(true)}>
+              Edit
+            </button>
+            <button
+              className="profile-meas-delete-btn"
+              onClick={handleDelete}
+              disabled={deleting}
+              title="Clear measurements"
+              aria-label="Delete measurements"
+            >
+              {deleting ? '…' : '✕'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {msg && (
+        <div className={`profile-meas-msg profile-meas-msg--${msg.type}`}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* ── No data: CTA ── */}
+      {!meas && !editing && (
+        <div className="profile-meas-empty">
+          <p className="profile-meas-empty-text">
+            No measurements saved yet. Use the size recommender to get personalised size suggestions on any gown.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link href="/size-recommender" className="btn btn-primary profile-meas-cta-btn">
+              Use camera / enter measurements →
+            </Link>
+            <button className="btn btn-outline" onClick={() => setEditing(true)}>
+              Enter manually
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Has data: display ── */}
+      {meas && !editing && (
+        <>
+          {/* Measurements grid */}
+          <div className="profile-meas-grid">
+            {[
+              { label: 'Bust',   val: meas.bust_cm,   unit: 'cm' },
+              { label: 'Waist',  val: meas.waist_cm,  unit: 'cm' },
+              { label: 'Hips',   val: meas.hips_cm,   unit: 'cm' },
+              { label: 'Height', val: meas.height_cm, unit: 'cm' },
+              { label: 'Weight', val: meas.weight_kg, unit: 'kg' },
+            ].filter(f => f.val != null).map(f => (
+              <div key={f.label} className="profile-meas-item">
+                <div className="profile-meas-label">{f.label}</div>
+                <div className="profile-meas-val">{f.val} <span className="profile-meas-unit">{f.unit}</span></div>
+              </div>
+            ))}
+            <div className="profile-meas-item profile-meas-item--source">
+              <div className="profile-meas-label">Source</div>
+              <div className="profile-meas-val profile-meas-val--src">{meas.source || 'manual'}</div>
+            </div>
+          </div>
+
+          {/* Recommended size block */}
+          {recommendation && (
+            <div className="profile-meas-rec">
+              <div className="profile-meas-rec-row">
+                <div>
+                  <div className="profile-meas-rec-label">
+                    Your typical size · {supplierName || 'Standard'} chart
+                  </div>
+                  <div className="profile-meas-rec-size">{recommendation.size.label}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div className="profile-meas-rec-label">Match</div>
+                  <div className="profile-meas-rec-conf" style={{ color: confColor }}>
+                    {recommendation.conf}%
+                  </div>
+                </div>
+              </div>
+              <div className="profile-meas-conf-track">
+                <div className="profile-meas-conf-fill" style={{ width: `${recommendation.conf}%`, background: confColor }}/>
+              </div>
+              <div className="profile-meas-pills">
+                {recommendation.adjacent.map(sz => (
+                  <span
+                    key={sz.label}
+                    className={`profile-meas-pill${sz.label === recommendation.size.label ? ' profile-meas-pill--match' : ''}`}
+                  >
+                    {sz.label}
+                  </span>
+                ))}
+              </div>
+              {recommendation.score > 5 && (
+                <p className="profile-meas-border-note">
+                  You're near a size boundary. Consider sizing up — alteration services are available.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="profile-meas-footer">
+            <Link href="/size-recommender" className="profile-link-inline">
+              Retake with camera →
+            </Link>
+            <span className="profile-meas-footer-sep">·</span>
+            <span className="profile-meas-date">
+              Updated {new Date(meas.measured_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </span>
+          </div>
+        </>
+      )}
+
+      {/* ── Edit form ── */}
+      {editing && (
+        <div className="profile-meas-form">
+          <p className="profile-meas-form-note">
+            Enter measurements in centimetres (cm). At least one of bust, waist, or hips is required.
+          </p>
+          <div className="profile-meas-form-grid">
+            {[
+              { label: 'Bust / chest',     key: 'bust',   placeholder: 'e.g. 88',  min: 60,  max: 150, unit: 'cm' },
+              { label: 'Waist',            key: 'waist',  placeholder: 'e.g. 70',  min: 50,  max: 140, unit: 'cm' },
+              { label: 'Hips',             key: 'hips',   placeholder: 'e.g. 95',  min: 60,  max: 160, unit: 'cm' },
+              { label: 'Height',           key: 'height', placeholder: 'e.g. 162', min: 130, max: 220, unit: 'cm', optional: true },
+              { label: 'Weight',           key: 'weight', placeholder: 'e.g. 58',  min: 35,  max: 200, unit: 'kg', optional: true },
+            ].map(f => (
+              <div key={f.key} className="profile-field">
+                <label className="profile-field-label">
+                  {f.label}
+                  {f.optional && <span className="profile-meas-opt"> (optional)</span>}
+                </label>
+                <div className="profile-meas-input-wrap">
+                  <input
+                    className="profile-field-input"
+                    type="number"
+                    value={form[f.key]}
+                    onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                    min={f.min} max={f.max}
+                  />
+                  <span className="profile-meas-unit-label">{f.unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="profile-edit-controls" style={{ marginTop: 4 }}>
+            <button className="btn btn-outline" onClick={() => { setEditing(false); setMsg(null) }} disabled={saving}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save measurements'}
+            </button>
+          </div>
+          <p className="profile-meas-tip">
+            Or use the{' '}
+            <Link href="/size-recommender" className="profile-link-inline">
+              camera-based recommender
+            </Link>
+            {' '}for automatic measurement estimation.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -427,48 +725,56 @@ export default function ProfilePage() {
       <section className="profile-section">
         <div className="profile-grid">
 
-          {/* ── Info card ── */}
-          <div className="profile-card">
-            <div className="profile-card-header">
-              <h2 className="profile-card-title">Personal information</h2>
-              <p className="profile-card-sub">
-                {editing
-                  ? 'Changes here auto-fill your checkout form.'
-                  : 'Pre-fills your checkout. Click "Edit profile" to update.'}
-              </p>
+          {/* ── Left column: info + measurements ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+            {/* ── Info card ── */}
+            <div className="profile-card">
+              <div className="profile-card-header">
+                <h2 className="profile-card-title">Personal information</h2>
+                <p className="profile-card-sub">
+                  {editing
+                    ? 'Changes here auto-fill your checkout form.'
+                    : 'Pre-fills your checkout. Click "Edit profile" to update.'}
+                </p>
+              </div>
+
+              <div className="profile-fields">
+                <div className="profile-fields-row">
+                  <EditableField label="Full name" name="name"  value={form.name}  editing={editing} onChange={handleChange} />
+                  <EditableField label="Email"     name="email" type="email" value={form.email} editing={editing} onChange={handleChange} />
+                </div>
+                <EditableField label="Phone number" name="phone" type="tel" value={form.phone} editing={editing} onChange={handleChange} maxLength={11} placeholder="09XXXXXXXXX" />
+              </div>
+
+              <div className="profile-divider" />
+
+              <div className="profile-card-header">
+                <h2 className="profile-card-title">Delivery address</h2>
+              </div>
+              <div className="profile-fields">
+                <EditableField label="Street / Barangay" name="address"  value={form.address}  editing={editing} onChange={handleChange} />
+                <div className="profile-fields-row">
+                  <EditableField label="City"     name="city"     value={form.city}     editing={editing} onChange={handleChange} />
+                  <EditableField label="Province" name="province" value={form.province} editing={editing} onChange={handleChange} />
+                </div>
+                <EditableField label="ZIP / Postal" name="zip" value={form.zip} editing={editing} onChange={handleChange} maxLength={6} />
+              </div>
+
+              <div className="profile-completion">
+                <div className="profile-completion-label">
+                  <span>Profile completeness</span>
+                  <span>{completionPct}%</span>
+                </div>
+                <div className="profile-completion-track">
+                  <div className="profile-completion-fill" style={{ width: `${completionPct}%` }} />
+                </div>
+              </div>
             </div>
 
-            <div className="profile-fields">
-              <div className="profile-fields-row">
-                <EditableField label="Full name" name="name"  value={form.name}  editing={editing} onChange={handleChange} />
-                <EditableField label="Email"     name="email" type="email" value={form.email} editing={editing} onChange={handleChange} />
-              </div>
-              <EditableField label="Phone number" name="phone" type="tel" value={form.phone} editing={editing} onChange={handleChange} maxLength={11} placeholder="09XXXXXXXXX" />
-            </div>
+            {/* ── Measurements card ── */}
+            <MeasurementsCard userId={user?.id} />
 
-            <div className="profile-divider" />
-
-            <div className="profile-card-header">
-              <h2 className="profile-card-title">Delivery address</h2>
-            </div>
-            <div className="profile-fields">
-              <EditableField label="Street / Barangay" name="address"  value={form.address}  editing={editing} onChange={handleChange} />
-              <div className="profile-fields-row">
-                <EditableField label="City"     name="city"     value={form.city}     editing={editing} onChange={handleChange} />
-                <EditableField label="Province" name="province" value={form.province} editing={editing} onChange={handleChange} />
-              </div>
-              <EditableField label="ZIP / Postal" name="zip" value={form.zip} editing={editing} onChange={handleChange} maxLength={6} />
-            </div>
-
-            <div className="profile-completion">
-              <div className="profile-completion-label">
-                <span>Profile completeness</span>
-                <span>{completionPct}%</span>
-              </div>
-              <div className="profile-completion-track">
-                <div className="profile-completion-fill" style={{ width: `${completionPct}%` }} />
-              </div>
-            </div>
           </div>
 
           {/* ── Sidebar ── */}
@@ -488,9 +794,11 @@ export default function ProfilePage() {
               <h2 className="profile-card-title">Quick links</h2>
               <div className="profile-links">
                 {[
-                  { href: '/my-orders', label: 'My orders'        },
-                  { href: '/gowns',     label: 'Browse collection' },
-                  { href: '/cart',      label: 'View cart'         },
+                  { href: '/my-orders',        label: 'My orders'          },
+                  { href: '/size-recommender',  label: 'Size recommender'   },
+                  { href: '/virtual-try-on',    label: 'Virtual try-on'     },
+                  { href: '/gowns',             label: 'Browse collection'  },
+                  { href: '/cart',              label: 'View cart'          },
                 ].map(({ href, label }) => (
                   <Link key={href} href={href} className="profile-link">
                     <span>{label}</span>
@@ -546,6 +854,55 @@ export default function ProfilePage() {
       )}
 
       <Footer />
+
+      <style>{`
+        /* ── Measurements card ── */
+        .profile-meas-card .profile-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+        .profile-meas-edit-btn { font-size: 12px; padding: 5px 12px; }
+        .profile-meas-delete-btn { background: none; border: none; cursor: pointer; color: #ccc; font-size: 14px; padding: 4px 6px; border-radius: 4px; transition: color .15s; }
+        .profile-meas-delete-btn:hover { color: #E24B4A; }
+
+        .profile-meas-msg { font-size: 12px; padding: 8px 12px; border-radius: 7px; margin-bottom: 12px; }
+        .profile-meas-msg--success { background: #EAF3DE; color: #27500A; border: 0.5px solid #97C459; }
+        .profile-meas-msg--error   { background: #FCEBEB; color: #501313; border: 0.5px solid #F09595; }
+
+        .profile-meas-empty { display: flex; flex-direction: column; gap: 12px; }
+        .profile-meas-empty-text { font-size: 13px; color: #666; line-height: 1.5; }
+        .profile-meas-cta-btn { font-size: 13px; }
+
+        .profile-meas-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-bottom: 1rem; }
+        .profile-meas-item { background: #f9f9f9; border-radius: 8px; padding: 10px 12px; }
+        .profile-meas-item--source { background: transparent; border: 0.5px solid #eee; }
+        .profile-meas-label { font-size: 10px; color: #aaa; margin-bottom: 3px; }
+        .profile-meas-val { font-size: 15px; font-weight: 500; color: #222; }
+        .profile-meas-val--src { font-size: 12px; color: #7F77DD; font-weight: 400; }
+        .profile-meas-unit { font-size: 11px; font-weight: 400; color: #999; }
+
+        .profile-meas-rec { background: linear-gradient(135deg,#f5f0ff 0%,#eef8f3 100%); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; border: 0.5px solid #AFA9EC; }
+        .profile-meas-rec-row { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 8px; }
+        .profile-meas-rec-label { font-size: 10px; color: #7F77DD; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+        .profile-meas-rec-size  { font-size: 2rem; font-weight: 400; color: #3C3489; line-height: 1; }
+        .profile-meas-rec-conf  { font-size: 1rem; font-weight: 500; line-height: 1; }
+        .profile-meas-conf-track { height: 3px; background: rgba(0,0,0,.08); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+        .profile-meas-conf-fill  { height: 100%; border-radius: 2px; transition: width .5s; }
+        .profile-meas-pills      { display: flex; gap: 5px; }
+        .profile-meas-pill       { padding: 3px 10px; border-radius: 20px; font-size: 12px; border: 0.5px solid #ddd; color: #888; background: #fff; }
+        .profile-meas-pill--match { background: #EEEDFE; border-color: #AFA9EC; color: #3C3489; font-weight: 500; }
+        .profile-meas-border-note { font-size: 11px; color: #7A5200; background: #FDF3DC; border: 0.5px solid #F5CC79; border-radius: 6px; padding: 7px 10px; margin-top: 8px; }
+
+        .profile-meas-footer { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #aaa; }
+        .profile-meas-footer-sep { color: #ddd; }
+        .profile-meas-date { font-size: 11px; }
+
+        .profile-meas-form { display: flex; flex-direction: column; gap: 14px; }
+        .profile-meas-form-note { font-size: 12px; color: #777; line-height: 1.4; }
+        .profile-meas-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .profile-meas-opt  { font-size: 11px; color: #aaa; font-weight: 400; }
+        .profile-meas-input-wrap { position: relative; }
+        .profile-meas-input-wrap .profile-field-input { padding-right: 36px; }
+        .profile-meas-unit-label { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #aaa; pointer-events: none; }
+        .profile-meas-tip { font-size: 11px; color: #aaa; }
+      `}</style>
     </main>
   )
 }

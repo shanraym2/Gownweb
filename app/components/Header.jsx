@@ -130,8 +130,8 @@ export default function Header({ solid = false, cmsTheme = null }) {
           {/* Nav links */}
           <nav className="hdr-nav">
             <Link href="/gowns">Catalogue</Link>
-            <Link href="/virtual-try-on">Virtual Try-On</Link>
-            <Link href="/style-recommender">Style Recommender</Link>
+          {/*   <Link href="/virtual-try-on">Virtual Try-On</Link>  */}
+            <Link href="/fitting-room">My Fitting room</Link>
             <Link href="/contact">Contact</Link>
             {dashboardLink && (
               <Link href={dashboardLink.href} className="nav-admin">
@@ -263,10 +263,9 @@ export default function Header({ solid = false, cmsTheme = null }) {
               <span className="mobile-logo-sub">Boutique</span>
             </div>
           </Link>
-
           <Link href="/gowns"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Catalogue</Link>
-          <Link href="/virtual-try-on"    className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link>
-          <Link href="/style-recommender" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Style Recommender</Link>
+      {/*     <Link href="/virtual-try-on"    className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link> */}
+          <Link href="/fitting-room" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>My Fitting room</Link>
           <Link href="/about"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
           <Link href="/contact"           className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Contact</Link>
           <Link href="/cart"              className="mobile-nav-link" onClick={() => { setIsMobileOpen(false); refreshCartCount() }}>

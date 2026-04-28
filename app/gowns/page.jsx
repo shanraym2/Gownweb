@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns } from '@/hooks/useGowns'
+import { getCurrentUser } from '../utils/authClient'
 
 function parsePrice(s) {
   if (!s || typeof s !== 'string') return 0
@@ -52,6 +53,7 @@ function uniqueCI(arr) {
 }
 
 const EMPTY = { categories:[], types:[], silhouettes:[], colors:[], occasions:[] }
+const DEFAULT_SHOW_UNAVAILABLE = true
 
 function FilterGroup({ title, options, selected, onToggle }) {
   const [open, setOpen] = useState(true)
@@ -87,63 +89,144 @@ function FilterGroup({ title, options, selected, onToggle }) {
   )
 }
 
-// ── Determine if a gown is fully sold out ─────────────────────────────────────
-// sizeStock is an array of { size, stock }. A gown is sold out only when
-// every size has stock === 0. Unknown stock (null) is treated as available.
 function isGownSoldOut(g) {
   const ss = g.sizeStock
   if (!ss || ss.length === 0) return false
   return ss.every(s => s.stock === 0)
 }
 
-// ── Grid card ─────────────────────────────────────────────────────────────────
+function isGownUnavailable(g) {
+  // No size/stock data at all — treat as unavailable
+  const ss = g.sizeStock
+  if (!ss || ss.length === 0) return true
+  return ss.every(s => s.stock === 0)
+}
 
 function GownCard({ g, score }) {
   const soldOut   = isGownSoldOut(g)
+  const noStock   = !g.sizeStock || g.sizeStock.length === 0
+  const unavailable = soldOut || noStock
   const isRec     = (score || 0) > 0
   const badgeText = g.category || g.type
 
+  // Label: prefer "Sold Out" when we know stock exists but is 0; "Unavailable" when no data
+  const unavailLabel = soldOut ? 'Sold Out' : 'Unavailable'
+
   return (
-    <Link href={`/gowns/${g.id}`} className={`gc${soldOut ? ' gc--soldout' : ''}`}>
+    <Link href={`/gowns/${g.id}`} className={`gc${unavailable ? ' gc--soldout' : ''}`}>
       <div className="gc-img-w">
         <img
           src={g.image}
           alt={g.alt || g.name}
-          className={`gc-img${soldOut ? ' gc-img--grey' : ''}`}
+          className={`gc-img${unavailable ? ' gc-img--grey' : ''}`}
         />
-
-        {/* Sold-out overlay — greyscale is on the img, badge sits on top */}
-        {soldOut ? (
+        {unavailable ? (
           <div className="gc-soldout-overlay">
-            <span className="gc-soldout-badge">Sold Out</span>
+            <span className="gc-soldout-badge">{unavailLabel}</span>
           </div>
         ) : (
           <div className="gc-ov">
             <span className="gc-cta">View Details</span>
           </div>
         )}
-
         {badgeText && (
-          <span className={`gc-badge${soldOut ? ' gc-badge--dim' : ''}`}>
+          <span className={`gc-badge${unavailable ? ' gc-badge--dim' : ''}`}>
             {badgeText}
           </span>
         )}
-
-        {/* Relevance dot — only on in-stock items */}
-        {isRec && !soldOut && (
+        {isRec && !unavailable && (
           <span className="gc-rec" title="Recommended for you" />
         )}
       </div>
-
       <div className="gc-info">
-        <p className={`gc-name${soldOut ? ' gc-name--dim' : ''}`}>{g.name}</p>
+        <p className={`gc-name${unavailable ? ' gc-name--dim' : ''}`}>{g.name}</p>
         <div className="gc-row2">
-          <span className={`gc-price${soldOut ? ' gc-price--dim' : ''}`}>{g.price}</span>
+          <span className={`gc-price${unavailable ? ' gc-price--dim' : ''}`}>{g.price}</span>
           {g.silhouette && <span className="gc-sil">{g.silhouette}</span>}
-          {soldOut && <span className="gc-sold-label">Sold out</span>}
+          {unavailable && <span className="gc-sold-label">{unavailLabel}</span>}
         </div>
       </div>
     </Link>
+  )
+}
+
+// ── FitMatcher sidebar widget ──────────────────────────────────────────────────
+// Shown below the filter groups in the sidebar.
+// - Logged-in user with saved measurements: shows active state with measurements.
+// - Logged-in user without measurements: CTA to the recommender.
+// - Guest: invite to log in / try recommender.
+
+function FitMatcherBanner({ user }) {
+  const [meas, setMeas] = useState(undefined)  // undefined = loading, null = none
+
+  useEffect(() => {
+    if (!user?.id) { setMeas(null); return }
+    fetch('/api/measurements', { headers: { 'x-user-id': user.id } })
+      .then(r => r.json())
+      .then(d => setMeas(d.ok ? d.measurements : null))
+      .catch(() => setMeas(null))
+  }, [user?.id])
+
+  // Still loading
+  if (meas === undefined) return null
+
+  // Has measurements — compact active state for sidebar
+  if (meas) {
+    const parts = [
+      meas.bust_cm  && `B ${meas.bust_cm}`,
+      meas.waist_cm && `W ${meas.waist_cm}`,
+      meas.hips_cm  && `H ${meas.hips_cm}`,
+    ].filter(Boolean)
+
+    return (
+      <div className="gp-sb-fm gp-sb-fm--active">
+        <div className="gp-sb-fm-row">
+          <span className="gp-sb-fm-icon">📐</span>
+          <div>
+            <p className="gp-sb-fm-title">FitMatcher active</p>
+            {parts.length > 0 && (
+              <p className="gp-sb-fm-meas">{parts.join(' · ')} cm</p>
+            )}
+          </div>
+        </div>
+        <Link href="/size-recommender" className="gp-sb-fm-btn gp-sb-fm-btn--ghost">
+          Update measurements →
+        </Link>
+      </div>
+    )
+  }
+
+  // Logged in, no measurements
+  if (user) {
+    return (
+      <div className="gp-sb-fm">
+        <div className="gp-sb-fm-row">
+          <span className="gp-sb-fm-icon">📏</span>
+          <p className="gp-sb-fm-title">Not sure which size fits?</p>
+        </div>
+        <p className="gp-sb-fm-sub">
+          Use your camera or enter measurements. FitMatcher will show your recommended size on every gown.
+        </p>
+        <Link href="/size-recommender" className="gp-sb-fm-btn">Get my size →</Link>
+      </div>
+    )
+  }
+
+  // Guest
+  return (
+    <div className="gp-sb-fm gp-sb-fm--guest">
+      <div className="gp-sb-fm-row">
+        <span className="gp-sb-fm-icon">✨</span>
+        <p className="gp-sb-fm-title">Personalised size recommendations</p>
+      </div>
+      <p className="gp-sb-fm-sub">
+        Log in and use FitMatcher to see your recommended size on every gown.
+      </p>
+      <div className="gp-sb-fm-btns">
+        <Link href="/size-recommender" className="gp-sb-fm-btn">Try it →</Link>
+        <Link href="/login?redirect=/gowns" className="gp-sb-fm-btn gp-sb-fm-btn--ghost">Log in</Link>
+      </div>
+    </div>
   )
 }
 
@@ -155,14 +238,18 @@ export default function GownsPage() {
   const query        = searchParams.get('search') ?? ''
   const router       = useRouter()
 
-  const [draft,        setDraft       ] = useState(EMPTY)
-  const [applied,      setApplied     ] = useState(EMPTY)
-  const [draftPrice,   setDraftPrice  ] = useState([0, 200000])
-  const [appliedPrice, setAppliedPrice] = useState(null)
-  const [sortBy,       setSortBy      ] = useState('relevance')
-  const [scores,       setScores      ] = useState({})
-  const [dirty,        setDirty       ] = useState(false)
+  const [user,                setUser              ] = useState(null)
+  const [draft,               setDraft             ] = useState(EMPTY)
+  const [applied,             setApplied           ] = useState(EMPTY)
+  const [draftPrice,          setDraftPrice        ] = useState([0, 200000])
+  const [appliedPrice,        setAppliedPrice      ] = useState(null)
+  const [draftShowUnavail,    setDraftShowUnavail  ] = useState(DEFAULT_SHOW_UNAVAILABLE)
+  const [appliedShowUnavail,  setAppliedShowUnavail] = useState(DEFAULT_SHOW_UNAVAILABLE)
+  const [sortBy,              setSortBy            ] = useState('relevance')
+  const [scores,              setScores            ] = useState({})
+  const [dirty,               setDirty             ] = useState(false)
 
+  useEffect(() => { setUser(getCurrentUser()) }, [])
   useEffect(() => { if (gowns.length) setScores(buildRelevanceScores(gowns)) }, [gowns])
 
   const opts = useMemo(() => {
@@ -184,19 +271,20 @@ export default function GownsPage() {
 
   const isDirty = useMemo(() => {
     return JSON.stringify(draft) !== JSON.stringify(applied) ||
-      JSON.stringify(draftPrice) !== JSON.stringify(appliedPrice ?? [opts.minP, opts.maxP])
-  }, [draft, applied, draftPrice, appliedPrice, opts])
+      JSON.stringify(draftPrice) !== JSON.stringify(appliedPrice ?? [opts.minP, opts.maxP]) ||
+      draftShowUnavail !== appliedShowUnavail
+  }, [draft, applied, draftPrice, appliedPrice, opts, draftShowUnavail, appliedShowUnavail])
 
   useEffect(() => { setDirty(isDirty) }, [isDirty])
 
   const toggle = key => val =>
     setDraft(p => ({ ...p, [key]: p[key].includes(val) ? p[key].filter(v=>v!==val) : [...p[key], val] }))
 
-  const apply = () => { setApplied({...draft}); setAppliedPrice([...draftPrice]); setDirty(false) }
-
+  const apply   = () => { setApplied({...draft}); setAppliedPrice([...draftPrice]); setAppliedShowUnavail(draftShowUnavail); setDirty(false) }
   const clearAll = () => {
     setDraft(EMPTY); setApplied(EMPTY)
     setDraftPrice([opts.minP, opts.maxP]); setAppliedPrice(null)
+    setDraftShowUnavail(DEFAULT_SHOW_UNAVAILABLE); setAppliedShowUnavail(DEFAULT_SHOW_UNAVAILABLE)
     setDirty(false)
   }
 
@@ -223,13 +311,25 @@ export default function GownsPage() {
     if (applied.colors.length)      r = r.filter(g=>applied.colors.some(v=>v.toLowerCase()===g.color?.toLowerCase()))
     if (applied.occasions.length)   r = r.filter(g=>applied.occasions.some(v=>v.toLowerCase()===g.occasion?.toLowerCase()))
     if (appliedPrice) r = r.filter(g=>{ const p=parsePrice(g.price); return p===0||(p>=appliedPrice[0]&&p<=appliedPrice[1]) })
-    if (sortBy==='relevance')  r.sort((a,b)=>(scores[b.id]||0)-(scores[a.id]||0))
+
+    // Hide unavailable entirely when toggled off
+    if (!appliedShowUnavail) r = r.filter(g => !isGownUnavailable(g))
+
+    if (sortBy==='relevance') {
+      // Available items sorted by score; unavailable items always sink to the bottom
+      r.sort((a, b) => {
+        const aUnavail = isGownUnavailable(a)
+        const bUnavail = isGownUnavailable(b)
+        if (aUnavail !== bUnavail) return aUnavail ? 1 : -1
+        return (scores[b.id]||0) - (scores[a.id]||0)
+      })
+    }
     if (sortBy==='price-asc')  r.sort((a,b)=>parsePrice(a.price)-parsePrice(b.price))
     if (sortBy==='price-desc') r.sort((a,b)=>parsePrice(b.price)-parsePrice(a.price))
     if (sortBy==='name-asc')   r.sort((a,b)=>a.name.localeCompare(b.name))
     if (sortBy==='name-desc')  r.sort((a,b)=>b.name.localeCompare(a.name))
     return r
-  }, [gowns, applied, appliedPrice, sortBy, scores, query])
+  }, [gowns, applied, appliedPrice, appliedShowUnavail, sortBy, scores, query])
 
   const appliedChips = [
     ...applied.categories.map(v=>({v,k:'categories'})),
@@ -306,7 +406,30 @@ export default function GownsPage() {
                 </div>
               </div>
             )}
+
+            {/* ── Availability toggle ── */}
+            <div className="fg">
+              <div className="fg-hd" style={{cursor:'default',pointerEvents:'none'}}>
+                <span className="fg-title">Availability</span>
+              </div>
+              <label className="fg-avail-toggle">
+                <span className="fg-lbl">Show sold out &amp; unavailable</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={draftShowUnavail}
+                  className={`fg-toggle${draftShowUnavail ? ' fg-toggle--on' : ''}`}
+                  onClick={() => setDraftShowUnavail(v => !v)}
+                >
+                  <span className="fg-toggle-thumb" />
+                </button>
+              </label>
+            </div>
           </div>
+
+          {/* ── FitMatcher widget — below filters ── */}
+          <FitMatcherBanner user={user} />
+
           <div className="gp-apply-zone">
             <button className={`gp-apply${dirty?' gp-apply--on':''}`} onClick={apply} type="button" disabled={!dirty}>
               {dirty
@@ -337,11 +460,17 @@ export default function GownsPage() {
             </div>
           )}
 
-          {appliedChips.length > 0 && (
+          {(appliedChips.length > 0 || !appliedShowUnavail) && (
             <div className="gp-chips">
               {appliedChips.map(({v,k}) => (
                 <span key={v} className="gp-chip">{v}<button onClick={()=>removeChip(k,v)} aria-label={`Remove ${v}`}>×</button></span>
               ))}
+              {!appliedShowUnavail && (
+                <span className="gp-chip gp-chip--unavail">
+                  Hiding unavailable
+                  <button onClick={() => { setDraftShowUnavail(true); setAppliedShowUnavail(true) }} aria-label="Show unavailable">×</button>
+                </span>
+              )}
               <button className="gp-chips-clr" onClick={clearAll}>Clear all</button>
             </div>
           )}
@@ -364,6 +493,83 @@ export default function GownsPage() {
           )}
         </div>
       </div>
+
+      <style>{`
+        /* ── Availability toggle ── */
+        .fg-avail-toggle {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 6px 0; cursor: pointer; gap: 8px;
+        }
+        .fg-toggle {
+          flex-shrink: 0; width: 34px; height: 20px; border-radius: 10px;
+          background: #ddd; border: none; cursor: pointer; position: relative;
+          transition: background 0.2s; padding: 0;
+        }
+        .fg-toggle--on { background: #7F77DD; }
+        .fg-toggle-thumb {
+          position: absolute; top: 3px; left: 3px;
+          width: 14px; height: 14px; border-radius: 50%;
+          background: #fff; transition: left 0.2s;
+          box-shadow: 0 1px 3px rgba(0,0,0,.2);
+        }
+        .fg-toggle--on .fg-toggle-thumb { left: 17px; }
+
+        /* ── Unavailable hidden chip ── */
+        .gp-chip--unavail { background: #fff3e0; border-color: #f5a623; color: #a0522d; }
+        .gp-chip--unavail button { color: #a0522d; }
+
+        /* ── FitMatcher sidebar widget ── */
+        .gp-sb-fm {
+          margin: 16px 0 8px;
+          padding: 14px;
+          background: #f5f0ff;
+          border-radius: 10px;
+          border: 0.5px solid #AFA9EC;
+        }
+        .gp-sb-fm--active {
+          background: linear-gradient(135deg, #f5f0ff 0%, #eef8f3 100%);
+        }
+        .gp-sb-fm--guest {
+          background: #fafafa;
+          border-color: #e5e5e5;
+        }
+        .gp-sb-fm-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        .gp-sb-fm-icon  { font-size: 1.1rem; flex-shrink: 0; }
+        .gp-sb-fm-title { font-size: 12px; font-weight: 600; color: #3C3489; line-height: 1.3; }
+        .gp-sb-fm-meas  { font-size: 11px; color: #7F77DD; margin-top: 1px; }
+        .gp-sb-fm-sub   { font-size: 11px; color: #666; line-height: 1.45; margin-bottom: 10px; }
+        .gp-sb-fm-btns  { display: flex; gap: 6px; }
+        .gp-sb-fm-btn {
+          display: block;
+          width: 100%;
+          text-align: center;
+          padding: 8px;
+          border-radius: 7px;
+          background: #7F77DD;
+          color: #fff;
+          font-size: 12px;
+          font-weight: 500;
+          text-decoration: none;
+          border: none;
+          cursor: pointer;
+          margin-top: 4px;
+        }
+        .gp-sb-fm-btn:hover { background: #534AB7; }
+        .gp-sb-fm-btn--ghost {
+          background: transparent;
+          border: 0.5px solid #AFA9EC;
+          color: #534AB7;
+          flex: 1;
+        }
+        .gp-sb-fm-btn--ghost:hover { background: rgba(127,119,221,.08); }
+        .gp-sb-fm-btns .gp-sb-fm-btn { flex: 1; margin-top: 0; }
+      `}</style>
+
       <Footer />
     </main>
   )

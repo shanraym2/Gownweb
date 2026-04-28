@@ -110,7 +110,7 @@ export default function AdminDashboardPage() {
             {gownCount !== null && (
               <div className="adm-stat">
                 <span className="adm-stat-val">{gownCount}</span>
-                <span className="adm-stat-lbl">Gowns listed</span>
+                <span className="adm-stat-lbl">Products listed</span>
               </div>
             )}
           </div>
@@ -119,7 +119,7 @@ export default function AdminDashboardPage() {
 
       <div className="adm-nav-cards">
         {[
-          { href: '/admin/gowns',     title: 'Gowns',           desc: 'Add, edit, or remove listings.'        },
+          { href: '/admin/gowns',     title: 'Catalogue',           desc: 'Add, edit, or remove listings.'        },
           { href: '/admin/orders',    title: 'Orders',          desc: 'View and manage all orders.'           },
           { href: '/admin/dashboard', title: 'Sales dashboard', desc: 'Revenue charts and analytics.'         },
           { href: '/admin/users',     title: 'Users',           desc: 'View registered accounts.'             },

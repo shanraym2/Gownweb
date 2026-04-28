@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../layout'
 import { useRoleGuard } from '../../utils/useRoleGuard'
-
 
 
   // ... rest unchanged
@@ -16,7 +15,6 @@ const SECTIONS = [
   { key: 'collection-spotlight', label: 'Collection Spotlight', icon: '◈' },
   { key: 'contact',              label: 'Contact',              icon: '◎' },
   { key: 'footer',               label: 'Footer',               icon: '▣' },
-  { key: 'theme-config',         label: 'Theme & Colours',      icon: '◉' },
 ]
 
 const SECTION_FIELDS = {
@@ -49,11 +47,7 @@ const SECTION_FIELDS = {
     { key: 'pinterest',   label: 'Pinterest URL',  type: 'text', placeholder: 'https://pinterest.com/…' },
     { key: 'copyright',   label: 'Copyright Text', type: 'text', placeholder: '© 2026 JCE Bridal Boutique. All rights reserved.' },
   ],
-  'theme-config': [
-    { key: 'colors.navBg',   label: 'Nav Background Colour', type: 'color', placeholder: '#1a1a2e' },
-    { key: 'colors.primary', label: 'Primary / Gold Colour',  type: 'color', placeholder: '#c8a96e' },
-    { key: 'fonts.body',     label: 'Body Font',              type: 'text',  placeholder: 'Jost, sans-serif' },
-  ],
+  
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -184,7 +178,83 @@ function TestimonialRow({ t, onEdit, onDelete, onToggle }) {
     </div>
   )
 }
+function ImageUploadField({ value, onChange }) {
+  const [dragging, setDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const inputRef = useRef(null)
 
+  async function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) return
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/admin/upload', {
+        method: 'POST',
+        headers: { 'X-Admin-Secret': getAdminSecret() || '' },
+        body: formData,
+      })
+      const data = await res.json()
+      if (data.url) onChange(data.url)
+      else throw new Error(data.error || 'Upload failed')
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `2px dashed ${dragging ? 'var(--adm-accent)' : 'var(--adm-border-em)'}`,
+          borderRadius: 'var(--adm-radius-md)',
+          padding: '18px 14px',
+          textAlign: 'center',
+          cursor: 'pointer',
+          background: dragging ? 'var(--adm-accent-bg)' : 'var(--adm-surface-alt)',
+          transition: 'all .15s',
+          fontSize: 13,
+          color: 'var(--adm-text-3)',
+        }}
+      >
+        {uploading
+          ? '⏳ Uploading…'
+          : <>📁 <strong>Choose file</strong> or drag &amp; drop an image</>}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={e => handleFile(e.target.files[0])}
+      />
+
+      {/* Manual URL fallback */}
+      <input
+        type="text"
+        className="adm-input"
+        placeholder="/images/weds.jpg or https://…"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+      />
+
+      {/* Preview */}
+      {value && (
+        <div style={{ borderRadius: 8, overflow: 'hidden', height: 100, background: 'var(--adm-surface-alt)', border: '1px solid var(--adm-border)' }}>
+          <img src={value} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
+            onError={e => { e.target.style.opacity = '0.15' }} />
+        </div>
+      )}
+    </div>
+  )
+}
 // ── Slide / Testimonial Modal ─────────────────────────────────────────────────
 
 function SlideModal({ slide, onSave, onClose, saving }) {
@@ -212,12 +282,17 @@ function SlideModal({ slide, onSave, onClose, saving }) {
           <button className="adm-modal-close" onClick={onClose}>✕</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          <div className="adm-form-row">
+            <label className="adm-label">Image</label>
+            <ImageUploadField value={form.image_url} onChange={v => setForm(p => ({ ...p, image_url: v }))} />
+          </div>
+
           {[
-            { key: 'image_url',  label: 'Image Path / URL',  type: 'text',     placeholder: '/images/weds.jpg' },
-            { key: 'subtitle',   label: 'Subtitle',           type: 'text',     placeholder: 'DESIGNER COLLECTION' },
-            { key: 'heading',    label: 'Heading (use \\n for line break)', type: 'text', placeholder: 'Your New\nDream Look.' },
-            { key: 'body',       label: 'Body text',          type: 'textarea', placeholder: 'Description…' },
-            { key: 'sort_order', label: 'Sort order',         type: 'number',   placeholder: '0' },
+            { key: 'subtitle',   label: 'Subtitle',                          type: 'text',     placeholder: 'DESIGNER COLLECTION' },
+            { key: 'heading',    label: 'Heading (use \\n for line break)',   type: 'text',     placeholder: 'Your New\nDream Look.' },
+            { key: 'body',       label: 'Body text',                         type: 'textarea', placeholder: 'Description…' },
+            { key: 'sort_order', label: 'Sort order',                        type: 'number',   placeholder: '0' },
           ].map(f => (
             <div key={f.key} className="adm-form-row">
               <label className="adm-label">{f.label}</label>
@@ -229,16 +304,14 @@ function SlideModal({ slide, onSave, onClose, saving }) {
               }
             </div>
           ))}
+
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: 'var(--adm-text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
             Visible to visitors
           </label>
-          {form.image_url && (
-            <div style={{ borderRadius: 8, overflow: 'hidden', height: 120, background: 'var(--adm-surface-alt)', border: '1px solid var(--adm-border)' }}>
-              <img src={form.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
-                onError={e => { e.target.style.opacity = '0.15' }} />
-            </div>
-          )}
+
+        
+          
         </div>
         <div className="adm-confirm-actions" style={{ marginTop: 22 }}>
           <button className="adm-btn-outline" onClick={onClose}>Cancel</button>
@@ -247,7 +320,7 @@ function SlideModal({ slide, onSave, onClose, saving }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>  
   )
 }
 
@@ -275,22 +348,26 @@ function TestimonialModal({ item, onSave, onClose, saving }) {
           <button className="adm-modal-close" onClick={onClose}>✕</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {[
-            { key: 'quote_text',  label: 'Quote',              type: 'textarea', placeholder: 'Customer quote…' },
-            { key: 'author_name', label: 'Author name',        type: 'text',     placeholder: 'Karina Ayacocho' },
-            { key: 'image_url',   label: 'Photo URL / Path',   type: 'text',     placeholder: '/images/image2.png' },
-            { key: 'sort_order',  label: 'Sort order',         type: 'number',   placeholder: '0' },
-          ].map(f => (
-            <div key={f.key} className="adm-form-row">
-              <label className="adm-label">{f.label}</label>
-              {f.type === 'textarea'
-                ? <textarea rows={3} className="adm-input" placeholder={f.placeholder} value={form[f.key]}
-                    onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
-                : <input type={f.type} className="adm-input" placeholder={f.placeholder}
-                    value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} />
-              }
-            </div>
-          ))}
+         <div className="adm-form-row">
+          <label className="adm-label">Photo</label>
+          <ImageUploadField value={form.image_url} onChange={v => setForm(p => ({ ...p, image_url: v }))} />
+        </div>
+        {[
+          { key: 'quote_text',  label: 'Quote',       type: 'textarea', placeholder: 'Customer quote…' },
+          { key: 'author_name', label: 'Author name', type: 'text',     placeholder: 'Karina Ayacocho' },
+          { key: 'sort_order',  label: 'Sort order',  type: 'number',   placeholder: '0' },
+        ].map(f => (
+          <div key={f.key} className="adm-form-row">
+            <label className="adm-label">{f.label}</label>
+            {f.type === 'textarea'
+              ? <textarea rows={3} className="adm-input" placeholder={f.placeholder} value={form[f.key]}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
+              : <input type={f.type} className="adm-input" placeholder={f.placeholder}
+                  value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} />
+            }
+          </div>
+        ))}
+       
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: 'var(--adm-text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
             Visible to visitors

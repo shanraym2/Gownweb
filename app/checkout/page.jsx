@@ -5,7 +5,7 @@
   import { useRouter } from 'next/navigation'
   import Header from '../components/Header'
   import Footer from '../components/Footer'
-  import { loadCart, clearCart, saveCart } from '../utils/cartClient'
+  import { loadCart, saveCart } from '../utils/cartClient'
   import { getCurrentUser } from '../utils/authClient'
 
   // ─── Constants ────────────────────────────────────────────────────────────────
@@ -664,7 +664,11 @@
         }
 
         // Clear cart and redirect to confirmation
-        clearCart()
+                // Instead of clearCart()
+        const cart = loadCart()
+        const orderedIds = new Set(items.map(i => String(i.id)))
+        const remaining = cart.filter(i => !orderedIds.has(String(i.id)))
+        saveCart(remaining)
         router.push(`/order-confirmation/${data.orderId}`)
       } catch {
         setPlaceError('Could not connect to the server. Please try again.')
