@@ -19,6 +19,7 @@ export default function LoginPage() {
   const [devMode,       setDevMode      ] = useState(false)
   const [showPassword,  setShowPassword ] = useState(false)
   const [resendCooldown,setResendCooldown] = useState(0)
+  const [pendingUser,   setPendingUser  ] = useState(null)
   const cooldownRef = useRef(null)
 
   const [errors, setErrors] = useState({
@@ -97,6 +98,9 @@ export default function LoginPage() {
         return
       }
 
+      // Keep the validated user from step 1 so step 2 doesn't need another login call.
+      setPendingUser(loginData.user)
+
       // 3. Send OTP
       const otpRes  = await fetch('/api/auth/send-otp', {
         method:  'POST',
@@ -143,7 +147,13 @@ export default function LoginPage() {
         return
       }
 
-      // OTP verified — fetch the user record
+      // OTP verified — use the already validated user from step 1 when available.
+      if (pendingUser) {
+        finishLogin(pendingUser)
+        return
+      }
+
+      // Fallback if local state was lost (rare refresh/navigation during OTP step).
       const loginRes  = await fetch('/api/auth/login', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
