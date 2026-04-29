@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
 
+export const dynamic = 'force-dynamic'
+
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'users.json')
 
