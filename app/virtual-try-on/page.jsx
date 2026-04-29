@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { Suspense, useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import Header from '../components/Header'
@@ -298,7 +298,7 @@ function OnboardingOverlay({ onDismiss }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function VirtualTryOnPage() {
+function VirtualTryOnPageContent() {
   const searchParams = useSearchParams()
 
   const videoRef    = useRef(null)
@@ -923,5 +923,13 @@ export default function VirtualTryOnPage() {
         <Footer/>
       </main>
     </>
+  )
+}
+
+export default function VirtualTryOnPage() {
+  return (
+    <Suspense fallback={<main className="to-page"><Header solid /><div className="to-spacer" /><div className="to-muted">Loading virtual try-on...</div><Footer /></main>}>
+      <VirtualTryOnPageContent />
+    </Suspense>
   )
 }

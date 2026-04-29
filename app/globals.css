@@ -9,7 +9,7 @@
 @import url("gowns.css");
 @import url("checkout-orders.css");
 @import url("recommender.css");
-@import url("virtual.css");
+@import url("Virtual.css");
 @import url("myorders.css");
 :root {
     --color-bg: #FFFBFF; /* Very light off-white background */

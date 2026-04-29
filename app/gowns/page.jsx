@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { Suspense, useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Header from '../components/Header'
@@ -232,7 +232,7 @@ function FitMatcherBanner({ user }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function GownsPage() {
+function GownsPageContent() {
   const { gowns, loading, error } = useGowns()
   const searchParams = useSearchParams()
   const query        = searchParams.get('search') ?? ''
@@ -572,5 +572,13 @@ export default function GownsPage() {
 
       <Footer />
     </main>
+  )
+}
+
+export default function GownsPage() {
+  return (
+    <Suspense fallback={<main className="gp"><Header solid /><div className="gp-spacer" /><div className="gp-empty"><p>Loading gowns...</p></div><Footer /></main>}>
+      <GownsPageContent />
+    </Suspense>
   )
 }
