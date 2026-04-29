@@ -15,30 +15,52 @@ export async function PATCH(request) {
     }
 
     const body = await request.json()
-    const { name, email, password } = body
+    // Accept both split fields (firstName/lastName) and legacy combined (name)
+    const { firstName, lastName, name, email, password } = body
 
     const setClauses = []
     const values     = []
     let   paramIndex = 1
 
-    if (name !== undefined) {
-      const cleanName = String(name).trim().replace(/\s+/g, ' ')
-      if (!isRealName(cleanName)) {
+    // ── Name handling ─────────────────────────────────────────────────────────
+    // Prefer firstName/lastName if provided; fall back to splitting legacy name
+    if (firstName !== undefined || lastName !== undefined || name !== undefined) {
+      let cleanFirst, cleanLast
+
+      if (firstName !== undefined || lastName !== undefined) {
+        // Split-field path (used by admin EditSelfModal)
+        cleanFirst = String(firstName || '').trim()
+        cleanLast  = String(lastName  || '').trim()
+      } else {
+        // Legacy combined name path
+        const cleanName = String(name || '').trim().replace(/\s+/g, ' ')
+        const parts     = cleanName.split(' ')
+        cleanFirst = parts[0]
+        cleanLast  = parts.slice(1).join(' ') || parts[0]
+      }
+
+      if (!isRealName(cleanFirst)) {
         return NextResponse.json(
-          { ok: false, error: 'Use your real name: letters only, spaces, hyphens, and apostrophes.' },
+          { ok: false, error: 'First name: letters only, spaces, hyphens, and apostrophes.' },
           { status: 400 }
         )
       }
-      const parts = cleanName.split(' ')
+      if (!isRealName(cleanLast)) {
+        return NextResponse.json(
+          { ok: false, error: 'Last name: letters only, spaces, hyphens, and apostrophes.' },
+          { status: 400 }
+        )
+      }
+
       setClauses.push(`first_name = $${paramIndex++}`)
-      values.push(parts[0])
+      values.push(cleanFirst)
       setClauses.push(`last_name = $${paramIndex++}`)
-      values.push(parts.slice(1).join(' ') || parts[0])
+      values.push(cleanLast)
     }
 
+    // ── Email handling ────────────────────────────────────────────────────────
     if (email !== undefined) {
       const cleanEmail = normalizeEmail(email)
-      // Check not taken by another user
       const taken = await query(
         'SELECT id FROM users WHERE email = $1 AND id != $2',
         [cleanEmail, userId]
@@ -53,6 +75,7 @@ export async function PATCH(request) {
       values.push(cleanEmail)
     }
 
+    // ── Password handling ─────────────────────────────────────────────────────
     if (password !== undefined && password !== '') {
       const hash = await bcrypt.hash(String(password), 12)
       setClauses.push(`password_hash = $${paramIndex++}`)
@@ -65,7 +88,10 @@ export async function PATCH(request) {
 
     values.push(userId)
     const rows = await query(
-      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${paramIndex} RETURNING id, first_name, last_name, email, role`,
+      `UPDATE users
+       SET ${setClauses.join(', ')}
+       WHERE id = $${paramIndex}
+       RETURNING id, first_name, last_name, email, role`,
       values
     )
 
@@ -77,10 +103,12 @@ export async function PATCH(request) {
     return NextResponse.json({
       ok: true,
       user: {
-        id:    u.id,
-        name:  `${u.first_name} ${u.last_name}`.trim(),
-        email: u.email,
-        role:  u.role,
+        id:        u.id,
+        firstName: u.first_name,
+        lastName:  u.last_name,
+        name:      `${u.first_name} ${u.last_name}`.trim(),
+        email:     u.email,
+        role:      u.role,
       },
     })
   } catch (err) {
