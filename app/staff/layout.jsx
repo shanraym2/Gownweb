@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { getCurrentUser, setCurrentUserRole } from '../utils/authClient'
+import { usePathname, useRouter } from 'next/navigation'
+import { getCurrentUser, setCurrentUserRole, logoutUser } from '../utils/authClient'
 
 const ADMIN_SECRET_KEY = 'jce_admin_secret'
 
@@ -20,16 +20,8 @@ export function clearAdminSecret() {
   localStorage.removeItem(ADMIN_SECRET_KEY)
 }
 
-// ── Nav links per role ────────────────────────────────────────────────────────
-
-const ADMIN_NAV_LINKS = [
-  { href: '/admin',           label: 'Dashboard', exact: true },
-  { href: '/admin/gowns',     label: 'Gowns'                 },
-  { href: '/admin/orders',    label: 'Orders'                },
-  { href: '/admin/dashboard', label: 'Sales'                 },
-  { href: '/admin/users',     label: 'Users'                 },
-  { href: '/admin/contents',  label: 'Content'               },
-]
+// ── Nav links ─────────────────────────────────────────────────────────────────
+// Staff only sees staff-scoped routes — no Users or Content pages
 
 const STAFF_NAV_LINKS = [
   { href: '/staff',           label: 'Dashboard', exact: true },
@@ -70,8 +62,6 @@ function useAdminTheme() {
 }
 
 // ── Secret gate ───────────────────────────────────────────────────────────────
-// Validates the secret against a dedicated lightweight endpoint instead of
-// piggybacking on the gowns list route.
 
 function SecretGate({ onSuccess }) {
   const [secret,     setSecret    ] = useState('')
@@ -88,7 +78,6 @@ function SecretGate({ onSuccess }) {
     if (!trimmed) { setError('Enter the admin secret.'); return }
     setValidating(true); setError('')
     try {
-      // Use the dedicated ping endpoint — no side effects
       const res = await fetch('/api/admin/ping', {
         headers: { 'X-Admin-Secret': trimmed },
       })
@@ -97,11 +86,9 @@ function SecretGate({ onSuccess }) {
         setError('Incorrect secret. Check ADMIN_SECRET in your .env.local.')
         return
       }
-      // Any 2xx (or even network-level success on other codes) — accept
       if (store) setAdminSecret(trimmed)
       onSuccess()
     } catch {
-      // Server unreachable — still store and proceed so offline dev works
       if (store) setAdminSecret(trimmed)
       onSuccess()
     } finally {
@@ -192,8 +179,9 @@ function SystemIcon() {
 
 // ── Main layout ───────────────────────────────────────────────────────────────
 
-export default function AdminLayout({ children }) {
+export default function StaffLayout({ children }) {
   const pathname = usePathname()
+  const router   = useRouter()
   const { theme, toggle } = useAdminTheme()
 
   const [user,           setUser          ] = useState(null)
@@ -217,7 +205,15 @@ export default function AdminLayout({ children }) {
     return () => { document.body.style.overflow = '' }
   }, [sidebarOpen])
 
-  // ── Re-check role from server then refresh local state ────────────────────
+  const handleLogout = () => {
+    logoutUser()
+    clearAdminSecret()
+    setSecretOk(false)
+    setUser(null)
+    setSidebarOpen(false)
+    router.replace('/staff')
+  }
+
   const handleRefreshRole = async () => {
     const u = getCurrentUser()
     if (!u?.email) { setRoleError('You are not logged in.'); return }
@@ -228,7 +224,6 @@ export default function AdminLayout({ children }) {
       if (data.ok && data.role) {
         setCurrentUserRole(data.role)
         if (['admin', 'staff'].includes(data.role)) { window.location.reload(); return }
-        // Still not elevated — show a helpful error
         setRoleError(
           data.adminEmailConfigured === false
             ? `ADMIN_EMAIL not set. Add ADMIN_EMAIL=${u.email} to .env.local and restart.`
@@ -250,8 +245,7 @@ export default function AdminLayout({ children }) {
     </div>
   )
 
-  // ── Not logged in or wrong role ───────────────────────────────────────────
-  if (!user || !['admin', 'staff'].includes(user.role)) return (
+  if (!user || user.role !== 'staff') return (
     <div className="adm-access-screen">
       <div className="adm-access-card">
         <div className="adm-access-icon">
@@ -261,7 +255,7 @@ export default function AdminLayout({ children }) {
           </svg>
         </div>
         <h1 className="adm-access-title">Access required</h1>
-        <p className="adm-access-desc">Sign in with an account that has admin or staff access.</p>
+        <p className="adm-access-desc">Sign in with an account that has staff access.</p>
         {user ? (
           <>
             <div className="adm-user-info-box">
@@ -276,14 +270,9 @@ export default function AdminLayout({ children }) {
         ) : (
           <Link href="/login" className="adm-access-btn-primary">Go to login</Link>
         )}
-        <Link href="/" className="adm-access-btn-outline">Back to home</Link>
       </div>
     </div>
   )
-
-  // ── Authed ────────────────────────────────────────────────────────────────
-  const isAdmin  = user.role === 'admin'
-  const navLinks = isAdmin ? ADMIN_NAV_LINKS : STAFF_NAV_LINKS
 
   return (
     <div className="adm-layout">
@@ -308,8 +297,8 @@ export default function AdminLayout({ children }) {
             </svg>
           )}
         </button>
-        <div className="adm-topnav-brand">JCE Bridal · {isAdmin ? 'Admin' : 'Staff'}</div>
-        <Link href="/" className="adm-topnav-back">← Site</Link>
+        <div className="adm-topnav-brand">JCE Bridal · Staff</div>
+        <button className="adm-topnav-back" onClick={handleLogout}>Logout</button>
       </div>
 
       {sidebarOpen && (
@@ -319,14 +308,14 @@ export default function AdminLayout({ children }) {
       {/* Sidebar */}
       <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
         <div className="adm-sidebar-brand">
-          <Link href={isAdmin ? '/admin' : '/staff'} onClick={() => setSidebarOpen(false)}>
+          <Link href="/staff" onClick={() => setSidebarOpen(false)}>
             <div className="adm-brand-name">JCE Bridal</div>
-            <div className="adm-brand-sub">{isAdmin ? 'Admin panel' : 'Staff panel'}</div>
+            <div className="adm-brand-sub">Staff panel</div>
           </Link>
         </div>
 
         <nav className="adm-nav">
-          {navLinks.map(({ href, label, exact }) => {
+          {STAFF_NAV_LINKS.map(({ href, label, exact }) => {
             const active = exact ? pathname === href : pathname.startsWith(href)
             return (
               <Link
@@ -345,12 +334,17 @@ export default function AdminLayout({ children }) {
         <div className="adm-sidebar-footer">
           <ThemeToggle theme={theme} onToggle={toggle} />
           <div className="adm-footer-divider" />
-          <Link href="/" className="adm-footer-btn">← Back to site</Link>
           <button
             className="adm-footer-btn"
             onClick={() => { clearAdminSecret(); setSecretOk(false) }}
           >
             Clear secret
+          </button>
+          <button
+            className="adm-footer-btn adm-footer-btn--logout"
+            onClick={handleLogout}
+          >
+            Logout
           </button>
         </div>
       </aside>

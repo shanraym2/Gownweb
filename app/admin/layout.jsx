@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { getCurrentUser, setCurrentUserRole } from '../utils/authClient'
+import { useRouter, usePathname } from 'next/navigation'
+import { getCurrentUser, setCurrentUserRole, logoutUser } from '../utils/authClient'
 
 const ADMIN_SECRET_KEY = 'jce_admin_secret'
 
@@ -21,23 +21,28 @@ export function clearAdminSecret() {
 }
 
 // ── Nav links per role ────────────────────────────────────────────────────────
+// Admin-only routes: dashboard, users, contents
+// Staff routes: catalogue, orders, sales, customers (no users/contents/dashboard mgmt)
 
 const ADMIN_NAV_LINKS = [
   { href: '/admin',           label: 'Dashboard', exact: true },
-  { href: '/admin/gowns',     label: 'Catalogue'                 },
-  { href: '/admin/orders',    label: 'Orders'                },
-  { href: '/admin/dashboard', label: 'Sales'                 },
-  { href: '/admin/users',     label: 'Users'                 },
-  { href: '/admin/contents',  label: 'Content'               },
+  { href: '/admin/gowns',     label: 'Catalogue'              },
+  { href: '/admin/orders',    label: 'Orders'                 },
+  { href: '/admin/dashboard', label: 'Sales'                  },
+  { href: '/admin/users',     label: 'Users'                  },
+  { href: '/admin/contents',  label: 'Content'                },
 ]
 
 const STAFF_NAV_LINKS = [
   { href: '/staff',           label: 'Dashboard', exact: true },
   { href: '/admin/gowns',     label: 'Catalogue'              },
-  { href: '/admin/orders',    label: 'Orders'                },
-  { href: '/admin/dashboard', label: 'Sales'                 },
-  { href: '/admin/users',     label: 'Customers'             },
+  { href: '/admin/orders',    label: 'Orders'                 },
+  { href: '/admin/dashboard', label: 'Sales'                  },
+  { href: '/admin/users',     label: 'Customers'              },
 ]
+
+// Routes that are restricted to admins only
+const ADMIN_ONLY_ROUTES = ['/admin/contents', '/admin/users']
 
 // ── Theme hook ────────────────────────────────────────────────────────────────
 
@@ -189,6 +194,7 @@ function SystemIcon() {
 
 export default function AdminLayout({ children }) {
   const pathname = usePathname()
+  const router   = useRouter()
   const { theme, toggle } = useAdminTheme()
 
   const [user,           setUser          ] = useState(null)
@@ -211,6 +217,14 @@ export default function AdminLayout({ children }) {
     document.body.style.overflow = sidebarOpen ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [sidebarOpen])
+
+  // Block staff from admin-only routes
+  useEffect(() => {
+    if (!user) return
+    if (user.role === 'staff' && ADMIN_ONLY_ROUTES.some(r => pathname.startsWith(r))) {
+      router.replace('/staff')
+    }
+  }, [user, pathname])
 
   const handleRefreshRole = async () => {
     const u = getCurrentUser()
@@ -235,6 +249,17 @@ export default function AdminLayout({ children }) {
     } finally {
       setRefreshingRole(false)
     }
+  }
+
+  const handleLogout = () => {
+    const role = user?.role
+    logoutUser()
+    clearAdminSecret()
+    setSecretOk(false)
+    setUser(null)
+    setSidebarOpen(false)
+    // Redirect to the appropriate panel login, not the homepage
+    router.replace(role === 'staff' ? '/staff' : '/admin')
   }
 
   if (checking) return (
@@ -268,30 +293,17 @@ export default function AdminLayout({ children }) {
         ) : (
           <Link href="/login" className="adm-access-btn-primary">Go to login</Link>
         )}
-        <Link href="/" className="adm-access-btn-outline">Back to home</Link>
       </div>
     </div>
   )
 
   const isAdmin  = user.role === 'admin'
   const navLinks = isAdmin ? ADMIN_NAV_LINKS : STAFF_NAV_LINKS
+  const homeHref = isAdmin ? '/admin' : '/staff'
 
   return (
     <div className="adm-layout">
 
-      {/*
-        ── GLOBAL THEME TOKENS ──────────────────────────────────────────────────
-        Three layers, in ascending specificity so the manual toggle always wins:
-
-        1. :root                          — dark default (specificity 0,0,1)
-        2. @media prefers-color-scheme    — OS light preference, guarded so it
-                                           cannot override a manual dark choice
-        3. [data-adm-theme="light|dark"]  — explicit toggle (specificity 0,1,0)
-                                           beats both layers above
-
-        applyTheme() in useAdminTheme sets/removes data-adm-theme on <html>,
-        which is an ancestor of every admin page, so all pages inherit correctly.
-      */}
       <style>{`
         /* 1 ── Dark default */
         :root {
@@ -364,7 +376,7 @@ export default function AdminLayout({ children }) {
           )}
         </button>
         <div className="adm-topnav-brand">JCE Bridal · {isAdmin ? 'Admin' : 'Staff'}</div>
-        <Link href="/" className="adm-topnav-back">← Site</Link>
+        <button className="adm-topnav-back" onClick={handleLogout}>Logout</button>
       </div>
 
       {sidebarOpen && (
@@ -374,7 +386,7 @@ export default function AdminLayout({ children }) {
       {/* Sidebar */}
       <aside className={`adm-sidebar${sidebarOpen ? ' adm-sidebar--open' : ''}`}>
         <div className="adm-sidebar-brand">
-          <Link href={isAdmin ? '/admin' : '/staff'} onClick={() => setSidebarOpen(false)}>
+          <Link href={homeHref} onClick={() => setSidebarOpen(false)}>
             <div className="adm-brand-name">JCE Bridal</div>
             <div className="adm-brand-sub">{isAdmin ? 'Admin panel' : 'Staff panel'}</div>
           </Link>
@@ -400,12 +412,17 @@ export default function AdminLayout({ children }) {
         <div className="adm-sidebar-footer">
           <ThemeToggle theme={theme} onToggle={toggle} />
           <div className="adm-footer-divider" />
-          <Link href="/" className="adm-footer-btn">← Back to site</Link>
           <button
             className="adm-footer-btn"
             onClick={() => { clearAdminSecret(); setSecretOk(false) }}
           >
             Clear secret
+          </button>
+          <button
+            className="adm-footer-btn adm-footer-btn--logout"
+            onClick={handleLogout}
+          >
+            Logout
           </button>
         </div>
       </aside>
