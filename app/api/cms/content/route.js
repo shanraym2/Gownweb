@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-
 const VALID_SECTIONS = ['about', 'collection-spotlight', 'footer', 'theme-config', 'contact']
-
+export const dynamic = 'force-dynamic'
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const section = searchParams.get('section')

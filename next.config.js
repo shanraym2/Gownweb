@@ -1,4 +1,3 @@
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config, { isServer }) => {
@@ -10,6 +9,10 @@ const nextConfig = {
         tls: false,
         dns: false,
         pg: false,
+        crypto: false,
+        stream: false,
+        os: false,
+        path: false,
       }
     }
     return config

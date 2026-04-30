@@ -13,7 +13,8 @@ export async function GET() {
   try {
     const { query } = await import('@/lib/db')
     const testimonials = await query(
-      `SELECT * FROM cms_testimonials WHERE is_active = TRUE ORDER BY sort_order ASC`
+      `SELECT id, quote_text, author_name, image_url, sort_order
+      FROM cms_testimonials WHERE is_active = TRUE ORDER BY sort_order ASC`
     )
     return NextResponse.json({ ok: true, testimonials })
   } catch (err) {

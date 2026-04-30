@@ -14,7 +14,8 @@ export async function GET() {
   try {
     const { query } = await import('@/lib/db')
     const slides = await query(
-      `SELECT * FROM cms_hero_slides WHERE is_active = TRUE ORDER BY sort_order ASC`
+      `SELECT id, image_url, subtitle, heading, body, sort_order
+      FROM cms_hero_slides WHERE is_active = TRUE ORDER BY sort_order ASC` 
     )
     return NextResponse.json({ ok: true, slides })
   } catch (err) {
