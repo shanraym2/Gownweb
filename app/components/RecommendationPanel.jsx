@@ -1,5 +1,6 @@
 'use client'
-
+import { useState } from 'react'
+import Link from 'next/link'
 /**
  * RecommendationPanel
  * ────────────────────
@@ -15,7 +16,7 @@
  *   showEngineInfo   — show collapsible engine transparency panel (default: false)
  */
 
-import Link from 'next/link'
+
 
 function WeightBar({ label, value, color = 'var(--warm-brown)' }) {
   if (value === 0) return null
@@ -54,8 +55,8 @@ export default function RecommendationPanel({
   showMethodBadges = true,
   showEngineInfo = true,
 }) {
-  const { useState: _useState } = require('react')
-  const [infoOpen, setInfoOpen] = _useState(showEngineInfo)
+ 
+  const [infoOpen, setInfoOpen] = useState(showEngineInfo)
 
   if (!loading && recommendations.length === 0) return null
 
@@ -64,7 +65,7 @@ export default function RecommendationPanel({
 
   return (
     <section className="rp-section">
-      <style>{PANEL_STYLES}</style>
+      
       <div className="container">
 
         <div className="rp-header">
