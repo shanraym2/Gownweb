@@ -39,6 +39,16 @@ export async function GET(request) {
   }
 }
 
+// Helper to generate a random temporary password
+function generateTempPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz'
+  let pwd = ''
+  for (let i = 0; i < 12; i++) {
+    pwd += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return pwd
+}
+
 // POST — create user
 export async function POST(request) {
   if (!checkAuth(request)) {
@@ -46,8 +56,8 @@ export async function POST(request) {
   }
   try {
     const { firstName, lastName, email, password, role } = await request.json()
-    if (!firstName || !lastName || !email || !password) {
-      return NextResponse.json({ ok: false, error: 'All fields are required.' }, { status: 400 })
+    if (!firstName || !lastName || !email) {
+      return NextResponse.json({ ok: false, error: 'First name, last name, and email are required.' }, { status: 400 })
     }
     const cleanEmail = email.trim().toLowerCase()
     const existing   = await query('SELECT id FROM users WHERE email = $1', [cleanEmail])
@@ -57,7 +67,9 @@ export async function POST(request) {
         { status: 409 }
       )
     }
-    const passwordHash = await bcrypt.hash(password, 12)
+    // Generate temporary password if not provided
+    const finalPassword = password || generateTempPassword()
+    const passwordHash = await bcrypt.hash(finalPassword, 12)
     // ── Accept customer, staff, and admin ──
     const validRole = ['customer', 'staff', 'admin'].includes(role) ? role : 'customer'
     const rows = await query(
@@ -65,7 +77,11 @@ export async function POST(request) {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [firstName.trim(), lastName.trim(), cleanEmail, passwordHash, validRole]
     )
-    return NextResponse.json({ ok: true, user: mapUser(rows[0]) })
+    return NextResponse.json({ 
+      ok: true, 
+      user: mapUser(rows[0]),
+      tempPassword: finalPassword 
+    })
   } catch (err) {
     console.error('Admin users POST error:', err)
     return NextResponse.json({ ok: false, error: 'Failed to create user.' }, { status: 500 })

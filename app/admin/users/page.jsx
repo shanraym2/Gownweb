@@ -298,6 +298,8 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
   const [role,      setRole     ] = useState('customer')
   const [error,     setError    ] = useState('')
   const [saving,    setSaving   ] = useState(false)
+  const [tempPassword, setTempPassword] = useState(null)
+  const [copied, setCopied] = useState(false)
 
   async function handleSubmit() {
     setError('')
@@ -319,13 +321,106 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
       })
       const data = await res.json()
       if (!data.ok) { setError(data.error || 'Failed to save.'); return }
+      
+      // Show temporary password
+      setTempPassword(data.tempPassword)
+      
+      // Call onSave to update the users list
       onSave(data.user)
-      onClose()
     } catch {
       setError('Could not connect. Please try again.')
     } finally {
       setSaving(false)
     }
+  }
+
+  const copyPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(tempPassword)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  // Show password confirmation screen
+  if (tempPassword) {
+    return (
+      <Modal title="User Created" onClose={() => { setTempPassword(null); onClose() }}>
+        <div className="modal-body">
+          <div style={{
+            background: '#ecfdf5',
+            border: '1px solid #86efac',
+            borderRadius: 6,
+            padding: 12,
+            marginBottom: 14,
+          }}>
+            <p style={{ fontSize: 13, color: '#166534', margin: 0, marginBottom: 8, fontWeight: 500 }}>
+              ✓ User account created successfully
+            </p>
+            <p style={{ fontSize: 12, color: '#16a34a', margin: 0 }}>
+              Email: <strong>{email}</strong>
+            </p>
+          </div>
+
+          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '12px 0 8px' }}>
+            Temporary password (send to user securely):
+          </p>
+
+          <div style={{
+            display: 'flex',
+            gap: 6,
+            padding: 10,
+            background: 'var(--color-background-secondary)',
+            border: '1px solid var(--color-border-tertiary)',
+            borderRadius: 6,
+            alignItems: 'center',
+          }}>
+            <code style={{
+              flex: 1,
+              fontSize: 14,
+              fontWeight: 600,
+              fontFamily: '"Courier New", monospace',
+              color: 'var(--color-text-primary)',
+              letterSpacing: 1,
+            }}>
+              {tempPassword}
+            </code>
+            <button
+              onClick={copyPassword}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 12,
+                color: copied ? '#16a34a' : 'var(--color-text-secondary)',
+                fontWeight: 500,
+                transition: 'color .15s',
+              }}
+            >
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
+          </div>
+
+          <p style={{
+            fontSize: 11,
+            color: 'var(--color-text-tertiary)',
+            margin: '12px 0 0',
+            lineHeight: 1.5,
+          }}>
+            The user should change this password immediately after first login.
+          </p>
+        </div>
+
+        <div className="modal-footer">
+          <button
+            className="modal-btn modal-btn-primary"
+            onClick={() => { setTempPassword(null); onClose() }}
+          >
+            Done
+          </button>
+        </div>
+      </Modal>
+    )
   }
 
   return (
