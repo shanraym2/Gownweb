@@ -615,3 +615,12 @@ JOIN   public.payments p ON p.order_id = o.id
 WHERE  o.status IN ('paid','processing','ready','shipped','completed')
   AND  p.status = 'verified'
 ON CONFLICT DO NOTHING;
+
+
+UPDATE public.cms_hero_slides
+SET heading = replace(heading, '\n', E'\n')
+WHERE heading LIKE '%\n%';
+
+UPDATE public.cms_hero_slides
+SET body = replace(body, 'â€"', '—')
+WHERE body LIKE '%â€"%';

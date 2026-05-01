@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 import ProductCard from './ProductCard'
 import { useGowns } from '@/hooks/useGowns'
@@ -12,8 +12,19 @@ export default function Collection() {
   const { ref: headerRef, isVisible: headerVisible } = useIntersectionObserver(OBSERVER_OPTIONS)
   const { gowns, loading } = useGowns()
 
-  const featured = useMemo(() => gowns.slice(0, FEATURED_COUNT), [gowns])
+  const [spotlight, setSpotlight] = useState({
+    eyebrow_label: 'THE COLLECTION',
+    heading: 'Handpicked Elegance',
+  })
 
+  useEffect(() => {
+    fetch('/api/cms/content?section=collection-spotlight')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setSpotlight(d.fields) })
+      .catch(() => {})
+  }, [])
+
+  const featured = useMemo(() => gowns.slice(0, FEATURED_COUNT), [gowns])
   return (
     <section id="collection" className="collection-section">
       <div className="container">
@@ -22,8 +33,8 @@ export default function Collection() {
           ref={headerRef}
           className={`section-header reveal-up ${headerVisible ? 'active' : ''}`}
         >
-          <span className="subtitle">THE COLLECTION</span>
-          <h2>Handpicked Elegance</h2>
+          <span className="subtitle">{spotlight.eyebrow_label}</span>
+          <h2>{spotlight.heading}</h2>
         </div>
 
         {loading ? (

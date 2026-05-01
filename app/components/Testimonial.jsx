@@ -33,12 +33,14 @@ export default function Testimonial() {
           ref={textRef}
           className={`text-col reveal-left ${textVisible ? 'active' : ''}`}
         >
-          <blockquote>
-            <p className="testimonial-text">"{testimonial.quote_text}"</p>
-            <footer>
+          <figure>
+            <blockquote>
+              <p className="testimonial-text">"{testimonial.quote_text}"</p>
+            </blockquote>
+            <figcaption>
               <cite className="author">{testimonial.author_name}</cite>
-            </footer>
-          </blockquote>
+            </figcaption>
+          </figure>
         </div>
 
         <div
