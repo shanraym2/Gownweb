@@ -20,6 +20,66 @@ export default function Header({ solid = false, cmsTheme = null }) {
   const searchRef  = useRef(null)
   const searchInputRef = useRef(null)
 
+  // ── CMS state ──────────────────────────────────────────────────────────────
+  const [navLabels, setNavLabels] = useState({
+    nav_catalogue_label: 'Catalogue',
+    nav_fitting_label:   'My Fitting room',
+    nav_contact_label:   'Contact',
+  })
+  const [announcementBar, setAnnouncementBar] = useState({
+    enabled:    'false',
+    text:       '',
+    link_url:   '',
+    link_label: '',
+    bg_color:   '#1a1a2e',
+    txt_color:  '#f5e9d0',
+  })
+  // theme-config: colours, font, logo text, custom logo image
+  const [theme, setTheme] = useState({
+    colors:    { navBg: '', primary: '' },
+    fonts:     { body: '' },
+    site_name: '',   // replaces "JCE Bridal" in the logo
+    logo_sub:  '',   // replaces "Boutique"
+    logo_url:  '',   // optional custom logo image path
+  })
+
+  useEffect(() => {
+    Promise.allSettled([
+      fetch('/api/cms/content?section=header').then(r => r.json()),
+      fetch('/api/cms/content?section=announcement-bar').then(r => r.json()),
+      fetch('/api/cms/content?section=theme-config').then(r => r.json()),
+    ]).then(([headerResult, annResult, themeResult]) => {
+      if (headerResult.status === 'fulfilled' && headerResult.value?.ok) {
+        const f = headerResult.value.fields || {}
+        setNavLabels(prev => ({
+          nav_catalogue_label: f.nav_catalogue_label || prev.nav_catalogue_label,
+          nav_fitting_label:   f.nav_fitting_label   || prev.nav_fitting_label,
+          nav_contact_label:   f.nav_contact_label   || prev.nav_contact_label,
+        }))
+      }
+      if (annResult.status === 'fulfilled' && annResult.value?.ok) {
+        const f = annResult.value.fields || {}
+        setAnnouncementBar(prev => ({ ...prev, ...f }))
+      }
+      if (themeResult.status === 'fulfilled' && themeResult.value?.ok) {
+        const f = themeResult.value.fields || {}
+        setTheme(prev => ({
+          colors: {
+            navBg:   f.colors?.navBg   || prev.colors.navBg,
+            primary: f.colors?.primary || prev.colors.primary,
+          },
+          fonts: {
+            body: f.fonts?.body || prev.fonts.body,
+          },
+          site_name: f.site_name || prev.site_name,
+          logo_sub:  f.logo_sub  || prev.logo_sub,
+          logo_url:  f.logo_url  || prev.logo_url,
+        }))
+      }
+    })
+  }, [])
+  // ──────────────────────────────────────────────────────────────────────────
+
   const refreshCartCount = () => {
     try {
       const items = loadCart()
@@ -101,16 +161,23 @@ export default function Header({ solid = false, cmsTheme = null }) {
 
   const isActive = isScrolled || solid
 
-  // CMS inline vars
-  const cmsVars = cmsTheme ? {
-    '--cms-nav-bg':    cmsTheme.colors?.navBg  || cmsTheme.colors?.secondary || '#1a1a2e',
-    '--cms-primary':   cmsTheme.colors?.primary || '#c8a96e',
-    '--cms-font-body': cmsTheme.fonts?.body     || "'Jost', sans-serif",
-  } : {}
+  // ── Resolved theme values: prop cmsTheme wins, then CMS fetch, then hardcoded defaults
+  const resolvedNavBg  = cmsTheme?.colors?.navBg  || cmsTheme?.colors?.secondary || theme.colors.navBg  || '#1a1a2e'
+  const resolvedPrimary = cmsTheme?.colors?.primary || theme.colors.primary || '#c8a96e'
+  const resolvedFont   = cmsTheme?.fonts?.body     || theme.fonts.body      || "'Jost', sans-serif"
 
-  const headerBgOverride = cmsTheme && isActive
-    ? { backgroundColor: 'var(--cms-nav-bg)' }
-    : {}
+  const cmsVars = {
+    '--cms-nav-bg':    resolvedNavBg,
+    '--cms-primary':   resolvedPrimary,
+    '--cms-font-body': resolvedFont,
+  }
+
+  const headerBgOverride = isActive ? { backgroundColor: resolvedNavBg } : {}
+
+  // ── Logo values: CMS fields fall back to hardcoded strings ────────────────
+  const logoMain = theme.site_name || 'JCE Bridal'
+  const logoSub  = theme.logo_sub  || 'Boutique'
+  const logoImg  = theme.logo_url  || '/images/jce_logo.svg'
 
   // ── Role-based dashboard link ─────────────────────────────────────────────
   const dashboardLink = currentUser?.role === 'admin'
@@ -119,8 +186,43 @@ export default function Header({ solid = false, cmsTheme = null }) {
       ? { href: '/staff', label: 'Staff' }
       : null
 
+  const showAnnouncement = announcementBar.enabled === 'true' && !!announcementBar.text
+
   return (
     <>
+      {/* Announcement Bar */}
+      {showAnnouncement && (
+        <div
+          style={{
+            backgroundColor: announcementBar.bg_color || '#1a1a2e',
+            color:           announcementBar.txt_color || '#f5e9d0',
+            textAlign:       'center',
+            fontSize:        '13px',
+            fontWeight:      500,
+            padding:         '9px 16px',
+            lineHeight:      1.4,
+          }}
+        >
+          {announcementBar.text}
+          {announcementBar.link_url && announcementBar.link_label && (
+            <>
+              {' '}
+              <a
+                href={announcementBar.link_url}
+                style={{
+                  color:          announcementBar.txt_color || '#f5e9d0',
+                  fontWeight:     700,
+                  textDecoration: 'underline',
+                  marginLeft:     4,
+                }}
+              >
+                {announcementBar.link_label}
+              </a>
+            </>
+          )}
+        </div>
+      )}
+
       <header
         className={`hdr${isActive ? ' scrolled' : ''}`}
         style={{ ...cmsVars, ...headerBgOverride }}
@@ -129,10 +231,10 @@ export default function Header({ solid = false, cmsTheme = null }) {
 
           {/* Nav links */}
           <nav className="hdr-nav">
-            <Link href="/gowns">Catalogue</Link>
+            <Link href="/gowns">{navLabels.nav_catalogue_label}</Link>
           {/*   <Link href="/virtual-try-on">Virtual Try-On</Link>  */}
-            <Link href="/fitting-room">My Fitting room</Link>
-            <Link href="/contact">Contact</Link>
+            <Link href="/fitting-room">{navLabels.nav_fitting_label}</Link>
+            <Link href="/contact">{navLabels.nav_contact_label}</Link>
             {dashboardLink && (
               <Link href={dashboardLink.href} className="nav-admin">
                 {dashboardLink.label}
@@ -150,11 +252,11 @@ export default function Header({ solid = false, cmsTheme = null }) {
           </button>
 
           {/* Logo */}
-          <Link href="/" className="hdr-logo" aria-label="JCE Bridal Boutique — Home">
-            <img src="/images/jce_logo.svg" alt="" aria-hidden="true" />
+          <Link href="/" className="hdr-logo" aria-label={`${logoMain} ${logoSub} — Home`}>
+            <img src={logoImg} alt="" aria-hidden="true" />
             <div className="hdr-logo-text">
-              <span className="hdr-logo-main">JCE Bridal</span>
-              <span className="hdr-logo-sub">Boutique</span>
+              <span className="hdr-logo-main">{logoMain}</span>
+              <span className="hdr-logo-sub">{logoSub}</span>
             </div>
           </Link>
 
@@ -257,18 +359,19 @@ export default function Header({ solid = false, cmsTheme = null }) {
           </button>
 
           <Link href="/" className="mobile-logo" onClick={() => setIsMobileOpen(false)}>
-            <img src="/images/jce_logo.svg" alt="" aria-hidden="true" />
+            <img src={logoImg} alt="" aria-hidden="true" />
             <div className="mobile-logo-text">
-              <span className="mobile-logo-main">JCE Bridal</span>
-              <span className="mobile-logo-sub">Boutique</span>
+              <span className="mobile-logo-main">{logoMain}</span>
+              <span className="mobile-logo-sub">{logoSub}</span>
             </div>
           </Link>
-          <Link href="/gowns"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Catalogue</Link>
-      {/*     <Link href="/virtual-try-on"    className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link> */}
-          <Link href="/fitting-room" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>My Fitting room</Link>
-          <Link href="/about"             className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
-          <Link href="/contact"           className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Contact</Link>
-          <Link href="/cart"              className="mobile-nav-link" onClick={() => { setIsMobileOpen(false); refreshCartCount() }}>
+
+          <Link href="/gowns"        className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>{navLabels.nav_catalogue_label}</Link>
+      {/*     <Link href="/virtual-try-on" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link> */}
+          <Link href="/fitting-room" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>{navLabels.nav_fitting_label}</Link>
+          <Link href="/about"        className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
+          <Link href="/contact"      className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>{navLabels.nav_contact_label}</Link>
+          <Link href="/cart"         className="mobile-nav-link" onClick={() => { setIsMobileOpen(false); refreshCartCount() }}>
             Cart{cartCount > 0 ? ` (${cartCount})` : ''}
           </Link>
 
@@ -305,7 +408,6 @@ export default function Header({ solid = false, cmsTheme = null }) {
             >Go</button>
           </form>
 
-          {/* Dashboard link in mobile drawer */}
           {dashboardLink && (
             <Link href={dashboardLink.href} className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>
               {dashboardLink.label} Dashboard

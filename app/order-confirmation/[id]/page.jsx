@@ -9,7 +9,7 @@ import { getCurrentUser } from '../../utils/authClient'
 
 // ─── Proof upload ─────────────────────────────────────────────────────────────
 
-function ProofUpload({ orderId, paymentMethod, onUploaded }) {
+function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
   const [image, setImage] = useState(null)
   const [preview, setPreview] = useState(null)
   const [refNo, setRefNo] = useState('')
@@ -17,6 +17,7 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+
 
   const fileRef = useRef(null)
   const user = getCurrentUser()
@@ -106,6 +107,8 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
       .finally(() => setLoading(false))
   }, [orderId, user])
 
+  
+
   useEffect(() => {
     fetchOrder()
   }, [fetchOrder])
@@ -121,11 +124,8 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
 
   return (
     <div className="conf-proof">
-      <p className="conf-proof-title">Upload proof of payment</p>
-      <p className="conf-proof-sub">
-        Send your payment to the account shown at checkout, then upload a clear screenshot here.
-        Orders without proof within 24 hours may be cancelled.
-      </p>
+      <p className="conf-proof-title">{content.heading}</p>
+      <p className="conf-proof-sub">{content.instructions}</p>
 
       <div
         className={`conf-dropzone${preview ? ' conf-dropzone--has-img' : ''}`}
@@ -144,7 +144,7 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
                 <line x1="12" y1="3" x2="12" y2="15"/>
               </svg>
               <p>Click or drag your screenshot here</p>
-              <p className="conf-dropzone-hint">JPEG or PNG · max 5 MB</p>
+              <p className="conf-dropzone-hint">{content.accepted_fmt}</p>
             </>
         }
       </div>
@@ -170,7 +170,7 @@ function ProofUpload({ orderId, paymentMethod, onUploaded }) {
         className={`conf-upload-btn${uploading ? ' conf-upload-btn--loading' : ''}`}
         onClick={handleUpload} disabled={uploading || !image}
       >
-        {uploading ? 'Uploading…' : 'Submit proof of payment'}
+        {uploading ? 'Uploading…' : content.submit_label}
       </button>
     </div>
   )
@@ -187,7 +187,21 @@ export default function OrderConfirmationPage() {
   const [error,    setError   ] = useState('')
   const [confirming, setConfirming] = useState(false)
 
+  const [content, setContent] = useState({
+    heading:      'Upload Payment Proof',
+    instructions: 'Please upload a clear screenshot or photo of your payment confirmation.',
+    accepted_fmt: 'JPG, PNG or PDF — max 10 MB',
+    submit_label: 'Send proof',
+  })
+
   const user = typeof window !== 'undefined' ? getCurrentUser() : null
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=upload-proof')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!orderId || !user) { setLoading(false); return }
@@ -289,7 +303,8 @@ export default function OrderConfirmationPage() {
               <ProofUpload
                 orderId={order.id}
                 paymentMethod={order.paymentMethod}
-                onUploaded={() => setOrder(o => ({ ...o, paymentStatus:'pending' }))}
+                onUploaded={() => setOrder(o => ({ ...o, paymentStatus: 'pending' }))}
+                content={content}
               />
 
               {['ready','shipped'].includes(order.status) && (

@@ -2,11 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../layout'
+import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
 
-
-  // ... rest unchanged
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -15,6 +13,20 @@ const SECTIONS = [
   { key: 'collection-spotlight', label: 'Collection Spotlight', icon: '◈' },
   { key: 'contact',              label: 'Contact',              icon: '◎' },
   { key: 'footer',               label: 'Footer',               icon: '▣' },
+  { key: 'theme-config',         label: 'Theme & Colours',      icon: '🎨' },
+  // ── New ──
+  { key: 'header',               label: 'Header / Nav',         icon: '≡' },
+  { key: 'announcement-bar',     label: 'Announcement Bar',     icon: '📣' },
+  { key: 'catalogue',            label: 'Catalogue',            icon: '◧' },
+  { key: 'product-details',      label: 'Product Details',      icon: '◑' },
+  { key: 'login',                label: 'Login / Register',     icon: '⊙' },
+  { key: 'cart',                 label: 'Cart',                 icon: '◻' },
+  { key: 'checkout',             label: 'Checkout',             icon: '✓' },
+  { key: 'upload-proof',         label: 'Upload Proof',         icon: '↑' },
+  { key: 'profile',              label: 'Profile',              icon: '◐' },
+  { key: 'my-orders',            label: 'My Orders',            icon: '◨' },
+  { key: 'fitting-room',         label: 'Fitting Room',         icon: '◈' },
+  { key: 'global-seo',           label: 'Global SEO',           icon: '⊕' },
 ]
 
 const SECTION_FIELDS = {
@@ -47,7 +59,95 @@ const SECTION_FIELDS = {
     { key: 'pinterest',   label: 'Pinterest URL',  type: 'text', placeholder: 'https://pinterest.com/…' },
     { key: 'copyright',   label: 'Copyright Text', type: 'text', placeholder: '© 2026 JCE Bridal Boutique. All rights reserved.' },
   ],
-  
+  'theme-config': [
+    { key: 'colors.navBg',   label: 'Nav Background Colour', type: 'color', placeholder: '#1a1a2e' },
+    { key: 'colors.primary', label: 'Primary Accent Colour', type: 'color', placeholder: '#c8a96e' },
+    { key: 'fonts.body',     label: 'Body Font',             type: 'text',  placeholder: "Jost, sans-serif" },
+  ],
+
+  // ── New sections ──────────────────────────────────────────────────────────
+
+  'header': [
+    { key: 'nav_catalogue_label', label: 'Catalogue Nav Label',    type: 'text', placeholder: 'Catalogue' },
+    { key: 'nav_fitting_label',   label: 'Fitting Room Nav Label', type: 'text', placeholder: 'My Fitting Room' },
+    { key: 'nav_contact_label',   label: 'Contact Nav Label',      type: 'text', placeholder: 'Contact' },
+  ],
+  'announcement-bar': [
+    { key: 'enabled',    label: 'Enabled (true / false)', type: 'text',     placeholder: 'false' },
+    { key: 'text',       label: 'Announcement Text',      type: 'textarea', placeholder: 'Free consultations every Saturday!' },
+    { key: 'link_url',   label: 'Link URL',               type: 'text',     placeholder: '/contact' },
+    { key: 'link_label', label: 'Link Label',             type: 'text',     placeholder: 'Book now' },
+    { key: 'bg_color',   label: 'Background Colour',      type: 'color',    placeholder: '#1a1a2e' },
+    { key: 'txt_color',  label: 'Text Colour',            type: 'color',    placeholder: '#f5e9d0' },
+  ],
+  'catalogue': [
+    { key: 'eyebrow',           label: 'Eyebrow Label',       type: 'text',     placeholder: 'JCE Bridal Boutique' },
+    { key: 'heading',           label: 'Heading',             type: 'text',     placeholder: 'Gowns & Dresses' },
+    { key: 'subheading',        label: 'Subheading',          type: 'textarea', placeholder: 'Every silhouette. Every occasion.' },
+    { key: 'filter_heading',    label: 'Filter Panel Heading',type: 'text',     placeholder: 'Filters' },
+    { key: 'empty_state_title', label: 'Empty State Title',   type: 'text',     placeholder: 'No gowns match' },
+    { key: 'empty_state_body',  label: 'Empty State Body',    type: 'textarea', placeholder: 'Try adjusting your filters or clearing the search.' },
+    { key: 'empty_state_cta',   label: 'Empty State CTA',     type: 'text',     placeholder: 'Clear all filters' },
+    { key: 'promo_banner',      label: 'Promo Banner Text',   type: 'textarea', placeholder: 'Leave blank to hide.' },
+  ],
+  'product-details': [
+    { key: 'enquiry_prompt',    label: 'Enquiry Prompt',     type: 'textarea', placeholder: 'Interested in this gown? Book a fitting appointment with us.' },
+    { key: 'add_to_cart_label', label: 'Add-to-Cart Label',  type: 'text',     placeholder: 'Add to Fitting Room' },
+    { key: 'sizing_note',       label: 'Sizing Note',        type: 'textarea', placeholder: 'All gowns are sample sizes. Alterations are available upon request.' },
+    { key: 'share_label',       label: 'Share Button Label', type: 'text',     placeholder: 'Share this look' },
+  ],
+  'login': [
+    { key: 'login_heading',    label: 'Login Heading',    type: 'text',     placeholder: 'Welcome back' },
+    { key: 'login_subheading', label: 'Login Subheading', type: 'text',     placeholder: 'Sign in to your account' },
+    { key: 'register_heading', label: 'Register Heading', type: 'text',     placeholder: 'Create an account' },
+    { key: 'tc_label',         label: 'T&C Link Label',   type: 'text',     placeholder: 'Terms & Conditions' },
+    { key: 'tc_url',           label: 'T&C URL',          type: 'text',     placeholder: '/terms' },
+    { key: 'promo_text',       label: 'Promo Text',       type: 'textarea', placeholder: 'Leave blank to hide.' },
+  ],
+  'cart': [
+    { key: 'heading',        label: 'Page Heading',     type: 'text',     placeholder: 'Your Fitting Room' },
+    { key: 'empty_title',    label: 'Empty State Title',type: 'text',     placeholder: 'Your cart is empty' },
+    { key: 'empty_body',     label: 'Empty State Body', type: 'textarea', placeholder: 'Browse our catalogue to add gowns to your fitting room.' },
+    { key: 'checkout_label', label: 'Checkout Button',  type: 'text',     placeholder: 'Proceed to Checkout' },
+    { key: 'promo_banner',   label: 'Promo Banner Text',type: 'textarea', placeholder: 'Leave blank to hide.' },
+  ],
+  'checkout': [
+    { key: 'heading',         label: 'Page Heading',       type: 'text',     placeholder: 'Complete Your Booking' },
+    { key: 'subheading',      label: 'Subheading',         type: 'text',     placeholder: 'Fill in your details below.' },
+    { key: 'submit_label',    label: 'Submit Button Label',type: 'text',     placeholder: 'Place Order' },
+    { key: 'tc_label',        label: 'T&C Link Label',     type: 'text',     placeholder: 'Terms & Conditions' },
+    { key: 'tc_url',          label: 'T&C URL',            type: 'text',     placeholder: '/terms' },
+    { key: 'success_heading', label: 'Success Heading',    type: 'text',     placeholder: 'Order placed!' },
+    { key: 'success_body',    label: 'Success Body',       type: 'textarea', placeholder: 'Thank you! We will be in touch shortly to confirm your appointment.' },
+  ],
+  'upload-proof': [
+    { key: 'heading',      label: 'Page Heading',    type: 'text',     placeholder: 'Upload Payment Proof' },
+    { key: 'instructions', label: 'Instructions',    type: 'textarea', placeholder: 'Please upload a clear screenshot or photo of your payment confirmation.' },
+    { key: 'accepted_fmt', label: 'Accepted Formats',type: 'text',     placeholder: 'JPG, PNG or PDF — max 10 MB' },
+    { key: 'submit_label', label: 'Submit Button',   type: 'text',     placeholder: 'Send proof' },
+  ],
+  'profile': [
+    { key: 'heading',    label: 'Page Heading',    type: 'text',     placeholder: 'My Profile' },
+    { key: 'save_label', label: 'Save Button',     type: 'text',     placeholder: 'Save changes' },
+    { key: 'help_text',  label: 'Help Text',       type: 'textarea', placeholder: 'Update your name, email address, or password below.' },
+  ],
+  'my-orders': [
+    { key: 'heading',     label: 'Page Heading',     type: 'text',     placeholder: 'My Orders' },
+    { key: 'empty_title', label: 'Empty State Title',type: 'text',     placeholder: 'No orders yet' },
+    { key: 'empty_body',  label: 'Empty State Body', type: 'textarea', placeholder: 'Once you place an order it will appear here.' },
+  ],
+  'fitting-room': [
+    { key: 'heading',     label: 'Page Heading',     type: 'text',     placeholder: 'My Fitting Room' },
+    { key: 'subheading',  label: 'Subheading',       type: 'textarea', placeholder: 'Gowns you have saved for your appointment.' },
+    { key: 'empty_title', label: 'Empty State Title',type: 'text',     placeholder: 'Nothing saved yet' },
+    { key: 'empty_body',  label: 'Empty State Body', type: 'textarea', placeholder: 'Browse the catalogue and save gowns you love.' },
+    { key: 'cta_label',   label: 'CTA Button Label', type: 'text',     placeholder: 'Browse catalogue' },
+  ],
+  'global-seo': [
+    { key: 'site_name', label: 'Site Name',        type: 'text',     placeholder: 'JCE Bridal Boutique' },
+    { key: 'meta_desc', label: 'Meta Description', type: 'textarea', placeholder: 'Luxury bridal gowns and dresses in Manila. Book your fitting appointment today.' },
+    { key: 'og_image',  label: 'OG Image URL',     type: 'text',     placeholder: '/images/og-default.jpg' },
+  ],
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -178,6 +278,7 @@ function TestimonialRow({ t, onEdit, onDelete, onToggle }) {
     </div>
   )
 }
+
 function ImageUploadField({ value, onChange }) {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -255,6 +356,7 @@ function ImageUploadField({ value, onChange }) {
     </div>
   )
 }
+
 // ── Slide / Testimonial Modal ─────────────────────────────────────────────────
 
 function SlideModal({ slide, onSave, onClose, saving }) {
@@ -310,8 +412,6 @@ function SlideModal({ slide, onSave, onClose, saving }) {
             Visible to visitors
           </label>
 
-        
-          
         </div>
         <div className="adm-confirm-actions" style={{ marginTop: 22 }}>
           <button className="adm-btn-outline" onClick={onClose}>Cancel</button>
@@ -595,7 +695,7 @@ export default function AdminContentsPage() {
 
   const activeSlides  = slides.filter(s => s.is_active).length
   const activeTestims = testims.filter(t => t.is_active).length
- if (!ready) return null
+  if (!ready) return null
   return (
     <>
       <style>{`
@@ -953,11 +1053,23 @@ export default function AdminContentsPage() {
                 <div>
                   <p className="cms-block-title">{section.label}</p>
                   <p className="cms-block-desc">
-                    {section.key === 'about'                && 'Controls the About section copy and image on the homepage.'}
-                    {section.key === 'collection-spotlight' && 'Controls the heading above the featured gowns grid.'}
-                    {section.key === 'contact'              && 'Controls the Contact page heading, address, phone, email, hours, social links, and Google Maps embed.'}
-                    {section.key === 'footer'               && 'Controls the footer brand name, social links, and copyright line.'}
-                    {section.key === 'theme-config'         && 'Controls global brand colours injected into the site header.'}
+                    {section.key === 'theme-config'     && 'Controls the nav background colour, primary accent colour, and body font applied across the site.'}
+                    {section.key === 'header'           && 'Controls the navigation link labels in the site header.'}
+                    {section.key === 'announcement-bar' && 'Optional banner shown at the top of every page. Set enabled to "true" to show it.'}
+                    {section.key === 'catalogue'        && 'Controls the catalogue page heading, subheading, filter labels, and empty states.'}
+                    {section.key === 'product-details'  && 'Controls copy on individual gown detail pages.'}
+                    {section.key === 'login'            && 'Controls headings and labels on the login and register pages.'}
+                    {section.key === 'cart'             && 'Controls the cart/fitting room page copy.'}
+                    {section.key === 'checkout'         && 'Controls the checkout form heading, button label, and success message.'}
+                    {section.key === 'upload-proof'     && 'Controls the payment proof upload page copy.'}
+                    {section.key === 'profile'          && 'Controls the profile page heading and help text.'}
+                    {section.key === 'my-orders'        && 'Controls the orders list page copy and empty state.'}
+                    {section.key === 'fitting-room'     && 'Controls the saved fitting room page copy and empty state.'}
+                    {section.key === 'global-seo'       && 'Controls the default site name, meta description, and Open Graph image used across all pages.'}
+                    {section.key === 'about'            && 'Controls the About section on the homepage.'}
+                    {section.key === 'collection-spotlight' && 'Controls the Collection Spotlight section heading on the homepage.'}
+                    {section.key === 'contact'          && 'Controls the Contact page copy and business details.'}
+                    {section.key === 'footer'           && 'Controls the site footer brand name, social links, and copyright text.'}
                   </p>
                 </div>
 
@@ -993,7 +1105,7 @@ export default function AdminContentsPage() {
                       </div>
                     )}
 
-                    {(field.type === 'text') && (
+                    {field.type === 'text' && (
                       <input
                         type="text"
                         className="adm-input"

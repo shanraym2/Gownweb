@@ -545,6 +545,8 @@ function StepConfirm({
   paymentMethod, shippingFee,
   tncAccepted, setTncAccepted,
   onPlace, onBack, placing, placeError,
+  // ── CMS ──
+  cmsContent,
 }) {
   const [showTnc, setShowTnc] = useState(false)
 
@@ -571,7 +573,7 @@ function StepConfirm({
       )}
 
       <div className="ck-step-body">
-        <h2 className="ck-section-title">Review &amp; place order</h2>
+        <h2 className="ck-section-title">{cmsContent.heading}</h2>
 
         <div className="ck-confirm-section">
           <p className="ck-confirm-label">Items</p>
@@ -640,7 +642,7 @@ function StepConfirm({
             <span>
               I have read and agree to the{' '}
               <button className="ck-tnc-link" type="button" onClick={() => setShowTnc(true)}>
-                Terms &amp; Conditions
+                {cmsContent.tc_label}
               </button>
             </span>
           </label>
@@ -654,14 +656,14 @@ function StepConfirm({
             onClick={handlePlaceOrder}
             disabled={placing}
           >
-            {placing ? 'Placing order…' : 'Place order'}
+            {placing ? 'Placing order…' : cmsContent.submit_label}
           </button>
           <button className="ck-btn-ghost" onClick={onBack} disabled={placing}>← Back</button>
         </div>
 
         {!tncAccepted && (
           <p className="ck-tnc-reminder">
-            You must read and accept the Terms &amp; Conditions before placing your order.
+            You must read and accept the {cmsContent.tc_label} before placing your order.
           </p>
         )}
       </div>
@@ -758,6 +760,25 @@ export default function CheckoutPage() {
   const [tncAccepted,   setTncAccepted  ] = useState(false)
   const [placing,       setPlacing      ] = useState(false)
   const [placeError,    setPlaceError   ] = useState('')
+
+  // ── CMS content ──────────────────────────────────────────────────────────────
+  const [cmsContent, setCmsContent] = useState({
+    heading:         'Complete Your Booking',
+    subheading:      'Fill in your details below.',
+    submit_label:    'Place Order',
+    tc_label:        'Terms & Conditions',
+    tc_url:          '/terms',
+    success_heading: 'Order placed!',
+    success_body:    'Thank you! We will be in touch shortly to confirm your appointment.',
+  })
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=checkout')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setCmsContent(prev => ({ ...prev, ...d.fields })) })
+      .catch(() => {})
+  }, [])
+  // ─────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const u = getCurrentUser()
@@ -880,8 +901,8 @@ export default function CheckoutPage() {
       ) : (
         <>
           <section className="ck-hero">
-            <h1 className="ck-hero-title">Checkout</h1>
-            <p className="ck-hero-sub">Complete your order below.</p>
+            <h1 className="ck-hero-title">{cmsContent.heading}</h1>
+            <p className="ck-hero-sub">{cmsContent.subheading}</p>
           </section>
 
           <div className="ck-steps-bar">
@@ -934,6 +955,7 @@ export default function CheckoutPage() {
                       onPlace={handlePlaceOrder}
                       onBack={() => setStep(2)}
                       placing={placing} placeError={placeError}
+                      cmsContent={cmsContent}
                     />
                   )}
                 </>

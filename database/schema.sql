@@ -626,3 +626,204 @@ SET body = replace(body, 'â€"', '—')
 WHERE body LIKE '%â€"%';
 
 
+
+-- =============================================================
+-- Migration: extend CMS to cover all site pages
+-- Run once against your live database.
+-- Safe to re-run — uses ON CONFLICT DO NOTHING / IF NOT EXISTS.
+-- =============================================================
+
+
+-- ── 1. Relax the CHECK constraint on cms_content_blocks ──────────────────────
+--
+-- The existing table has:
+--   CHECK (section IN ('about','collection-spotlight','contact','footer','theme-config'))
+--
+-- We need to add all new section keys.  PostgreSQL requires dropping the old
+-- constraint and adding a new one (constraints cannot be altered in-place).
+
+ALTER TABLE public.cms_content_blocks
+  DROP CONSTRAINT IF EXISTS cms_content_blocks_section_check;
+
+ALTER TABLE public.cms_content_blocks
+  ADD CONSTRAINT cms_content_blocks_section_check
+  CHECK (section IN (
+    -- original sections
+    'about',
+    'collection-spotlight',
+    'contact',
+    'footer',
+    'theme-config',
+    -- new sections
+    'header',
+    'announcement-bar',
+    'catalogue',
+    'product-details',
+    'login',
+    'cart',
+    'checkout',
+    'upload-proof',
+    'profile',
+    'my-orders',
+    'fitting-room',
+    'global-seo'
+  ));
+
+
+-- ── 2. Seed default content for every new section ────────────────────────────
+--
+-- Uses ON CONFLICT (section) DO NOTHING so existing customisations are never
+-- overwritten.  If you want to RESET a section to defaults, change DO NOTHING
+-- to DO UPDATE SET fields = EXCLUDED.fields for that specific INSERT.
+
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
+
+  ('header', '{
+    "nav_catalogue_label": "Catalogue",
+    "nav_fitting_label":   "My Fitting Room",
+    "nav_contact_label":   "Contact"
+  }'::jsonb),
+
+  ('announcement-bar', '{
+    "enabled":    "false",
+    "text":       "",
+    "link_url":   "",
+    "link_label": "",
+    "bg_color":   "#1a1a2e",
+    "txt_color":  "#f5e9d0"
+  }'::jsonb),
+
+  ('catalogue', '{
+    "eyebrow":           "JCE Bridal Boutique",
+    "heading":           "Gowns & Dresses",
+    "subheading":        "Every silhouette. Every occasion. Filter to find the gown made for you.",
+    "filter_heading":    "Filters",
+    "empty_state_title": "No gowns match",
+    "empty_state_body":  "Try adjusting your filters or clearing the search.",
+    "empty_state_cta":   "Clear all filters",
+    "promo_banner":      ""
+  }'::jsonb),
+
+  ('product-details', '{
+    "enquiry_prompt":    "Interested in this gown? Book a fitting appointment with us.",
+    "add_to_cart_label": "Add to Fitting Room",
+    "sizing_note":       "All gowns are sample sizes. Alterations are available upon request.",
+    "share_label":       "Share this look"
+  }'::jsonb),
+
+  ('login', '{
+    "login_heading":    "Welcome back",
+    "login_subheading": "Sign in to your account",
+    "register_heading": "Create an account",
+    "tc_label":         "Terms & Conditions",
+    "tc_url":           "/terms",
+    "promo_text":       ""
+  }'::jsonb),
+
+  ('cart', '{
+    "heading":        "Your Fitting Room",
+    "empty_title":    "Your cart is empty",
+    "empty_body":     "Browse our catalogue to add gowns to your fitting room.",
+    "checkout_label": "Proceed to Checkout",
+    "promo_banner":   ""
+  }'::jsonb),
+
+  ('checkout', '{
+    "heading":         "Complete Your Booking",
+    "subheading":      "Fill in your details below.",
+    "submit_label":    "Place Order",
+    "tc_label":        "Terms & Conditions",
+    "tc_url":          "/terms",
+    "success_heading": "Order placed!",
+    "success_body":    "Thank you! We will be in touch shortly to confirm your appointment."
+  }'::jsonb),
+
+  ('upload-proof', '{
+    "heading":      "Upload Payment Proof",
+    "instructions": "Please upload a clear screenshot or photo of your payment confirmation.",
+    "accepted_fmt": "JPG, PNG or PDF — max 10 MB",
+    "submit_label": "Send proof"
+  }'::jsonb),
+
+  ('profile', '{
+    "heading":    "My Profile",
+    "save_label": "Save changes",
+    "help_text":  "Update your name, email address, or password below."
+  }'::jsonb),
+
+  ('my-orders', '{
+    "heading":     "My Orders",
+    "empty_title": "No orders yet",
+    "empty_body":  "Once you place an order it will appear here."
+  }'::jsonb),
+
+  ('fitting-room', '{
+    "heading":     "My Fitting Room",
+    "subheading":  "Gowns you have saved for your appointment.",
+    "empty_title": "Nothing saved yet",
+    "empty_body":  "Browse the catalogue and save gowns you love.",
+    "cta_label":   "Browse catalogue"
+  }'::jsonb),
+
+  ('global-seo', '{
+    "site_name": "JCE Bridal Boutique",
+    "meta_desc": "Luxury bridal gowns and dresses in Manila. Book your fitting appointment today.",
+    "og_image":  "/images/og-default.jpg"
+  }'::jsonb)
+
+ON CONFLICT (section) DO NOTHING;
+
+-- Step 1: drop the old constraint
+ALTER TABLE public.cms_content_blocks
+  DROP CONSTRAINT IF EXISTS cms_content_blocks_section_check;
+
+-- Step 2: add the new one covering all sections
+ALTER TABLE public.cms_content_blocks
+  ADD CONSTRAINT cms_content_blocks_section_check
+  CHECK (section IN (
+    'about',
+    'collection-spotlight',
+    'contact',
+    'footer',
+    'theme-config',
+    'header',
+    'announcement-bar',
+    'catalogue',
+    'product-details',
+    'login',
+    'cart',
+    'checkout',
+    'upload-proof',
+    'profile',
+    'my-orders',
+    'fitting-room',
+    'global-seo'
+  ));
+
+  INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('theme-config', '{
+    "colors": { "navBg": "#faf7f4", "primary": "#2c2420" },
+    "fonts":  { "body": "Jost, sans-serif" }
+  }'::jsonb),
+  ('header', '{
+    "nav_catalogue_label": "Catalogue",
+    "nav_fitting_label":   "My Fitting room",
+    "nav_contact_label":   "Contact"
+  }'::jsonb),
+  ('announcement-bar', '{
+    "enabled": "false", "text": "", "link_url": "", "link_label": "",
+    "bg_color": "#faf7f4", "txt_color": "#2c2420"
+  }'::jsonb),
+  ('catalogue', '{
+    "eyebrow": "JCE Bridal Boutique", "heading": "Gowns & Dresses",
+    "subheading": "Every silhouette. Every occasion. Filter to find the gown made for you.",
+    "filter_heading": "Filters", "empty_state_title": "No gowns match",
+    "empty_state_body": "Try adjusting your filters or clearing the search.",
+    "empty_state_cta": "Clear all filters", "promo_banner": ""
+  }'::jsonb),
+  ('global-seo', '{
+    "site_name": "JCE Bridal Boutique",
+    "meta_desc": "Luxury bridal gowns and dresses in Manila. Book your fitting appointment today.",
+    "og_image":  "/images/og-default.jpg"
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;

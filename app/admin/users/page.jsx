@@ -661,26 +661,33 @@ export default function AdminUsersPage() {
     <>
       <style>{`
         .adm-users-filters{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
-        .adm-role-pill{background:none;border:1px solid var(--color-border-tertiary);border-radius:20px;padding:5px 14px;font-size:12px;cursor:pointer;transition:all .15s;color:var(--color-text-secondary);}
-        .adm-role-pill.active{background:var(--color-text-primary);color:var(--color-background-primary);border-color:var(--color-text-primary);}
+        
+        .adm-role-pill{background:none;border:1px solid var(--adm-border-em);border-radius:20px;padding:5px 14px;font-size:12px;cursor:pointer;transition:all .15s;color:var(--adm-text-2);}
+        .adm-role-pill.active{background:var(--adm-text);color:var(--adm-surface);border-color:var(--adm-text);}
+        
         .adm-status-filters{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
-        .adm-status-pill{background:none;border:1px solid var(--color-border-tertiary);border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;transition:all .15s;color:var(--color-text-secondary);}
-        .adm-status-pill.active{background:var(--color-text-secondary);color:var(--color-background-primary);border-color:var(--color-text-secondary);}
+        .adm-status-pill{background:none;border:1px solid var(--adm-border-em);border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;transition:all .15s;color:var(--adm-text-2);}
+        .adm-status-pill.active{background:var(--adm-text-2);color:var(--adm-surface);border-color:var(--adm-text-2);}
         .adm-status-pill.archived.active{background:#b45309;border-color:#b45309;}
+        
         .adm-user-status{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px;}
         .adm-user-status.active{background:#639922;}
         .adm-user-status.inactive{background:#9ca3af;}
+        
         .adm-user-badge-staff{background:#e2d9f3;color:#4a2c82;}
         .adm-archived-banner{background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;padding:6px 12px;font-size:11px;color:#92400e;margin-bottom:12px;}
-        .adm-my-profile-bar{display:flex;align-items:center;justify-content:space-between;background:var(--color-background-secondary,#f9fafb);border:1px solid var(--color-border-tertiary);border-radius:8px;padding:10px 14px;margin-bottom:18px;gap:12px;flex-wrap:wrap;}
+        
+        .adm-my-profile-bar{display:flex;align-items:center;justify-content:space-between;background:var(--adm-surface-alt);border:1px solid var(--adm-border-em);border-radius:8px;padding:10px 14px;margin-bottom:18px;gap:12px;flex-wrap:wrap;}
         .adm-my-profile-info{display:flex;flex-direction:column;gap:2px;}
-        .adm-my-profile-name{font-size:13px;font-weight:600;color:var(--color-text-primary);}
-        .adm-my-profile-meta{font-size:11px;color:var(--color-text-tertiary);}
-        .adm-user-row{cursor:default;transition:background .12s;}
+        .adm-my-profile-name{font-size:13px;font-weight:600;color:var(--adm-text);}
+        .adm-my-profile-meta{font-size:11px;color:var(--adm-text-3);}
+        
+        .adm-user-row{background:var(--adm-surface);cursor:default;transition:background .12s;}
         .adm-user-row.clickable{cursor:pointer;}
-        .adm-user-row.clickable:hover{background:var(--color-background-secondary,#f9fafb);}
+        .adm-user-row.clickable:hover{background:var(--adm-surface-hover);}
+        
         .adm-user-details{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;}
-        .adm-user-detail-chip{font-size:11px;color:var(--color-text-tertiary);display:flex;align-items:center;gap:4px;}
+        .adm-user-detail-chip{font-size:11px;color:var(--adm-text-3);display:flex;align-items:center;gap:4px;}
       `}</style>
 
       <div className="adm-users-page">

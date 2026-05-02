@@ -232,6 +232,7 @@ function FitMatcherBanner({ user }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+
 function GownsPageContent() {
   const { gowns, loading, error } = useGowns()
   const searchParams = useSearchParams()
@@ -248,6 +249,17 @@ function GownsPageContent() {
   const [sortBy,              setSortBy            ] = useState('relevance')
   const [scores,              setScores            ] = useState({})
   const [dirty,               setDirty             ] = useState(false)
+  const [content, setContent] = useState({
+    eyebrow:           'JCE Bridal Boutique',
+    heading:           'Gowns & Dresses',
+    subheading:        'Every silhouette. Every occasion. Filter to find the gown made for you.',
+    filter_heading:    'Filters',
+    empty_state_title: 'No gowns match',
+    empty_state_body:  'Try adjusting your filters or clearing the search.',
+    empty_state_cta:   'Clear all filters',
+    promo_banner:      '',
+  })
+
 
   useEffect(() => { setUser(getCurrentUser()) }, [])
   useEffect(() => { if (gowns.length) setScores(buildRelevanceScores(gowns)) }, [gowns])
@@ -265,6 +277,12 @@ function GownsPageContent() {
     }
   }, [gowns])
 
+    useEffect(() => {
+    fetch('/api/cms/content?section=catalogue')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
   useEffect(() => {
     if (opts.maxP) setDraftPrice([opts.minP, opts.maxP])
   }, [opts.minP, opts.maxP])
@@ -368,15 +386,15 @@ function GownsPageContent() {
       <div className="gp-spacer" />
       <section className="gp-banner">
         <div className="gp-banner-in">
-          <p className="gp-eye">JCE Bridal Boutique</p>
-          <h1 className="gp-h1">Gowns &amp; <em>Dresses</em></h1>
-          <p className="gp-sub">Every silhouette. Every occasion. Filter to find the gown made for you.</p>
+          <p className="gp-eye">{content.eyebrow}</p>
+          <h1 className="gp-h1">{content.heading}</h1>
+          <p className="gp-sub">{content.subheading}</p>
         </div>
       </section>
       <div className="gp-body">
         <aside className="gp-sidebar">
           <div className="gp-sb-top">
-            <span className="gp-sb-title">Filters</span>
+          <span className="gp-sb-title">{content.filter_heading}</span>
             {draftCount > 0 && <button className="gp-sb-clear" onClick={clearAll} type="button">Clear all</button>}
           </div>
           <div className="gp-fgroups">
@@ -480,9 +498,16 @@ function GownsPageContent() {
           ) : error ? (
             <div className="gp-empty"><p>Could not load collection.</p></div>
           ) : filtered.length === 0 ? (
+      
             <div className="gp-empty">
-              <p className="gp-empty-h">No gowns match{query.trim() ? ` "${query}"` : ' these filters'}.</p>
-              <button className="gp-empty-btn" onClick={() => { clearAll(); router.replace('/gowns') }}>Clear all filters</button>
+              <p className="gp-empty-h">
+                {query.trim()
+                  ? `${content.empty_state_title} "${query}".`
+                  : `${content.empty_state_title} these filters.`}
+              </p>
+              <button className="gp-empty-btn" onClick={() => { clearAll(); router.replace('/gowns') }}>
+                {content.empty_state_cta}
+              </button>
             </div>
           ) : (
             <div className="gp-grid">

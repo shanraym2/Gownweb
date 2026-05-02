@@ -697,6 +697,19 @@ export default function MyOrdersPage() {
   const [tab,        setTab       ] = useState('ongoing')
   const [expandedId, setExpandedId] = useState(null)
 
+  const [content, setContent] = useState({
+    heading:     'My Orders',
+    empty_title: 'No orders yet',
+    empty_body:  'Once you place an order it will appear here.',
+  })
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=my-orders')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     setUser(getCurrentUser())
     setAuthReady(true)
@@ -751,7 +764,7 @@ export default function MyOrdersPage() {
 
       <section className="mo-hero">
         <span className="mo-eyebrow">My Account</span>
-        <h1 className="mo-h1">My Orders</h1>
+        <h1 className="mo-h1">{content.heading}</h1>
         <p className="mo-sub">Track your orders and manage payment proofs.</p>
       </section>
 
@@ -798,11 +811,13 @@ export default function MyOrdersPage() {
               <p style={{ fontSize: 13, color: 'var(--ro)' }}>{error}</p>
             ) : shown.length === 0 ? (
               <div className="mo-empty" style={{ padding: '60px 0' }}>
-                <p className="mo-empty-title">{tab === 'ongoing' ? 'No active orders' : 'No completed orders yet'}</p>
+                <p className="mo-empty-title">
+                  {tab === 'ongoing' ? 'No active orders' : content.empty_title}
+                </p>
                 <p className="mo-empty-sub">
                   {tab === 'ongoing'
                     ? 'Orders you place will appear here while in progress.'
-                    : 'Completed, cancelled, and refunded orders will appear here.'}
+                    : content.empty_body}
                 </p>
                 {tab === 'ongoing' && (
                   <Link href="/gowns" className="mo-btn">Browse collection</Link>

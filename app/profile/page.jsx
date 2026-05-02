@@ -565,6 +565,19 @@ export default function ProfilePage() {
     setTimeout(() => setToast(null), 2800)
   }
 
+  const [content, setContent] = useState({
+    heading:    'My Profile',
+    save_label: 'Save changes',
+    help_text:  'Update your name, email address, or password below.',
+  })
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=profile')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     const existing = getCurrentUser()
     if (!existing) { router.replace('/login'); return }
@@ -672,7 +685,7 @@ export default function ProfilePage() {
         <div className="profile-hero-inner">
           <Avatar name={user.name} />
           <div className="profile-hero-text">
-            <span className="profile-label">YOUR ACCOUNT</span>
+            <span className="profile-label">{content.heading}</span>
             <h1 className="profile-name">{user.name || 'Guest'}</h1>
             <span className="profile-member-since">
               Member since {user.createdAt
@@ -689,7 +702,7 @@ export default function ProfilePage() {
               <div className="profile-edit-controls">
                 <button className="btn btn-outline" onClick={handleCancel} disabled={saving}>Cancel</button>
                 <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                  {saving ? 'Saving…' : 'Save changes'}
+                  {saving ? 'Saving…' : content.save_label}
                 </button>
               </div>
             )}
@@ -715,9 +728,7 @@ export default function ProfilePage() {
               <div className="profile-card-header">
                 <h2 className="profile-card-title">Personal information</h2>
                 <p className="profile-card-sub">
-                  {editing
-                    ? 'Changes here auto-fill your checkout form.'
-                    : 'Pre-fills your checkout. Click "Edit profile" to update.'}
+                  {editing ? content.help_text : 'Pre-fills your checkout. Click "Edit profile" to update.'}
                 </p>
               </div>
 

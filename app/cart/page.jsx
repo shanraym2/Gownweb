@@ -53,6 +53,21 @@ export default function CartPage() {
   const [inventoryMap, setInventoryMap] = useState({})
   const [stockLoading, setStockLoading] = useState(false)
 
+  const [content, setContent] = useState({
+    heading:        'Your Fitting Room',
+    empty_title:    'Your cart is empty',
+    empty_body:     'Browse our catalogue to add gowns to your fitting room.',
+    checkout_label: 'Proceed to Checkout',
+    promo_banner:   '',
+  })
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=cart')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
+  
   useEffect(() => { setMounted(true) }, [])
 
   // ── Fetch live inventory for all items in cart ─────────────────────────────
@@ -203,7 +218,7 @@ export default function CartPage() {
 
       <div className="cart-hero">
         <p className="cart-hero-eyebrow">Your Selection</p>
-        <h1>Shopping Cart</h1>
+        <h1>{content.heading}</h1>
       </div>
 
       <div className="cart-body">
@@ -222,7 +237,8 @@ export default function CartPage() {
               <line x1="3" y1="6" x2="21" y2="6"/>
               <path d="M16 10a4 4 0 01-8 0"/>
             </svg>
-            <p>Your cart is empty.</p>
+            <p>{content.empty_title}</p>
+            <p>{content.empty_body}</p>
             <Link href="/gowns" style={{
               display: 'inline-block', padding: '0.85rem 2.5rem',
               background: '#2c2420', color: '#faf7f4',
@@ -444,7 +460,7 @@ export default function CartPage() {
 
               {canCheckout ? (
                 <Link href={checkoutHref} className="btn-checkout">
-                  Checkout {selectedKeys.size === cartItems.length ? 'All' : `(${selectedKeys.size})`} →
+                  {content.checkout_label} {selectedKeys.size === cartItems.length ? '— All' : `(${selectedKeys.size})`} →
                 </Link>
               ) : selectedItems.length > 0 ? (
                 <>

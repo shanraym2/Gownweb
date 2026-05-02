@@ -4,17 +4,16 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getCurrentUser } from '../utils/authClient'
-import { getAdminSecret } from './layout'
+import { getAdminSecret } from './adminSecret'
 
 const ORDER_STATUSES = ['placed', 'pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled', 'refunded']
 
 export default function AdminDashboardPage() {
   const router = useRouter()
-  const [user,         setUser        ] = useState(null)
-  const [ready,        setReady       ] = useState(false)
-  const [orderStats,   setOrderStats  ] = useState(null)
-  const [gownCount,    setGownCount   ] = useState(null)
-  const [resetConfirm, setResetConfirm] = useState(false)
+  const [user,       setUser      ] = useState(null)
+  const [ready,      setReady     ] = useState(false)
+  const [orderStats, setOrderStats] = useState(null)
+  const [gownCount,  setGownCount ] = useState(null)
 
   // ── Auth guard (runs client-side, avoids hook-in-conditional) ─────────────
   useEffect(() => {
@@ -61,16 +60,6 @@ export default function AdminDashboardPage() {
   if (!ready) return null
 
   const fmtPhp = n => '₱' + Math.round(n).toLocaleString('en-PH')
-
-  const handleResetUsers = () => {
-    if (!resetConfirm) { setResetConfirm(true); return }
-    // Dynamic import keeps resetAllUsers out of the critical path
-    import('../utils/authClient').then(({ resetAllUsers }) => {
-      resetAllUsers()
-      router.push('/')
-      window.location.reload()
-    })
-  }
 
   return (
     <div className="adm-dash-page">
@@ -119,38 +108,18 @@ export default function AdminDashboardPage() {
 
       <div className="adm-nav-cards">
         {[
-          { href: '/admin/gowns',     title: 'Catalogue',           desc: 'Add, edit, or remove listings.'        },
+          { href: '/admin/gowns',     title: 'Catalogue',       desc: 'Add, edit, or remove listings.'        },
           { href: '/admin/orders',    title: 'Orders',          desc: 'View and manage all orders.'           },
           { href: '/admin/dashboard', title: 'Sales dashboard', desc: 'Revenue charts and analytics.'         },
           { href: '/admin/users',     title: 'Users',           desc: 'View registered accounts.'             },
           { href: '/admin/contents',  title: 'Content',         desc: 'Edit homepage slides, copy, and theme.' },
+          { href: '/admin/change-secret', title: 'Change secret', desc: 'Update the admin secret with 2FA verification.' },
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">
             <div className="adm-nav-card-title">{title}</div>
             <div className="adm-nav-card-desc">{desc}</div>
           </Link>
         ))}
-      </div>
-
-      <div className="adm-danger-zone">
-        <p className="adm-danger-eyebrow">Danger zone</p>
-        <div className="adm-danger-row">
-          <div>
-            <div className="adm-danger-row-title">Reset all users</div>
-            <div className="adm-danger-row-desc">Deletes all browser-stored accounts and logs everyone out.</div>
-          </div>
-          <button
-            onClick={handleResetUsers}
-            className={`adm-btn-danger${resetConfirm ? ' armed' : ''}`}
-          >
-            {resetConfirm ? 'Confirm reset' : 'Reset users'}
-          </button>
-        </div>
-        {resetConfirm && (
-          <button onClick={() => setResetConfirm(false)} className="adm-danger-cancel">
-            Cancel
-          </button>
-        )}
       </div>
     </div>
   )

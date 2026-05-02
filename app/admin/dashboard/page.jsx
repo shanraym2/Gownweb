@@ -7,7 +7,7 @@ import {
   CategoryScale, LinearScale, BarElement, ArcElement, Tooltip,
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
-import { getAdminSecret } from '../layout'
+import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip)

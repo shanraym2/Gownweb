@@ -22,6 +22,15 @@ export default function LoginPage() {
   const [pendingUser,    setPendingUser   ] = useState(null)
   const cooldownRef = useRef(null)
 
+  const [content, setContent] = useState({
+    login_heading:    'Welcome back',
+    login_subheading: 'Sign in to your account',
+    register_heading: 'Create an account',
+    tc_label:         'Terms & Conditions',
+    tc_url:           '/terms',
+    promo_text:       '',
+  })
+
   const [errors, setErrors] = useState({
     email: '', password: '', otp: '', general: '',
   })
@@ -46,6 +55,12 @@ export default function LoginPage() {
     redirectByRole(user.role)
   }, [redirectByRole])
 
+  useEffect(() => {
+    fetch('/api/cms/content?section=login')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
   // Countdown timer
   useEffect(() => {
     if (resendCooldown <= 0) return
@@ -243,8 +258,8 @@ export default function LoginPage() {
       <section className="auth-section">
         <div className="container auth-layout">
           <div className="auth-copy">
-            <span className="subtitle">Welcome Back</span>
-            <h1>Log in to your account</h1>
+            <span className="subtitle">{content.login_heading}</span>
+            <h1>{content.login_subheading}</h1>
             <p>Access your saved favorites and make it easier to inquire about your chosen looks.</p>
           </div>
 
@@ -300,7 +315,7 @@ export default function LoginPage() {
                 </button>
 
                 <p className="auth-switch">
-                  New to JCE Bridal? <a href="/signup">Create an account</a>
+                  New to JCE Bridal? <a href="/signup">{content.register_heading}</a>
                 </p>
               </form>
             ) : (

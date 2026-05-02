@@ -298,9 +298,23 @@ export default function GownDetailPage() {
   const [addedToast,   setAddedToast  ] = useState(null)
   const [activeImg,    setActiveImg   ] = useState(0)
 
+  const [content, setContent] = useState({
+    enquiry_prompt:    'Interested in this gown? Book a fitting appointment with us.',
+    add_to_cart_label: 'Add to Fitting Room',
+    sizing_note:       'All gowns are sample sizes. Alterations are available upon request.',
+    share_label:       'Share this look',
+  })
+
   useEffect(() => { setUser(getCurrentUser()) }, [])
 
   const refreshCart = () => setCart(loadCart())
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=product-details')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (id == null) return
@@ -599,7 +613,9 @@ export default function GownDetailPage() {
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/>
                   </svg>
-                  <span>Alteration services available — between sizes? Size up and we'll tailor it to fit you perfectly.</span>
+                  <span>
+                    {content.sizing_note}
+                  </span>
                 </div>
               </>
             ) : (
@@ -658,7 +674,7 @@ export default function GownDetailPage() {
                       <line x1="3" y1="6" x2="21" y2="6"/>
                       <path d="M16 10a4 4 0 01-8 0"/>
                     </svg>
-                    {thisInCart ? 'Add more to cart' : 'Add to cart'}
+                    {thisInCart ? `Add more — ${content.add_to_cart_label}` : content.add_to_cart_label}
                   </button>
 
                   {totalInCart > 0 && (
@@ -684,16 +700,13 @@ export default function GownDetailPage() {
                 )}
 
                 <Link href="/contact" className="dp-btn-inquire">
-                  Inquire About This Piece
+                  {content.enquiry_prompt}
                 </Link>
               </>
             )}
           </div>
 
-          <p className="dp-footnote">
-            This is a ready-to-wear piece. Each dress has limited stock — sizes vary by supplier.
-            Custom orders and alteration services are available upon inquiry.
-          </p>
+          <p className="dp-footnote">{content.sizing_note}</p>
 
         </div>
       </div>

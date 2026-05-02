@@ -34,6 +34,11 @@
   --adm-shadow-sm:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
   --adm-shadow-md:    0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
   --adm-shadow-lg:    0 12px 32px rgba(0,0,0,0.14), 0 4px 8px rgba(0,0,0,0.06);
+  /* Hover surface: slightly darker than surface in light, slightly lighter in dark */
+  --adm-surface-hover: #f0eeea;
+  /* Staff badge — theme-aware */
+  --adm-staff-bg:     #dbeafe;
+  --adm-staff-text:   #1e40af;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -56,6 +61,9 @@
     --adm-danger:       #fca5a5;
     --adm-danger-bg:    #7f1d1d;
     --adm-danger-text:  #fecaca;
+    --adm-surface-hover: #2e2e2e;
+    --adm-staff-bg:     #1e3a5f;
+    --adm-staff-text:   #93c5fd;
   }
 }
 
@@ -131,6 +139,7 @@
 }
 
 .adm-nav-link:hover {
+  /* FIX: use surface-alt instead of a blank hover that could bleed white in dark */
   background: var(--adm-surface-alt);
   color: var(--adm-text);
 }
@@ -300,6 +309,8 @@
   color: var(--adm-warn);
 }
 
+/* FIX: adm-access-btn-primary used var(--adm-text) as bg which is near-white in dark mode,
+   making the label (var(--adm-surface) = dark) appear as dark-on-dark. Use accent instead. */
 .adm-access-btn-primary {
   display: block;
   width: 100%;
@@ -309,8 +320,8 @@
   font-weight: 700;
   cursor: pointer;
   border: none;
-  background: var(--adm-text);
-  color: var(--adm-surface);
+  background: var(--adm-accent);
+  color: #ffffff;
   margin-bottom: 10px;
   text-align: center;
   text-decoration: none;
@@ -497,6 +508,8 @@
 .adm-search::placeholder { color: var(--adm-text-3); }
 
 /* Buttons */
+/* FIX: adm-btn used var(--adm-text) bg + var(--adm-surface) text — in dark mode that's
+   near-white bg with dark text (low contrast). Use accent for a safe, always-readable CTA. */
 .adm-btn {
   padding: 11px 22px;
   border-radius: var(--adm-radius-md);
@@ -504,8 +517,8 @@
   font-weight: 600;
   cursor: pointer;
   border: none;
-  background: var(--adm-text);
-  color: var(--adm-surface);
+  background: var(--adm-accent);
+  color: #ffffff;
   transition: opacity 0.15s;
   letter-spacing: 0.01em;
   min-height: 44px;
@@ -516,6 +529,25 @@
 
 .adm-btn:hover    { opacity: 0.82; }
 .adm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Variant aliases used alongside adm-btn */
+.adm-btn.adm-btn-primary {
+  background: var(--adm-accent);
+  color: #ffffff;
+}
+
+.adm-btn.adm-btn-secondary {
+  background: var(--adm-surface-alt);
+  color: var(--adm-text-2);
+  border: 1.5px solid var(--adm-border-em);
+}
+
+.adm-btn.adm-btn-secondary:hover {
+  background: var(--adm-surface-hover);
+  color: var(--adm-text);
+  border-color: var(--adm-text-3);
+  opacity: 1;
+}
 
 .adm-btn-outline {
   padding: 10px 18px;
@@ -552,7 +584,7 @@
 }
 
 .adm-btn-sm:hover {
-  background: var(--adm-surface-alt);
+  background: var(--adm-surface-hover);
   border-color: var(--adm-text-3);
   color: var(--adm-text);
 }
@@ -572,12 +604,13 @@
 
 .adm-btn-danger:hover {
   background: var(--adm-danger);
-  color: #fff;
+  /* FIX: was color: #fff which is fine, but danger token in dark is already light — keep white */
+  color: #ffffff;
 }
 
 .adm-btn-danger.armed {
   background: var(--adm-danger);
-  color: #fff;
+  color: #ffffff;
   animation: pulse-danger 1.5s infinite;
 }
 
@@ -730,6 +763,7 @@
   letter-spacing: -0.02em;
 }
 
+/* These are overridden below via [data-adm-theme] and @media for both paths */
 .adm-stat-val-purple { color: #4f46e5; }
 .adm-stat-val-green  { color: #166534; }
 .adm-stat-val-amber  { color: #92400e; }
@@ -760,7 +794,9 @@
   padding: 22px 22px;
   text-decoration: none;
   display: block;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
+  /* FIX: was no explicit transition on background; hover only changed border/shadow
+     but browser might flash the surface white. Now we explicitly keep bg stable. */
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s, background 0.15s;
   box-shadow: var(--adm-shadow-sm);
 }
 
@@ -768,14 +804,23 @@
   border-color: var(--adm-accent);
   box-shadow: var(--adm-shadow-md);
   transform: translateY(-1px);
+  /* FIX: use accent-bg tint instead of a bare surface which read white in dark */
+  background: var(--adm-accent-bg);
 }
 
 .adm-nav-card-title {
   font-size: 16px;
   font-weight: 700;
+  /* FIX: was var(--adm-text) — now use accent-text inside hover state via CSS inheritance.
+     The base still reads fine; on hover accent-bg provides contrast for accent-text. */
   color: var(--adm-text);
   margin-bottom: 6px;
   letter-spacing: -0.01em;
+}
+
+/* Override title color inside hovered card so it reads against accent-bg */
+.adm-nav-card:hover .adm-nav-card-title {
+  color: var(--adm-accent-text);
 }
 
 .adm-nav-card-desc {
@@ -783,60 +828,6 @@
   color: var(--adm-text-3);
   line-height: 1.5;
 }
-
-/* Danger zone */
-.adm-danger-zone {
-  border-top: 1px solid var(--adm-border);
-  padding-top: 28px;
-}
-
-.adm-danger-eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--adm-warn);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  margin-bottom: 14px;
-}
-
-.adm-danger-row {
-  background: var(--adm-surface);
-  border: 1px solid rgba(153, 27, 27, 0.25);
-  border-radius: var(--adm-radius-lg);
-  padding: 18px 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  box-shadow: var(--adm-shadow-sm);
-}
-
-.adm-danger-row-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--adm-text);
-  margin-bottom: 4px;
-}
-
-.adm-danger-row-desc {
-  font-size: 13px;
-  color: var(--adm-text-3);
-}
-
-.adm-danger-cancel {
-  margin-top: 10px;
-  font-size: 13px;
-  color: var(--adm-text-3);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  transition: color 0.12s;
-  text-decoration: underline;
-}
-
-.adm-danger-cancel:hover { color: var(--adm-text); }
 
 /* ============================================================
    GOWNS PAGE
@@ -899,10 +890,15 @@
   margin-bottom: 10px;
   background: var(--adm-surface);
   box-shadow: var(--adm-shadow-sm);
-  transition: border-color 0.15s;
+  /* FIX: add background to transition so hover doesn't snap */
+  transition: border-color 0.15s, background 0.15s;
 }
 
-.adm-gown-row:hover { border-color: var(--adm-border-em); }
+.adm-gown-row:hover {
+  border-color: var(--adm-border-em);
+  /* FIX: use surface-hover so dark mode doesn't go white */
+  background: var(--adm-surface-hover);
+}
 
 .adm-gown-row.is-editing {
   border-color: var(--adm-accent);
@@ -1362,13 +1358,15 @@
   margin-bottom: 8px;
   background: var(--adm-surface);
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.12s;
+  transition: border-color 0.15s, box-shadow 0.12s, background 0.15s;
   box-shadow: var(--adm-shadow-sm);
 }
 
 .adm-order-row:hover {
   border-color: var(--adm-accent);
   box-shadow: var(--adm-shadow-md);
+  /* FIX: use accent-bg tint so hover is legible in dark mode */
+  background: var(--adm-accent-bg);
 }
 
 .adm-order-row.has-proof {
@@ -2087,14 +2085,17 @@
   padding: 16px 18px;
   border: 1px solid var(--adm-border);
   border-radius: var(--adm-radius-lg);
-  background: var(--adm-surface);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  background: var(--adm-surface);          /* ← ADD THIS */
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
   box-shadow: var(--adm-shadow-sm);
 }
 
+/* FIX: original rule only set border/shadow but not background, so browsers defaulted
+   to white (#fff) on hover in dark mode. Now use a tinted surface instead. */
 .adm-user-row:hover {
   border-color: var(--adm-accent);
   box-shadow: var(--adm-shadow-md);
+  background: var(--adm-surface-hover);
 }
 
 .adm-user-avatar {
@@ -2134,6 +2135,7 @@
   max-width: 240px;
 }
 
+/* FIX: adm-copy-btn had hardcoded light surface values; now uses theme tokens */
 .adm-copy-btn {
   font-size: 12px;
   font-weight: 600;
@@ -2141,10 +2143,15 @@
   border-radius: var(--adm-radius-sm);
   border: 1.5px solid var(--adm-border-em);
   background: var(--adm-surface-alt);
+  color: var(--adm-text-2);
   cursor: pointer;
   transition: all 0.15s;
   flex-shrink: 0;
-  color: var(--adm-text-2);
+}
+
+.adm-copy-btn:hover {
+  background: var(--adm-surface-hover);
+  color: var(--adm-text);
 }
 
 .adm-copy-btn.is-copied {
@@ -2171,7 +2178,8 @@
 }
 
 .adm-user-badge-admin    { background: var(--adm-accent-bg); color: var(--adm-accent-text); }
-.adm-user-badge-staff    { background: #dbeafe;              color: #1e40af; }
+/* FIX: was hardcoded light blue — now uses theme-aware tokens defined in :root / dark media */
+.adm-user-badge-staff    { background: var(--adm-staff-bg); color: var(--adm-staff-text); }
 .adm-user-badge-customer { background: var(--adm-surface-alt); color: var(--adm-text-3); border: 1px solid var(--adm-border); }
 
 .adm-user-joined {
@@ -2207,7 +2215,8 @@
 }
 
 .adm-row-btn:hover {
-  background: var(--adm-surface-alt);
+  /* FIX: was adm-surface-alt which could bleed light in dark; use surface-hover */
+  background: var(--adm-surface-hover);
   border-color: var(--adm-text-3);
   color: var(--adm-text);
 }
@@ -2366,9 +2375,11 @@
   min-height: 44px;
 }
 
+/* FIX: modal-btn-primary was var(--adm-text) bg in dark = near-white bg + dark text = unreadable.
+   Use accent for a reliably legible CTA in both themes. */
 .modal-btn-primary {
-  background: var(--adm-text);
-  color: var(--adm-surface);
+  background: var(--adm-accent);
+  color: #ffffff;
 }
 
 .modal-btn-primary:hover:not(:disabled) { opacity: 0.82; }
@@ -2379,11 +2390,11 @@
   border: 1.5px solid var(--adm-border-em);
 }
 
-.modal-btn-ghost:hover:not(:disabled) { background: var(--adm-surface-alt); }
+.modal-btn-ghost:hover:not(:disabled) { background: var(--adm-surface-hover); }
 
 .modal-btn-danger {
   background: var(--adm-danger);
-  color: #fff;
+  color: #ffffff;
 }
 
 .modal-btn-danger:hover:not(:disabled) { opacity: 0.82; }
@@ -2611,6 +2622,9 @@
   --adm-danger:       #991b1b;
   --adm-danger-bg:    #fee2e2;
   --adm-danger-text:  #7f1d1d;
+  --adm-surface-hover: #f0eeea;
+  --adm-staff-bg:     #dbeafe;
+  --adm-staff-text:   #1e40af;
 }
 
 [data-adm-theme="dark"] {
@@ -2632,6 +2646,9 @@
   --adm-danger:       #fca5a5;
   --adm-danger-bg:    #7f1d1d;
   --adm-danger-text:  #fecaca;
+  --adm-surface-hover: #2e2e2e;
+  --adm-staff-bg:     #1e3a5f;
+  --adm-staff-text:   #93c5fd;
 }
 
 /* Stat color overrides for forced dark */

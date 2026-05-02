@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../layout'
+import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
 
 /* ─────────────────────────────────────────────
@@ -1250,7 +1250,7 @@ export default function AdminGownsPage() {
         /* ── Page ── */
         .page{padding:28px 32px;max-width:900px;margin:0 auto;}
         .page-topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;}
-        .page-title{font-size:22px;font-weight:700;letter-spacing:-.3px;}
+        .page-title{font-size:22px;font-weight:700;letter-spacing:-.3px;color:var(--c-text);}
         .page-meta{font-size:12px;color:var(--c-muted);}
         .stats-bar{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;}
         .stat-card{flex:1;min-width:100px;padding:12px 16px;border:1px solid var(--c-border);border-radius:var(--radius-lg);background:var(--c-surface);}

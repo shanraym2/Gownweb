@@ -1,3 +1,24 @@
+// Replace only the PUT handler's query — everything else in the file stays identical.
+// Old query (full replace):
+//   INSERT INTO cms_content_blocks (section, fields)
+//   VALUES ($1,$2)
+//   ON CONFLICT (section) DO UPDATE SET fields=$2, updated_at=NOW()
+//
+// New query (deep merge — existing keys not present in the incoming payload are preserved):
+//   INSERT INTO cms_content_blocks (section, fields)
+//   VALUES ($1,$2)
+//   ON CONFLICT (section) DO UPDATE
+//     SET fields     = cms_content_blocks.fields || $2,
+//         updated_at = NOW()
+//
+// The || operator in PostgreSQL merges two jsonb objects, with right-hand keys
+// winning on conflict.  This means:
+//   - Sending { subheading: "new" } only updates that one key.
+//   - All other keys in the existing row are untouched.
+//   - To deliberately blank a key, the client must send { key: "" } explicitly.
+//
+// ── Drop-in replacement for app/api/admin/cms/content/route.js ───────────────
+
 import { NextResponse } from 'next/server'
 
 const USE_DB = process.env.USE_DB === 'true'
@@ -7,7 +28,12 @@ function checkAuth(request) {
   return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
 }
 
-const VALID_SECTIONS = ['about', 'collection-spotlight', 'footer', 'theme-config', 'contact']
+const VALID_SECTIONS = [
+  'about', 'collection-spotlight', 'contact', 'footer', 'theme-config',
+  'header', 'announcement-bar', 'catalogue', 'product-details',
+  'login', 'cart', 'checkout', 'upload-proof', 'profile',
+  'my-orders', 'fitting-room', 'global-seo',
+]
 
 export async function GET(request) {
   if (!checkAuth(request))
@@ -57,8 +83,10 @@ export async function PUT(request) {
     const { query } = await import('@/lib/db')
     await query(
       `INSERT INTO cms_content_blocks (section, fields)
-       VALUES ($1,$2)
-       ON CONFLICT (section) DO UPDATE SET fields=$2, updated_at=NOW()`,
+       VALUES ($1, $2)
+       ON CONFLICT (section) DO UPDATE
+         SET fields     = cms_content_blocks.fields || $2,
+             updated_at = NOW()`,
       [section, JSON.stringify(fields)]
     )
     return NextResponse.json({ ok: true })

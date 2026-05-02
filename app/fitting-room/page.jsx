@@ -63,8 +63,6 @@ function smoothKps(prev, curr, t = 0.35) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BODY SHAPE DETECTION FROM KEYPOINTS
-// Infers a body shape ID from shoulder, waist, and hip proportions.
-// Returns null when data is insufficient or confidence is low.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function detectBodyShapeFromPose(kps, vw) {
@@ -76,17 +74,10 @@ function detectBodyShapeFromPose(kps, vw) {
 
   const shoulderW = dist(ls, rs)
   const hipW      = dist(lh, rh)
-
-  // Approximate waist: midpoint between shoulders and hips
   const sm = mid(ls, rs), hm = mid(lh, rh)
-  const waistY = sm.y + (hm.y - sm.y) * 0.55
-  // Shoulder width is our proxy for waist width when we can't see arms
   const waistProxy = shoulderW * 0.72
-
-  const sToH = shoulderW / hipW       // > 1 = inverted triangle, < 1 = pear
-  const wToH = waistProxy / hipW      // high = apple/rectangle, low = defined waist
-
-  // Height-based size: use fraction of frame
+  const sToH = shoulderW / hipW
+  const wToH = waistProxy / hipW
   const torsoH = hm.y - sm.y
   const frameH = kps[KP.LA]?.score > CONF && kps[KP.RA]?.score > CONF
     ? Math.max(kps[KP.LA].y, kps[KP.RA].y) - sm.y
@@ -95,14 +86,12 @@ function detectBodyShapeFromPose(kps, vw) {
   const likelyPetite   = heightFraction < 0.19
 
   if (likelyPetite) return 'petite'
-
-  if (sToH > 1.18)               return 'invertedTriangle'  // shoulders clearly wider
-  if (sToH < 0.83)               return 'pear'              // hips clearly wider
-  if (wToH > 0.90 && sToH > 0.93) return 'rectangle'        // straight up/down
-  if (wToH < 0.78)               return 'hourglass'         // defined waist
-  if (wToH > 0.88 && sToH < 0.93) return 'apple'            // wider mid
-
-  return null  // not confident enough
+  if (sToH > 1.18)               return 'invertedTriangle'
+  if (sToH < 0.83)               return 'pear'
+  if (wToH > 0.90 && sToH > 0.93) return 'rectangle'
+  if (wToH < 0.78)               return 'hourglass'
+  if (wToH > 0.88 && sToH < 0.93) return 'apple'
+  return null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,7 +356,6 @@ function ProfileSidebar({ user, onSave, saving, saveMsg }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCAN PANEL
-// Detects: measurements · skin tone · undertone · body shape (all from camera)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GUIDANCE_MAP = {
@@ -402,7 +390,6 @@ function ScanPanel() {
   const torsoHRef       = useRef(null)
   const prevKpsRef      = useRef(null)
   const skinDebounceRef = useRef(null)
-  // Accumulate body-shape votes across frames
   const shapeVotesRef   = useRef({})
   const goodFrames      = useRef(0)
 
@@ -414,7 +401,6 @@ function ScanPanel() {
   const [poseIssues,   setPoseIssues  ] = useState([])
   const [poseFound,    setPoseFound   ] = useState(false)
   const [detectedTone, setDetectedTone] = useState(null)
-  // Live detected shape (voted across frames, shown in HUD)
   const [detectedShape,setDetectedShape] = useState(null)
 
   const [adjBust,  setAdjBust ] = useState('')
@@ -457,7 +443,6 @@ function ScanPanel() {
     }
   }, [])
 
-  // Stop camera when tab is hidden (privacy fix)
   useEffect(() => {
     const onVis = () => { if (document.hidden && camState === 'on') stopCamera() }
     document.addEventListener('visibilitychange', onVis)
@@ -501,12 +486,10 @@ function ScanPanel() {
             ctx.fillText(`Bust ~${estBust}cm`,ls.x+4,ls.y-14)
             ctx.fillText(`Hips ~${estHips}cm`,lh.x+4,lh.y+18)
 
-            // ── Body shape voting ──────────────────────────────────────────
             if (conf >= 55) {
               const shape = detectBodyShapeFromPose(kps, vw)
               if (shape) {
                 shapeVotesRef.current[shape] = (shapeVotesRef.current[shape] || 0) + 1
-                // Determine leading vote after ≥10 frames
                 const votes = shapeVotesRef.current
                 const totalVotes = Object.values(votes).reduce((a,b)=>a+b,0)
                 if (totalVotes >= 10) {
@@ -517,12 +500,10 @@ function ScanPanel() {
               }
             }
 
-            // ── Skin tone detection (debounced, coordinates already flipped) ─
             const nose=kps[KP.NOSE]
             if (nose?.score>0.4&&conf>=60) {
               clearTimeout(skinDebounceRef.current)
               skinDebounceRef.current=setTimeout(()=>{
-                // kps are already flipped — sampleFaceRegion reads at nose.x/y directly
                 const profile = detectSkinProfile(ctx, kps, vw, vh, KP)
                 if (profile) setDetectedTone(profile)
               }, 2000)
@@ -626,7 +607,6 @@ function ScanPanel() {
                 {confidence>0&&<span style={{color:confColor,fontWeight:600,fontSize:'12px'}}>{confidence}%</span>}
               </div>
             )}
-            {/* Live detection badges */}
             {camState==='on'&&poseFound&&(
               <div className="fr-cam-badges">
                 {detectedShape&&(
@@ -644,7 +624,6 @@ function ScanPanel() {
             )}
           </div>
 
-          {/* What the camera detects — info strip */}
           <div className="fr-scan-detects">
             <span className="fr-detect-item">📐 Measurements</span>
             <span className="fr-detect-item">👤 Body shape</span>
@@ -852,7 +831,7 @@ function SizePanel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BODY SHAPE PICKER — with illustrated SVG silhouettes
+// BODY SHAPE PICKER
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SHAPE_SVGS = {
@@ -924,7 +903,7 @@ function BodyShapePicker({ selected, onChange }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SKIN TONE PICKER — visual swatches with undertone + description
+// SKIN TONE PICKER
 // ─────────────────────────────────────────────────────────────────────────────
 
 const TONE_DESCRIPTIONS = {
@@ -998,7 +977,6 @@ function StylePanel() {
 
   return (
     <div className="fr-panel-content">
-      {/* Body shape */}
       <div className="fr-style-section">
         <p className="fr-style-section-title">Body shape</p>
         {profile.bodyShape && (
@@ -1009,7 +987,6 @@ function StylePanel() {
         <BodyShapePicker selected={profile.bodyShape} onChange={v=>set('bodyShape',v)}/>
       </div>
 
-      {/* Skin tone */}
       <div className="fr-style-section">
         <p className="fr-style-section-title">Skin tone &amp; undertone</p>
         {(profile.skinTone || profile.undertone) && (
@@ -1025,7 +1002,6 @@ function StylePanel() {
         />
       </div>
 
-      {/* Occasion */}
       <div className="fr-style-section">
         <p className="fr-style-section-title">Occasion</p>
         <div className="fr-occasion-row">
@@ -1039,7 +1015,6 @@ function StylePanel() {
         </div>
       </div>
 
-      {/* Refine */}
       <div className="fr-refine-toggle" onClick={()=>setRefineOpen(v=>!v)} role="button" tabIndex={0}
         onKeyDown={e=>(e.key==='Enter'||e.key===' ')&&setRefineOpen(v=>!v)}>
         <span>⚙️ Refine preferences</span>
@@ -1133,7 +1108,7 @@ function StylePanel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TRY-ON PANEL — uses shared TryOnCamera component
+// TRY-ON PANEL
 // ─────────────────────────────────────────────────────────────────────────────
 
 function TryOnPanel({ initialGownId }) {
@@ -1141,7 +1116,6 @@ function TryOnPanel({ initialGownId }) {
   const [selectedGown, setSelectedGown] = useState(null)
   const [saving,       setSaving      ] = useState(false)
   const [saveMsg,      setSaveMsg     ] = useState('')
-  const [captured,     setCaptured    ] = useState(null)
 
   useEffect(() => {
     if (!gowns.length) return
@@ -1218,7 +1192,7 @@ function SkeletonLoader() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PANEL NAV — redesigned tab bar with emoji icons + active indicator
+// PANEL NAV
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PANELS = [
@@ -1241,6 +1215,23 @@ function FittingRoomInner() {
   const [saving,      setSaving     ] = useState(false)
   const [saveMsg,     setSaveMsg    ] = useState('')
   const user = mounted ? getCurrentUser() : null
+
+  // ── CMS content ─────────────────────────────────────────────────────────────
+  const [cmsContent, setCmsContent] = useState({
+    heading:     'My Fitting Room',
+    subheading:  'Gowns you have saved for your appointment.',
+    empty_title: 'Nothing saved yet',
+    empty_body:  'Browse the catalogue and save gowns you love.',
+    cta_label:   'Browse catalogue',
+  })
+
+  useEffect(() => {
+    fetch('/api/cms/content?section=fitting-room')
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.fields) setCmsContent(prev => ({ ...prev, ...d.fields })) })
+      .catch(() => {})
+  }, [])
+  // ────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     setMounted(true)
@@ -1297,8 +1288,8 @@ function FittingRoomInner() {
       <section className="fr-hero">
         <div className="fr-hero-inner">
           <span className="fr-eyebrow">Fitting Room</span>
-          <h1 className="fr-h1">Your personal <em>fitting room</em></h1>
-          <p className="fr-hero-sub">Scan your measurements, find your size, get style matches, and try on gowns — all in one place.</p>
+          <h1 className="fr-h1">{cmsContent.heading}</h1>
+          <p className="fr-hero-sub">{cmsContent.subheading}</p>
         </div>
       </section>
 
@@ -1306,7 +1297,6 @@ function FittingRoomInner() {
         <ProfileSidebar user={user} onSave={saveProfile} saving={saving} saveMsg={saveMsg}/>
 
         <div className="fr-main">
-          {/* ── Redesigned panel nav ── */}
           <nav className="fr-panel-nav" aria-label="Fitting room sections">
             {PANELS.map((p, i) => {
               const isActive = activePanel === p.id
@@ -1345,22 +1335,15 @@ function FittingRoomInner() {
       <Footer/>
 
       <style suppressHydrationWarning>{`
-        /* ── Page shell ────────────────────────────────────────────────── */
         .fr-page { min-height:100vh; display:flex; flex-direction:column; background:#faf9f7; }
         .fr-spacer { height:72px; }
-
-        /* ── Hero ──────────────────────────────────────────────────────── */
         .fr-hero { background:#2c1a0e; padding:2rem 2.5rem; }
         .fr-hero-inner { max-width:680px; margin:0 auto; }
         .fr-eyebrow { font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:#c9a96e; display:block; margin-bottom:8px; font-weight:500; }
         .fr-h1 { font-size:clamp(1.8rem,3.5vw,2.4rem); font-weight:400; color:#faf9f7; margin:0 0 8px; line-height:1.12; font-family:'Georgia',serif; }
         .fr-h1 em { font-style:italic; color:#c9a96e; }
         .fr-hero-sub { font-size:13px; color:rgba(250,249,247,.55); line-height:1.65; max-width:520px; }
-
-        /* ── Layout ────────────────────────────────────────────────────── */
         .fr-layout { display:grid; grid-template-columns:240px 1fr; gap:0; max-width:1160px; margin:0 auto; width:100%; min-height:calc(100vh - 200px); }
-
-        /* ── Sidebar ───────────────────────────────────────────────────── */
         .fr-sidebar { background:#fff; border-right:1px solid #eee; padding:1.25rem; display:flex; flex-direction:column; gap:0; position:sticky; top:72px; height:calc(100vh - 72px); overflow-y:auto; }
         .fr-sidebar-header { padding-bottom:1rem; border-bottom:1px solid #f0ede8; }
         .fr-sidebar-eyebrow { font-size:10px; letter-spacing:.35em; text-transform:uppercase; color:#c9a96e; display:block; }
@@ -1397,51 +1380,23 @@ function FittingRoomInner() {
         .fr-manual-field input { flex:1; padding:5px 8px; border:1px solid #e0ddd8; border-radius:6px; font-size:12px; background:#fff; min-width:0; }
         .fr-manual-field input:focus { outline:none; border-color:#c9a96e; }
         .fr-manual-unit { color:#bbb; font-size:10px; }
-
-        /* ── Redesigned panel nav ──────────────────────────────────────── */
         .fr-main { display:flex; flex-direction:column; min-height:0; }
-        .fr-panel-nav {
-          display:flex; background:#fff; border-bottom:2px solid #f0ede8;
-          position:sticky; top:72px; z-index:10; overflow-x:auto;
-        }
+        .fr-panel-nav { display:flex; background:#fff; border-bottom:2px solid #f0ede8; position:sticky; top:72px; z-index:10; overflow-x:auto; }
         .fr-panel-nav::-webkit-scrollbar { display:none; }
-        .fr-panel-tab {
-          flex:1; min-width:100px; padding:14px 10px 12px;
-          border:none; background:none; cursor:pointer;
-          display:flex; align-items:center; gap:8px;
-          position:relative; transition:background .15s;
-          border-bottom:3px solid transparent;
-          margin-bottom:-2px;
-        }
+        .fr-panel-tab { flex:1; min-width:100px; padding:14px 10px 12px; border:none; background:none; cursor:pointer; display:flex; align-items:center; gap:8px; position:relative; transition:background .15s; border-bottom:3px solid transparent; margin-bottom:-2px; }
         .fr-panel-tab:hover { background:#faf9f7; }
         .fr-panel-tab.active { background:#fff8ee; border-bottom-color:#c9a96e; }
-        .fr-tab-step {
-          width:20px; height:20px; border-radius:50%; border:1.5px solid #ddd;
-          display:flex; align-items:center; justify-content:center;
-          font-size:10px; color:#aaa; flex-shrink:0; font-weight:600;
-          transition:all .15s;
-        }
-        .fr-panel-tab.active .fr-tab-step {
-          background:#c9a96e; border-color:#c9a96e; color:#fff;
-        }
+        .fr-tab-step { width:20px; height:20px; border-radius:50%; border:1.5px solid #ddd; display:flex; align-items:center; justify-content:center; font-size:10px; color:#aaa; flex-shrink:0; font-weight:600; transition:all .15s; }
+        .fr-panel-tab.active .fr-tab-step { background:#c9a96e; border-color:#c9a96e; color:#fff; }
         .fr-tab-icon { font-size:18px; flex-shrink:0; }
         .fr-tab-text { display:flex; flex-direction:column; align-items:flex-start; min-width:0; }
         .fr-tab-label { font-size:12px; font-weight:600; color:#888; white-space:nowrap; }
         .fr-panel-tab.active .fr-tab-label { color:#1a1108; }
         .fr-tab-sub { font-size:10px; color:#bbb; white-space:nowrap; }
         .fr-panel-tab.active .fr-tab-sub { color:#c9a96e; }
-        .fr-panel-badge {
-          position:absolute; top:8px; right:6px;
-          font-size:9px; background:#c9a96e; color:#fff;
-          padding:1px 5px; border-radius:10px; font-weight:600;
-        }
-        .fr-tab-active-bar {
-          position:absolute; bottom:-2px; left:0; right:0; height:3px;
-          background:#c9a96e; border-radius:2px 2px 0 0;
-        }
+        .fr-panel-badge { position:absolute; top:8px; right:6px; font-size:9px; background:#c9a96e; color:#fff; padding:1px 5px; border-radius:10px; font-weight:600; }
+        .fr-tab-active-bar { position:absolute; bottom:-2px; left:0; right:0; height:3px; background:#c9a96e; border-radius:2px 2px 0 0; }
         .fr-panel-body { flex:1; overflow-y:auto; }
-
-        /* ── Shared panel UI ───────────────────────────────────────────── */
         .fr-panel-content { padding:1.25rem; display:flex; flex-direction:column; gap:1rem; }
         .fr-panel-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4rem 2rem; gap:12px; text-align:center; }
         .fr-empty-icon { font-size:2.5rem; }
@@ -1450,8 +1405,6 @@ function FittingRoomInner() {
         .fr-tab-row { display:flex; border-bottom:1px solid #f0ede8; margin:-1.25rem -1.25rem 1rem; }
         .fr-tab { flex:1; padding:11px; font-size:12px; font-weight:500; border:none; background:none; cursor:pointer; color:#aaa; border-bottom:2px solid transparent; transition:all .15s; }
         .fr-tab.active { color:#1a1108; border-bottom-color:#c9a96e; }
-
-        /* ── Scan panel ────────────────────────────────────────────────── */
         .fr-cam-area { position:relative; background:#111; border-radius:10px; overflow:hidden; aspect-ratio:4/3; max-height:320px; }
         .fr-cam-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
         .fr-cam-hud { position:absolute; bottom:8px; left:8px; right:8px; background:rgba(0,0,0,.65); border-radius:8px; padding:7px 10px; display:flex; align-items:center; gap:7px; }
@@ -1492,8 +1445,6 @@ function FittingRoomInner() {
         .fr-note { font-size:11px; color:#aaa; line-height:1.5; }
         .fr-spin { display:inline-block; width:11px; height:11px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; }
         @keyframes spin { to { transform:rotate(360deg); } }
-
-        /* ── Size panel ────────────────────────────────────────────────── */
         .fr-size-hero { display:flex; justify-content:space-between; align-items:flex-end; padding:1.25rem; background:linear-gradient(135deg,#faf6ee,#fff7f0); border-radius:10px; margin:-1.25rem -1.25rem 0; }
         .fr-size-hero-label { font-size:10px; color:#aaa; text-transform:uppercase; letter-spacing:.15em; margin-bottom:4px; }
         .fr-size-hero-value { font-size:3.5rem; font-weight:300; color:#1a1108; line-height:1; font-family:'Georgia',serif; }
@@ -1521,13 +1472,9 @@ function FittingRoomInner() {
         .fr-chart-row-item { display:grid; grid-template-columns:60px 1fr 1fr 1fr; padding:7px 12px; border-top:1px solid #f5f3ef; color:#666; }
         .fr-chart-row-item--match { background:#fff8ee; color:#7a5a1a; }
         .fr-chart-size-label { font-weight:500; color:#1a1108; }
-
-        /* ── Style panel ───────────────────────────────────────────────── */
         .fr-style-section { }
         .fr-style-section-title { font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:#aaa; margin-bottom:10px; }
         .fr-scan-detected-note { font-size:11px; color:#c9a96e; margin:-4px 0 10px; display:flex; align-items:center; gap:4px; }
-
-        /* Body shape grid */
         .fr-shape-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
         .fr-shape-card { padding:10px 6px 8px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:4px; transition:all .15s; }
         .fr-shape-card:hover { border-color:#c9a96e; background:#faf6ee; }
@@ -1537,8 +1484,6 @@ function FittingRoomInner() {
         .fr-shape-card-label { font-size:11px; font-weight:600; color:#333; text-align:center; }
         .fr-shape-card.sel .fr-shape-card-label { color:#7a5a1a; }
         .fr-shape-card-desc { font-size:9px; color:#aaa; text-align:center; line-height:1.3; }
-
-        /* Skin tone grid */
         .fr-tone-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
         .fr-tone-card { padding:10px 6px 8px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:5px; transition:all .15s; }
         .fr-tone-card:hover { border-color:#c9a96e; }
@@ -1547,8 +1492,6 @@ function FittingRoomInner() {
         .fr-tone-card-label { font-size:11px; font-weight:600; color:#333; }
         .fr-tone-card.sel .fr-tone-card-label { color:#7a5a1a; }
         .fr-tone-card-desc { font-size:9px; color:#aaa; text-align:center; line-height:1.3; }
-
-        /* Undertone cards */
         .fr-undertone-cards { display:flex; gap:8px; }
         .fr-undertone-card { flex:1; padding:10px 12px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; align-items:center; gap:10px; transition:all .15s; }
         .fr-undertone-card:hover { border-color:#c9a96e; }
@@ -1557,7 +1500,6 @@ function FittingRoomInner() {
         .fr-undertone-card-label { font-size:12px; font-weight:600; color:#333; display:block; }
         .fr-undertone-card.sel .fr-undertone-card-label { color:#7a5a1a; }
         .fr-undertone-card-desc { font-size:10px; color:#aaa; display:block; line-height:1.3; }
-
         .fr-occasion-row { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
         .fr-occasion-btn { padding:10px 8px; border:1.5px solid #e0ddd8; border-radius:8px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:4px; font-size:11px; color:#666; transition:all .15s; }
         .fr-occasion-icon { font-size:20px; }
@@ -1606,18 +1548,13 @@ function FittingRoomInner() {
         .fr-gown-btn--ghost:hover { background:#f5f3ef; }
         .fr-gown-btn--primary { background:#1a1108; color:#faf9f7; border:1px solid #1a1108; }
         .fr-gown-btn--primary:hover { background:#3d2c14; }
-
-        /* ── Try-on panel ──────────────────────────────────────────────── */
         .fr-tryon-layout { height:calc(100vh - 152px); min-height:600px; display:flex; flex-direction:column; }
-
-        /* ── Mobile ────────────────────────────────────────────────────── */
         @media (max-width:860px) {
           .fr-layout { grid-template-columns:1fr; }
           .fr-sidebar { position:static; height:auto; flex-direction:row; flex-wrap:wrap; gap:8px; padding:10px 12px; border-right:none; border-bottom:1px solid #eee; overflow:visible; }
           .fr-sidebar-header { width:100%; padding-bottom:8px; border-bottom:none; }
           .fr-sidebar-section { padding:6px 0; border-bottom:none; min-width:130px; flex:1; }
           .fr-sidebar-manual { display:none; }
-          /* Bottom tab bar */
           .fr-panel-nav { position:fixed; bottom:0; left:0; right:0; top:auto; z-index:100; border-top:1px solid #eee; border-bottom:none; box-shadow:0 -2px 12px rgba(0,0,0,.06); }
           .fr-panel-tab { flex-direction:column; gap:2px; padding:8px 4px 6px; align-items:center; }
           .fr-tab-step { display:none; }
