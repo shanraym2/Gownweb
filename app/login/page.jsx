@@ -11,27 +11,40 @@ const RESEND_COOLDOWN = 30
 export default function LoginPage() {
   const router = useRouter()
 
-  const [email,         setEmail        ] = useState('')
-  const [password,      setPassword     ] = useState('')
-  const [otp,           setOtp          ] = useState('')
-  const [step,          setStep         ] = useState(1)   // 1=credentials, 2=otp
-  const [isSubmitting,  setIsSubmitting ] = useState(false)
-  const [devMode,       setDevMode      ] = useState(false)
-  const [showPassword,  setShowPassword ] = useState(false)
-  const [resendCooldown,setResendCooldown] = useState(0)
-  const [pendingUser,   setPendingUser  ] = useState(null)
+  const [email,          setEmail         ] = useState('')
+  const [password,       setPassword      ] = useState('')
+  const [otp,            setOtp           ] = useState('')
+  const [step,           setStep          ] = useState(1)   // 1=credentials, 2=otp
+  const [isSubmitting,   setIsSubmitting  ] = useState(false)
+  const [devMode,        setDevMode       ] = useState(false)
+  const [showPassword,   setShowPassword  ] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const [pendingUser,    setPendingUser   ] = useState(null)
   const cooldownRef = useRef(null)
 
   const [errors, setErrors] = useState({
     email: '', password: '', otp: '', general: '',
   })
 
-  // Redirect if already logged in — send to the right dashboard
+  // ── FIX #4 — redirectByRole as useCallback, declared BEFORE useEffects ──
+  // Previously declared as a plain function below the useEffects.
+  // Hoisting worked but would silently break if converted to an arrow function.
+  // useCallback also satisfies the exhaustive-deps lint rule for useEffect.
+  const redirectByRole = useCallback((role) => {
+    if (role === 'admin') { router.replace('/admin'); return }
+    if (role === 'staff') { router.replace('/staff'); return }
+    router.replace('/')
+  }, [router])
+
+  // ── FIX #10 — lock form with setIsSubmitting while auto-redirect fires ──
+  // Without this, a fast user could submit the form simultaneously with the
+  // redirect, causing a double-fetch race condition.
   useEffect(() => {
     const user = getCurrentUser()
     if (!user) return
+    setIsSubmitting(true)
     redirectByRole(user.role)
-  }, [])
+  }, [redirectByRole])
 
   // Countdown timer
   useEffect(() => {
@@ -45,18 +58,21 @@ export default function LoginPage() {
     return () => clearInterval(cooldownRef.current)
   }, [resendCooldown])
 
-  // ── Role-based redirect helper ───────────────────────────────────────────
-  function redirectByRole(role) {
-    if (role === 'admin')  { router.replace('/admin'); return }
-    if (role === 'staff')  { router.replace('/staff'); return }
-    router.replace('/')
-  }
-
   const clearErrors = () => setErrors({ email: '', password: '', otp: '', general: '' })
 
-  const validateEmail    = v => !v ? 'Please enter your email.'    : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? 'Enter a valid email address.' : ''
-  const validatePassword = v => !v ? 'Please enter your password.' : v.length < 6 ? 'Password must be at least 6 characters.' : ''
-  const validateOtp      = v => !v ? 'Please enter the 6-digit code.' : v.length !== 6 ? 'Code must be exactly 6 digits.' : ''
+  const validateEmail = v =>
+    !v ? 'Please enter your email.'
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? 'Enter a valid email address.' : ''
+
+  // ── FIX #1 — min length 8 to match server-side passwordMeetsRules() ─────
+  // Was 6 — allowed passwords the server would reject, causing confusing UX.
+  const validatePassword = v =>
+    !v ? 'Please enter your password.'
+      : v.length < 8 ? 'Password must be at least 8 characters.' : ''
+
+  const validateOtp = v =>
+    !v ? 'Please enter the 6-digit code.'
+      : v.length !== 6 ? 'Code must be exactly 6 digits.' : ''
 
   // ── Step 1: verify credentials then check device trust ──────────────────
   const handleSendOtp = async e => {
@@ -117,6 +133,13 @@ export default function LoginPage() {
       setDevMode(!!otpData.devMode)
       setResendCooldown(RESEND_COOLDOWN)
       setStep(2)
+
+      // ── FIX #3 — clear plaintext password from state immediately ──────────
+      // The pendingUser pattern already avoids re-sending the password.
+      // Clearing here ensures it does not linger in React state for the full
+      // OTP window (up to 10 minutes).
+      setPassword('')
+
     } catch {
       setErrors(p => ({ ...p, general: 'Something went wrong. Please try again.' }))
     } finally {
@@ -147,26 +170,20 @@ export default function LoginPage() {
         return
       }
 
-      // OTP verified — use the already validated user from step 1 when available.
+      // OTP verified — use the already-validated user from step 1.
       if (pendingUser) {
         finishLogin(pendingUser)
         return
       }
 
-      // Fallback if local state was lost (rare refresh/navigation during OTP step).
-      const loginRes  = await fetch('/api/auth/login', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email: email.trim(), password }),
-      })
-      const loginData = await loginRes.json()
-
-      if (!loginRes.ok || !loginData.ok) {
-        setErrors(p => ({ ...p, general: 'Login failed after verification. Please try again.' }))
-        return
-      }
-
-      finishLogin(loginData.user)
+      // ── FIX #3 (cont.) — remove fallback re-login entirely ───────────────
+      // The old fallback sent password back to the server (empty after FIX #3)
+      // and also broke admin/staff redirect when coming from the reset flow.
+      // If pendingUser is missing (rare page-refresh during OTP step), send
+      // the user back to step 1 to re-authenticate cleanly.
+      setErrors(p => ({ ...p, general: 'Session expired. Please log in again.' }))
+      setStep(1)
+      setOtp('')
     } catch {
       setErrors(p => ({ ...p, general: 'Something went wrong. Please try again.' }))
     } finally {
@@ -175,10 +192,15 @@ export default function LoginPage() {
   }
 
   // ── Shared: save user and redirect by role ───────────────────────────────
+  // ── FIX #2 — store firstName/lastName and guard name fallback ────────────
+  // login/route.js now returns createdAt (SELECT includes created_at).
+  // name is composed defensively in case any route omits it.
   function finishLogin(user) {
     localStorage.setItem('jce_current_user', JSON.stringify({
       id:        user.id,
-      name:      user.name,
+      firstName: user.firstName,
+      lastName:  user.lastName,
+      name:      user.name || `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
       email:     user.email,
       role:      user.role,
       createdAt: user.createdAt,
@@ -189,7 +211,8 @@ export default function LoginPage() {
 
   const handleResendOtp = useCallback(async () => {
     if (resendCooldown > 0 || isSubmitting) return
-    setOtp(''); clearErrors()
+    setOtp('')
+    clearErrors()
     setIsSubmitting(true)
     try {
       const res  = await fetch('/api/auth/send-otp', {
@@ -215,7 +238,7 @@ export default function LoginPage() {
 
   return (
     <main className="auth-page">
-      <Header solid/>
+      <Header solid />
       <section className="login-header-spacer" />
       <section className="auth-section">
         <div className="container auth-layout">
@@ -302,7 +325,10 @@ export default function LoginPage() {
                     onChange={e => {
                       const v = e.target.value.replace(/\D/g, '')
                       setOtp(v)
-                      setErrors(p => ({ ...p, otp: validateOtp(v), general: '' }))
+                      // ── FIX #5 — only validate once 6 digits entered ──────
+                      // Was firing validateOtp on every keystroke, showing
+                      // "Code must be exactly 6 digits" while still typing.
+                      setErrors(p => ({ ...p, otp: v.length === 6 ? validateOtp(v) : '', general: '' }))
                     }}
                     placeholder="000000" className="auth-otp-input"
                   />

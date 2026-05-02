@@ -63,21 +63,7 @@ function EditableField({ label, name, type = 'text', value, editing, onChange, p
   )
 }
 
-// ─── Stat card ───────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, icon }) {
-  return (
-    <div className="profile-stat">
-      <span className="profile-stat-icon" aria-hidden="true">{icon}</span>
-      <span className="profile-stat-value">{value}</span>
-      <span className="profile-stat-label">{label}</span>
-    </div>
-  )
-}
-
 // ─── Measurements Card ────────────────────────────────────────────────────────
-// Shows saved measurements and recommended size, with a quick-edit form.
-// Calls GET/POST /api/measurements and GET /api/size-chart.
 
 function MeasurementsCard({ userId }) {
   const [meas,         setMeas        ] = useState(null)
@@ -87,10 +73,9 @@ function MeasurementsCard({ userId }) {
   const [editing,      setEditing     ] = useState(false)
   const [saving,       setSaving      ] = useState(false)
   const [deleting,     setDeleting    ] = useState(false)
-  const [msg,          setMsg         ] = useState(null)   // { text, type }
+  const [msg,          setMsg         ] = useState(null)
   const [form, setForm] = useState({ bust: '', waist: '', hips: '', height: '', weight: '' })
 
-  // Load saved measurements + size chart in parallel
   useEffect(() => {
     if (!userId) { setLoading(false); return }
     Promise.all([
@@ -114,7 +99,6 @@ function MeasurementsCard({ userId }) {
       .finally(() => setLoading(false))
   }, [userId])
 
-  // Derive recommendation from saved measurements + size chart
   const recommendation = useMemo(() => {
     if (!meas || !sizes.length) return null
     const bust = meas.bust_cm, waist = meas.waist_cm, hips = meas.hips_cm
@@ -150,7 +134,6 @@ function MeasurementsCard({ userId }) {
         weight_kg: form.weight ? Number(form.weight) : null,
         source:    'manual',
       }
-      // Require at least one real measurement
       if (!body.bust_cm && !body.waist_cm && !body.hips_cm) {
         setMsg({ text: 'Enter at least one of bust, waist, or hips.', type: 'error' }); setSaving(false); return
       }
@@ -236,7 +219,7 @@ function MeasurementsCard({ userId }) {
             No measurements saved yet. Use the size recommender to get personalised size suggestions on any gown.
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Link href="/size-recommender" className="btn btn-primary profile-meas-cta-btn">
+            <Link href="/fitting-room" className="btn btn-primary profile-meas-cta-btn">
               Use camera / enter measurements →
             </Link>
             <button className="btn btn-outline" onClick={() => setEditing(true)}>
@@ -249,7 +232,6 @@ function MeasurementsCard({ userId }) {
       {/* ── Has data: display ── */}
       {meas && !editing && (
         <>
-          {/* Measurements grid */}
           <div className="profile-meas-grid">
             {[
               { label: 'Bust',   val: meas.bust_cm,   unit: 'cm' },
@@ -269,7 +251,6 @@ function MeasurementsCard({ userId }) {
             </div>
           </div>
 
-          {/* Recommended size block */}
           {recommendation && (
             <div className="profile-meas-rec">
               <div className="profile-meas-rec-row">
@@ -308,7 +289,7 @@ function MeasurementsCard({ userId }) {
           )}
 
           <div className="profile-meas-footer">
-            <Link href="/size-recommender" className="profile-link-inline">
+            <Link href="/fitting-room" className="profile-link-inline">
               Retake with camera →
             </Link>
             <span className="profile-meas-footer-sep">·</span>
@@ -362,7 +343,7 @@ function MeasurementsCard({ userId }) {
           </div>
           <p className="profile-meas-tip">
             Or use the{' '}
-            <Link href="/size-recommender" className="profile-link-inline">
+            <Link href="/fitting-room" className="profile-link-inline">
               camera-based recommender
             </Link>
             {' '}for automatic measurement estimation.
@@ -398,7 +379,7 @@ function ChangePasswordModal({ email, onClose }) {
       const res  = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, purpose: 'reset-password' }),
+        body: JSON.stringify({ email, purpose: 'password_reset' }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.ok) { setError(data.error || 'Failed to send code.'); return }
@@ -416,7 +397,7 @@ function ChangePasswordModal({ email, onClose }) {
       const res  = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp: otp.trim(), purpose: 'reset-password' }),
+        body: JSON.stringify({ email, otp: otp.trim(), purpose: 'password_reset' }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.ok) { setError(data.error || 'Invalid or expired code.'); return }
@@ -621,13 +602,22 @@ export default function ProfilePage() {
     try {
       updateUser({ name: form.name, email: form.email })
       saveProfileExtra({
-        phone: form.phone, address: form.address,
-        city: form.city, province: form.province, zip: form.zip,
+        phone:    form.phone,
+        address:  form.address,
+        city:     form.city,
+        province: form.province,
+        zip:      form.zip,
       })
       setUser(prev => ({ ...prev, name: form.name, email: form.email }))
       await new Promise(r => setTimeout(r, 500))
       setEditing(false)
       showToast('Profile updated')
+
+      // Re-fetch orders with updated email
+      fetch('/api/my-orders', { headers: { 'X-Customer-Email': form.email } })
+        .then(r => r.json())
+        .then(data => { if (data.ok) setOrders((data.orders || []).slice(0, 3)) })
+        .catch(() => {})
     } finally { setSaving(false) }
   }
 
@@ -713,14 +703,6 @@ export default function ProfilePage() {
         )}
       </section>
 
-      {/* ── Stats ── */}
-      <section className="profile-stats-row">
-        <div className="profile-stats-inner">
-          <StatCard label="Orders"  value={ordersLoading ? '…' : orders.length} icon="🛍" />
-          <StatCard label="Profile" value={`${completionPct}%`}                 icon="◈" />
-        </div>
-      </section>
-
       {/* ── Main ── */}
       <section className="profile-section">
         <div className="profile-grid">
@@ -760,16 +742,6 @@ export default function ProfilePage() {
                 </div>
                 <EditableField label="ZIP / Postal" name="zip" value={form.zip} editing={editing} onChange={handleChange} maxLength={6} />
               </div>
-
-              <div className="profile-completion">
-                <div className="profile-completion-label">
-                  <span>Profile completeness</span>
-                  <span>{completionPct}%</span>
-                </div>
-                <div className="profile-completion-track">
-                  <div className="profile-completion-fill" style={{ width: `${completionPct}%` }} />
-                </div>
-              </div>
             </div>
 
             {/* ── Measurements card ── */}
@@ -780,6 +752,7 @@ export default function ProfilePage() {
           {/* ── Sidebar ── */}
           <div className="profile-sidebar">
 
+            {/* ── Security card with profile completion inline ── */}
             <div className="profile-card profile-card--sm">
               <h2 className="profile-card-title">Security</h2>
               <p className="profile-card-sub" style={{ marginBottom: '1rem' }}>
@@ -788,19 +761,30 @@ export default function ProfilePage() {
               <button className="btn btn-outline profile-security-btn" onClick={() => setShowPwdModal(true)}>
                 Change password
               </button>
+
+              {/* ── Profile completion (compact, relocated here) ── */}
+              <div className="profile-completion profile-completion--compact">
+                <div className="profile-completion-label">
+                  <span>Profile</span>
+                  <span>{completionPct}%</span>
+                </div>
+                <div className="profile-completion-track">
+                  <div className="profile-completion-fill" style={{ width: `${completionPct}%` }} />
+                </div>
+              </div>
             </div>
 
             <div className="profile-card profile-card--sm">
               <h2 className="profile-card-title">Quick links</h2>
               <div className="profile-links">
                 {[
-                  { href: '/my-orders',        label: 'My orders'          },
-                  { href: '/size-recommender',  label: 'Size recommender'   },
-                  { href: '/virtual-try-on',    label: 'Virtual try-on'     },
-                  { href: '/gowns',             label: 'Browse collection'  },
-                  { href: '/cart',              label: 'View cart'          },
+                  { href: '/my-orders',       label: 'My orders'         },
+                  { href: '/fitting-room',     label: 'Size recommender'  },
+                  { href: '/fitting-room',     label: 'Virtual try-on'    },
+                  { href: '/gowns',            label: 'Browse collection' },
+                  { href: '/cart',             label: 'View cart'         },
                 ].map(({ href, label }) => (
-                  <Link key={href} href={href} className="profile-link">
+                  <Link key={label} href={href} className="profile-link">
                     <span>{label}</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="9 18 15 12 9 6"/>
@@ -824,7 +808,7 @@ export default function ProfilePage() {
                   {orders.map((o, i) => (
                     <li key={i} className="profile-order-item">
                       <span className="profile-order-date">
-                        {new Date(o.createdAt).toLocaleDateString('en-PH', {
+                        {new Date(o.placed_at).toLocaleDateString('en-PH', {
                           month: 'short', day: 'numeric', year: 'numeric',
                         })}
                       </span>
@@ -902,6 +886,12 @@ export default function ProfilePage() {
         .profile-meas-input-wrap .profile-field-input { padding-right: 36px; }
         .profile-meas-unit-label { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #aaa; pointer-events: none; }
         .profile-meas-tip { font-size: 11px; color: #aaa; }
+
+        /* ── Profile completion compact (sidebar) ── */
+        .profile-completion--compact { margin-top: 14px; padding-top: 14px; border-top: 0.5px solid #f0f0f0; }
+        .profile-completion--compact .profile-completion-label { display: flex; justify-content: space-between; font-size: 11px; color: #aaa; margin-bottom: 5px; }
+        .profile-completion--compact .profile-completion-track { height: 3px; background: #f0f0f0; border-radius: 2px; overflow: hidden; }
+        .profile-completion--compact .profile-completion-fill { height: 100%; background: #7F77DD; border-radius: 2px; transition: width .4s; }
       `}</style>
     </main>
   )

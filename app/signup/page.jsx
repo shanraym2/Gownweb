@@ -31,8 +31,12 @@ export default function SignupPage() {
     password: '', confirmPassword: '', otp: '', general: '',
   })
 
+  // ── FIX #4 — lock form with setIsSubmitting while redirect fires ──────────
+  // Prevents race condition between auto-redirect and form submission.
   useEffect(() => {
-    if (getCurrentUser()) router.replace('/')
+    if (!getCurrentUser()) return
+    setIsSubmitting(true)
+    router.replace('/')
   }, [router])
 
   useEffect(() => {
@@ -86,29 +90,37 @@ export default function SignupPage() {
   }, [email])
 
   // ── Step 1: validate → check email → send OTP ────────────────────────────
-  const handleSendOtp = async e => {
+  const handleSendOtp = async (e) => {
     e.preventDefault()
-    const firstNameErr       = validateFirstName(firstName)
-    const lastNameErr        = validateLastName(lastName)
-    const emailErr           = validateEmail(email)
-    const passwordErr        = validatePassword(password)
-    const confirmPasswordErr = validateConfirmPassword(confirmPassword)
 
-    if (firstNameErr || lastNameErr || emailErr || passwordErr || confirmPasswordErr) {
+    const firstNameErr = validateFirstName(firstName)
+    const lastNameErr  = validateLastName(lastName)
+    const emailErr     = validateEmail(email)
+    const passwordErr  = validatePassword(password)
+    const confirmErr   = validateConfirmPassword(confirmPassword)
+
+    if (firstNameErr || lastNameErr || emailErr || passwordErr || confirmErr) {
       setErrors(p => ({
         ...p,
-        firstName: firstNameErr, lastName: lastNameErr,
-        email: emailErr, password: passwordErr,
-        confirmPassword: confirmPasswordErr,
+        firstName: firstNameErr,
+        lastName: lastNameErr,
+        email: emailErr,
+        password: passwordErr,
+        confirmPassword: confirmErr,
       }))
       return
     }
 
     setIsSubmitting(true)
+    setErrors(p => ({ ...p, general: '' }))
+
     try {
-      // Check if email already exists in DB
-      const checkRes  = await fetch('/api/auth/check-email?email=' + encodeURIComponent(email.trim()))
+      // 1. check email first
+      const checkRes = await fetch(
+        '/api/auth/check-email?email=' + encodeURIComponent(email.trim())
+      )
       const checkData = await checkRes.json()
+
       if (checkData.taken) {
         setErrors(p => ({
           ...p,
@@ -116,14 +128,19 @@ export default function SignupPage() {
         }))
         return
       }
-    } catch {
-      // If check fails, proceed — register API will catch duplicates anyway
+
+      // 2. send OTP ONLY ONCE
+      const sent = await sendOtp()
+      if (sent) setStep(2)
+
+    } catch (err) {
+      setErrors(p => ({
+        ...p,
+        general: 'Something went wrong. Please try again.',
+      }))
     } finally {
       setIsSubmitting(false)
     }
-
-    const sent = await sendOtp()
-    if (sent) setStep(2)
   }
 
   // ── Step 2: verify OTP → register in DB ──────────────────────────────────
@@ -166,17 +183,33 @@ export default function SignupPage() {
         return
       }
 
-      // 3. Save user to localStorage so getCurrentUser() works
+      // ── FIX #6 — clear plaintext passwords from state after registration ──
+      setPassword('')
+      setConfirmPassword('')
+
+      // ── FIX #1 — use correct localStorage key (was 'jce_user') ───────────
+      // login/page.jsx uses 'jce_current_user' — must match so getCurrentUser()
+      // recognises the session after signup without requiring a separate login.
+      // ── FIX #2 — store firstName/lastName to match login storage shape ────
+      // Components reading user.firstName / user.lastName after signup would
+      // get undefined if only name was stored.
       const user = regData.user
-      localStorage.setItem('jce_user', JSON.stringify({
+      localStorage.setItem('jce_current_user', JSON.stringify({
         id:        user.id,
-        name:      user.name,
+        firstName: user.firstName,
+        lastName:  user.lastName,
+        name:      user.name || `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
         email:     user.email,
         role:      user.role,
         createdAt: user.createdAt || new Date().toISOString(),
       }))
       setCurrentUserRole(user.role)
 
+      // ── FIX #8 — redirect admin/staff to their dashboard after signup ─────
+      // register/route.js assigns role via getRole() — if an admin or staff
+      // email registers they should land on their dashboard, not '/'.
+      if (user.role === 'admin') { router.replace('/admin'); return }
+      if (user.role === 'staff') { router.replace('/staff'); return }
       router.push('/')
     } catch {
       setErrors(p => ({ ...p, general: 'Something went wrong. Please try again.' }))
@@ -187,7 +220,8 @@ export default function SignupPage() {
 
   const handleResendOtp = useCallback(async () => {
     if (resendCooldown > 0 || isSubmitting) return
-    setOtp(''); clearErrors()
+    setOtp('')
+    clearErrors()
     await sendOtp()
   }, [resendCooldown, isSubmitting, sendOtp])
 
@@ -312,7 +346,10 @@ export default function SignupPage() {
                     onChange={e => {
                       const v = e.target.value.replace(/\D/g, '')
                       setOtp(v)
-                      setErrors(p => ({ ...p, otp: validateOtp(v), general: '' }))
+                      // ── FIX #3 — only validate once 6 digits entered ──────
+                      // Was firing on every keystroke showing "Code must be
+                      // exactly 6 digits" while the user was still typing.
+                      setErrors(p => ({ ...p, otp: v.length === 6 ? validateOtp(v) : '', general: '' }))
                     }}
                     placeholder="000000" className="auth-otp-input"
                   />

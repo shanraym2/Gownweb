@@ -23,7 +23,7 @@ const PURPOSE_MAP = {
   login:            'login',
   signup:           'signup',
   auth:             'login',
-  'reset-password': 'password_reset',
+  password_reset: 'password_reset',
 }
 
 export async function POST(request) {
@@ -46,6 +46,17 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'Invalid email format' }, { status: 400 })
     }
 
+    // Add this block before the cooldown check:
+    if (dbPurpose === 'login') {
+      const userExists = await query(
+        'SELECT id FROM users WHERE email = $1',
+        [cleanEmail]
+      )
+      if (userExists.length === 0) {
+        // Return ok:true to avoid confirming whether email is registered
+        return NextResponse.json({ ok: true, devMode: false, message: 'OTP sent if account exists' })
+      }
+    }
     // Cooldown check — look for a recent unexpired OTP for this email+purpose
     const recent = await query(
       `SELECT created_at FROM otp_codes

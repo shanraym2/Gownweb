@@ -2,15 +2,14 @@ import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import crypto from 'crypto'
 
-const MAX_ATTEMPTS = 5
-const TRUST_DAYS   = 7
-const TRUST_MS     = TRUST_DAYS * 24 * 60 * 60 * 1000
+const TRUST_DAYS = 7
+const TRUST_MS   = TRUST_DAYS * 24 * 60 * 60 * 1000
 
 const PURPOSE_MAP = {
-  login:            'login',
-  signup:           'signup',
-  auth:             'login',
-  'reset-password': 'password_reset',
+  login:          'login',
+  signup:         'signup',
+  auth:           'login',
+  password_reset: 'password_reset',
 }
 
 function hashOtp(otp) {
@@ -117,19 +116,40 @@ export async function POST(request) {
       [nextAttempts, record.id]
     )
 
-    // Issue a trust cookie using an opaque (hashed) name — not the raw email
-    const trustToken  = generateTrustToken()
-    const trustExpiry = new Date(Date.now() + TRUST_MS)
-    const cookieName  = trustCookieName(cleanEmail)
-
     const response = NextResponse.json({ ok: true, message: 'OTP verified' })
-    response.cookies.set(cookieName, trustToken, {
-      httpOnly: true,
-      secure:   process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      expires:  trustExpiry,
-      path:     '/',
-    })
+
+    // Only issue a trust cookie for login/signup — NOT for password_reset.
+    // A password_reset OTP only proves the user received the email; the actual
+    // credential change happens in /api/auth/reset-password after this step.
+    if (dbPurpose === 'login') {
+      // Look up the user so we can store the token against their id
+      const userRows = await query(
+        'SELECT id FROM users WHERE email = $1',
+        [cleanEmail]
+      )
+
+      if (userRows.length > 0) {
+        const trustToken  = generateTrustToken()
+        const trustHash   = crypto.createHash('sha256').update(trustToken).digest('hex')
+        const trustExpiry = new Date(Date.now() + TRUST_MS)
+        const cookieName  = trustCookieName(cleanEmail)
+
+        // Persist the hashed token so middleware can validate it later
+        await query(
+          `INSERT INTO device_tokens (user_id, token_hash, expires_at)
+           VALUES ($1, $2, $3)`,
+          [userRows[0].id, trustHash, trustExpiry]
+        )
+
+        response.cookies.set(cookieName, trustToken, {
+          httpOnly: true,
+          secure:   process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          expires:  trustExpiry,
+          path:     '/',
+        })
+      }
+    }
 
     return response
   } catch (err) {

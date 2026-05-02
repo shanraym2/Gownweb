@@ -50,28 +50,35 @@ export function saveCart(items) {
   safeSetItem(key, JSON.stringify(items))
 }
 
-// Each unique (id + size) combination is a separate cart line
+// Each unique (id + size) combination is a separate cart line.
+// maxQty: if provided, caps the total qty in cart to this value (= available stock).
+// Returns { items, capped } — capped=true if qty was limited by stock.
 export function addToCart(gownId, qty = 1, options = {}) {
+  const { size = null, maxQty = null } = options
   const items = loadCart()
-  const size = options.size ?? null
   const existing = items.find(
     (item) => item.id === gownId && (item.size ?? null) === size
   )
+
   if (existing) {
-    existing.qty += qty
+    const proposed = existing.qty + qty
+    existing.qty = maxQty != null ? Math.min(proposed, maxQty) : proposed
   } else {
-    items.push({ id: gownId, qty, size })
+    const capped = maxQty != null ? Math.min(qty, maxQty) : qty
+    items.push({ id: gownId, qty: capped, size })
   }
+
   saveCart(items)
   return items
 }
 
-export function setQuantity(gownId, qty, size = null) {
+export function setQuantity(gownId, qty, size = null, maxQty = null) {
   const items = loadCart()
   const entry = items.find(
     (item) => item.id === gownId && (item.size ?? null) === size
   )
   if (!entry) return items
+
   if (qty < 1) {
     const next = items.filter(
       (item) => !(item.id === gownId && (item.size ?? null) === size)
@@ -79,7 +86,8 @@ export function setQuantity(gownId, qty, size = null) {
     saveCart(next)
     return next
   }
-  entry.qty = qty
+
+  entry.qty = maxQty != null ? Math.min(qty, maxQty) : qty
   saveCart(items)
   return items
 }

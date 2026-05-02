@@ -9,8 +9,12 @@ function normalizeEmail(email) {
 
 export async function PATCH(request) {
   try {
+    // ── Auth ──────────────────────────────────────────────────────────────────
+    // NOTE: x-user-id is the current auth mechanism. A full session/JWT system
+    // should replace this once implemented. The UUID format check rejects
+    // obviously malformed values but is not a substitute for signed auth.
     const userId = request.headers.get('x-user-id')
-    if (!userId) {
+    if (!userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
       return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
     }
 
@@ -76,8 +80,10 @@ export async function PATCH(request) {
     }
 
     // ── Password handling ─────────────────────────────────────────────────────
+    // Cost factor 10: matches all other auth routes; factor 12 risks timeout
+    // on DigitalOcean basic droplets within Next.js's serverless time limit.
     if (password !== undefined && password !== '') {
-      const hash = await bcrypt.hash(String(password), 12)
+      const hash = await bcrypt.hash(String(password), 10)
       setClauses.push(`password_hash = $${paramIndex++}`)
       values.push(hash)
     }

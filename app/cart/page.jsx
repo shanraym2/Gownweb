@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
@@ -18,6 +18,30 @@ function formatPrice(num) {
   return '₱' + Number(num).toLocaleString('en-PH')
 }
 
+// ── Stock status helpers ───────────────────────────────────────────────────────
+
+// Returns { available: number | null } for a specific gown+size from live inventory data.
+// inventoryMap shape: { [gownId]: { [sizeLabel]: { stock_qty, reserved_qty } } }
+function getAvailable(inventoryMap, gownId, size) {
+  const gownInv = inventoryMap?.[String(gownId)]
+  if (!gownInv) return null
+  const sizeKey = size ?? Object.keys(gownInv)[0]
+  const row = gownInv?.[sizeKey]
+  if (!row) return null
+  return Math.max(0, (row.stock_qty ?? 0) - (row.reserved_qty ?? 0))
+}
+
+function StockBadge({ available }) {
+  if (available === null) return null
+  if (available === 0)
+    return <span className="cart-stock-badge cart-stock-badge--out">Out of stock</span>
+  if (available <= 2)
+    return <span className="cart-stock-badge cart-stock-badge--low">Only {available} left</span>
+  if (available <= 5)
+    return <span className="cart-stock-badge cart-stock-badge--low">{available} in stock</span>
+  return null
+}
+
 export default function CartPage() {
   const { gowns } = useGowns()
   const [cartItems,    setCartItems   ] = useState([])
@@ -25,8 +49,44 @@ export default function CartPage() {
   const [note,         setNote        ] = useState('')
   const [mounted,      setMounted     ] = useState(false)
 
+  // Live inventory: { [gownId]: { [sizeLabel]: { stock_qty, reserved_qty } } }
+  const [inventoryMap, setInventoryMap] = useState({})
+  const [stockLoading, setStockLoading] = useState(false)
+
   useEffect(() => { setMounted(true) }, [])
 
+  // ── Fetch live inventory for all items in cart ─────────────────────────────
+  const fetchInventory = useCallback(async (items) => {
+    if (!items.length) return
+    const gownIds = [...new Set(items.map(i => i.id))]
+    setStockLoading(true)
+    try {
+      // Fetch inventory for each gown; /api/gowns returns sizeStock per gown
+      // which already includes stock data. If your API exposes a dedicated
+      // inventory endpoint use that instead.
+      const res = await fetch(`/api/gowns?ids=${gownIds.join(',')}`)
+      if (!res.ok) return
+      const data = await res.json()
+      const map = {}
+      for (const g of (data.gowns ?? [])) {
+        if (!g.sizeStock?.length) continue
+        map[String(g.id)] = {}
+        for (const s of g.sizeStock) {
+          map[String(g.id)][s.size] = {
+            stock_qty:    s.stock    ?? s.stock_qty    ?? 0,
+            reserved_qty: s.reserved ?? s.reserved_qty ?? 0,
+          }
+        }
+      }
+      setInventoryMap(map)
+    } catch {
+      // Non-fatal — UI degrades gracefully without stock data
+    } finally {
+      setStockLoading(false)
+    }
+  }, [])
+
+  // ── Build cart items from localStorage + gown data ─────────────────────────
   useEffect(() => {
     if (!mounted) return
     const raw = loadCart()
@@ -50,7 +110,8 @@ export default function CartPage() {
     }).filter(Boolean)
     setCartItems(withGowns)
     setSelectedKeys(new Set(withGowns.map(i => i.lineKey)))
-  }, [mounted, gowns])
+    fetchInventory(withGowns)
+  }, [mounted, gowns, fetchInventory])
 
   useEffect(() => {
     if (!mounted) return
@@ -64,11 +125,19 @@ export default function CartPage() {
     if (allSelected) {
       setSelectedKeys(new Set())
     } else {
-      setSelectedKeys(new Set(cartItems.map(i => i.lineKey)))
+      // Only select items that are not out of stock
+      const selectable = cartItems
+        .filter(i => {
+          const avail = getAvailable(inventoryMap, i.id, i.size)
+          return avail === null || avail > 0
+        })
+        .map(i => i.lineKey)
+      setSelectedKeys(new Set(selectable))
     }
   }
 
-  const toggleSelect = lineKey => {
+  const toggleSelect = (lineKey, isOutOfStock) => {
+    if (isOutOfStock) return // Cannot select out-of-stock items
     setSelectedKeys(prev => {
       const next = new Set(prev)
       next.has(lineKey) ? next.delete(lineKey) : next.add(lineKey)
@@ -77,12 +146,15 @@ export default function CartPage() {
   }
 
   const handleQtyChange = (id, size, val) => {
+    const available = getAvailable(inventoryMap, id, size)
+    const maxQty = available !== null ? available : undefined
     const q = Math.max(1, parseInt(String(val), 10) || 1)
-    setQuantity(id, q, size)
+    const capped = maxQty !== undefined ? Math.min(q, maxQty) : q
+    setQuantity(id, capped, size, maxQty ?? null)
     setCartItems(prev =>
       prev.map(item =>
         item.id === id && (item.size ?? null) === (size ?? null)
-          ? { ...item, qty: q, subtotal: item.priceNum * q }
+          ? { ...item, qty: capped, subtotal: item.priceNum * capped }
           : item
       )
     )
@@ -99,12 +171,18 @@ export default function CartPage() {
     })
   }
 
-  // ── selectedKeys drives everything ────────────────────────────────────────
+  // ── Derived values ─────────────────────────────────────────────────────────
   const selectedItems = cartItems.filter(i => selectedKeys.has(i.lineKey))
   const subtotal      = selectedItems.reduce((sum, item) => sum + item.subtotal, 0)
   const totalQty      = selectedItems.reduce((s, i) => s + i.qty, 0)
 
-  // Pass only selected item IDs to checkout
+  // Check if any selected item is out of stock
+  const selectedOutOfStock = selectedItems.filter(i => {
+    const avail = getAvailable(inventoryMap, i.id, i.size)
+    return avail !== null && avail === 0
+  })
+  const canCheckout = selectedItems.length > 0 && selectedOutOfStock.length === 0
+
   const checkoutHref = `/checkout?items=${selectedItems.map(i => i.id).join(',')}`
 
   if (!mounted) return (
@@ -132,7 +210,7 @@ export default function CartPage() {
         <nav className="cart-bc">
           <Link href="/">Home</Link>
           <span className="cart-bc-sep">/</span>
-          <Link href="/gowns">Gowns</Link>
+          <Link href="/gowns">Collection</Link>
           <span className="cart-bc-sep">/</span>
           <span>Cart</span>
         </nav>
@@ -150,7 +228,7 @@ export default function CartPage() {
               background: '#2c2420', color: '#faf7f4',
               fontFamily: "'Jost',sans-serif", fontSize: '0.68rem',
               letterSpacing: '0.3em', textTransform: 'uppercase', textDecoration: 'none',
-            }}>Browse Gowns</Link>
+            }}>Browse Catalogue</Link>
           </div>
         ) : (
           <div className="cart-layout">
@@ -174,6 +252,9 @@ export default function CartPage() {
                 <span className="cart-select-count">
                   {selectedKeys.size} of {cartItems.length} selected
                 </span>
+                {stockLoading && (
+                  <span className="cart-stock-refreshing">Checking stock…</span>
+                )}
               </div>
 
               <div className="cart-col-head">
@@ -184,16 +265,30 @@ export default function CartPage() {
 
               <ul className="cart-item-list">
                 {cartItems.map(item => {
-                  const isSelected = selectedKeys.has(item.lineKey)
+                  const isSelected  = selectedKeys.has(item.lineKey)
+                  const available   = getAvailable(inventoryMap, item.id, item.size)
+                  const isOutOfStock = available !== null && available === 0
+                  const isLowStock  = available !== null && available > 0 && available <= 5
+                  // Cap qty if it exceeds available stock (stock may have changed)
+                  const effectiveMax = available !== null ? available : null
+
                   return (
-                    <li key={item.lineKey} className={`cart-row${!isSelected ? ' deselected' : ''}`}>
+                    <li
+                      key={item.lineKey}
+                      className={[
+                        'cart-row',
+                        !isSelected ? 'deselected' : '',
+                        isOutOfStock ? 'cart-row--out-of-stock' : '',
+                      ].filter(Boolean).join(' ')}
+                    >
 
                       <div className="cart-row-check">
-                        <label className="cb-wrap">
+                        <label className={`cb-wrap${isOutOfStock ? ' cb-wrap--disabled' : ''}`}>
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => toggleSelect(item.lineKey)}
+                            disabled={isOutOfStock}
+                            onChange={() => toggleSelect(item.lineKey, isOutOfStock)}
                           />
                           <span className="cb-box">
                             <span className="cb-box-dash" />
@@ -204,36 +299,60 @@ export default function CartPage() {
 
                       <div className="cart-row-img">
                         <img src={item.image} alt={item.alt} />
+                        {isOutOfStock && (
+                          <div className="cart-img-oos-overlay">
+                            <span>Out of<br/>Stock</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="cart-row-info">
                         <p className="cart-row-name">{item.name}</p>
                         {item.size && <p className="cart-row-size">Size: {item.size}</p>}
                         <p className="cart-row-unit">{item.price} per gown</p>
-                        <div className="cart-qty-wrap">
-                          <span className="cart-qty-label-text">Qty</span>
-                          <div className="cart-qty-ctrl">
-                            <button
-                              type="button"
-                              className="cart-qty-btn"
-                              onClick={() => handleQtyChange(item.id, item.size, item.qty - 1)}
-                              aria-label="Decrease"
-                            >−</button>
-                            <input
-                              type="number"
-                              className="cart-qty-num"
-                              min={1}
-                              value={item.qty}
-                              onChange={e => handleQtyChange(item.id, item.size, e.target.value)}
-                            />
-                            <button
-                              type="button"
-                              className="cart-qty-btn"
-                              onClick={() => handleQtyChange(item.id, item.size, item.qty + 1)}
-                              aria-label="Increase"
-                            >+</button>
+
+                        {/* Stock status badge */}
+                        <StockBadge available={available} />
+
+                        {isOutOfStock ? (
+                          <p className="cart-oos-msg">
+                            This item is currently out of stock and cannot be checked out.
+                            Please remove it or wait for restocking.
+                          </p>
+                        ) : (
+                          <div className="cart-qty-wrap">
+                            <span className="cart-qty-label-text">Qty</span>
+                            <div className="cart-qty-ctrl">
+                              <button
+                                type="button"
+                                className="cart-qty-btn"
+                                onClick={() => handleQtyChange(item.id, item.size, item.qty - 1)}
+                                aria-label="Decrease"
+                              >−</button>
+                              <input
+                                type="number"
+                                className="cart-qty-num"
+                                min={1}
+                                max={effectiveMax ?? undefined}
+                                value={item.qty}
+                                onChange={e => handleQtyChange(item.id, item.size, e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="cart-qty-btn"
+                                disabled={effectiveMax !== null && item.qty >= effectiveMax}
+                                onClick={() => handleQtyChange(item.id, item.size, item.qty + 1)}
+                                aria-label="Increase"
+                              >+</button>
+                            </div>
+                            {effectiveMax !== null && item.qty >= effectiveMax && (
+                              <span className="cart-qty-max-note">
+                                Max available: {effectiveMax}
+                              </span>
+                            )}
                           </div>
-                        </div>
+                        )}
+
                         <button
                           type="button"
                           className="cart-remove-btn"
@@ -243,13 +362,36 @@ export default function CartPage() {
 
                       <div className="cart-row-sub">
                         <span className="cart-row-sub-amt">{formatPrice(item.subtotal)}</span>
-                        {!isSelected && <span className="cart-row-sub-note">not included</span>}
+                        {isOutOfStock && (
+                          <span className="cart-row-sub-note cart-row-sub-note--oos">out of stock</span>
+                        )}
+                        {!isOutOfStock && !isSelected && (
+                          <span className="cart-row-sub-note">not included</span>
+                        )}
                       </div>
 
                     </li>
                   )
                 })}
               </ul>
+
+              {/* Out-of-stock global warning */}
+              {selectedOutOfStock.length > 0 && (
+                <div className="cart-oos-banner">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  <span>
+                    {selectedOutOfStock.length === 1
+                      ? `"${selectedOutOfStock[0].name}" is out of stock and has been deselected from checkout.`
+                      : `${selectedOutOfStock.length} items are out of stock and cannot be checked out.`
+                    }{' '}
+                    Please remove out-of-stock items or wait for restocking.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* ── Summary column ── */}
@@ -260,14 +402,21 @@ export default function CartPage() {
                 <p className="cart-summary-empty-note">No items selected</p>
               ) : (
                 <div className="cart-summary-items">
-                  {selectedItems.map(item => (
-                    <div key={item.lineKey} className="cart-summary-item">
-                      <span className="cart-summary-item-name">
-                        {item.name}{item.size ? ` (${item.size})` : ''} × {item.qty}
-                      </span>
-                      <span className="cart-summary-item-price">{formatPrice(item.subtotal)}</span>
-                    </div>
-                  ))}
+                  {selectedItems.map(item => {
+                    const avail = getAvailable(inventoryMap, item.id, item.size)
+                    const oos   = avail !== null && avail === 0
+                    return (
+                      <div key={item.lineKey} className={`cart-summary-item${oos ? ' cart-summary-item--oos' : ''}`}>
+                        <span className="cart-summary-item-name">
+                          {item.name}{item.size ? ` (${item.size})` : ''} × {item.qty}
+                          {oos && <span className="cart-summary-oos-tag"> · Out of stock</span>}
+                        </span>
+                        <span className="cart-summary-item-price">
+                          {oos ? <s>{formatPrice(item.subtotal)}</s> : formatPrice(item.subtotal)}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 
@@ -293,10 +442,19 @@ export default function CartPage() {
                 />
               </div>
 
-              {selectedItems.length > 0 ? (
+              {canCheckout ? (
                 <Link href={checkoutHref} className="btn-checkout">
                   Checkout {selectedKeys.size === cartItems.length ? 'All' : `(${selectedKeys.size})`} →
                 </Link>
+              ) : selectedItems.length > 0 ? (
+                <>
+                  <button disabled className="btn-checkout btn-checkout--blocked">
+                    Cannot checkout — items out of stock
+                  </button>
+                  <p className="cart-checkout-blocked-note">
+                    Remove or deselect out-of-stock items to continue.
+                  </p>
+                </>
               ) : (
                 <button disabled className="btn-checkout">Select items to checkout</button>
               )}
@@ -306,6 +464,115 @@ export default function CartPage() {
           </div>
         )}
       </div>
+
+      <style>{`
+        .cart-stock-badge {
+          display: inline-block;
+          font-size: 10px;
+          letter-spacing: .05em;
+          text-transform: uppercase;
+          padding: 2px 8px;
+          border-radius: 20px;
+          margin-bottom: 6px;
+          font-family: 'Jost', sans-serif;
+        }
+        .cart-stock-badge--low {
+          background: #FEF3C7;
+          color: #92400E;
+          border: 0.5px solid #FCD34D;
+        }
+        .cart-stock-badge--out {
+          background: #FEE2E2;
+          color: #991B1B;
+          border: 0.5px solid #FCA5A5;
+        }
+        .cart-row--out-of-stock {
+          opacity: 0.7;
+        }
+        .cart-img-oos-overlay {
+          position: absolute;
+          inset: 0;
+          background: rgba(0,0,0,0.45);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: inherit;
+        }
+        .cart-img-oos-overlay span {
+          color: #fff;
+          font-size: 11px;
+          text-align: center;
+          text-transform: uppercase;
+          letter-spacing: .1em;
+          font-family: 'Jost', sans-serif;
+          line-height: 1.4;
+        }
+        .cart-row-img { position: relative; }
+        .cart-oos-msg {
+          font-size: 11px;
+          color: #991B1B;
+          background: #FEF2F2;
+          border: 0.5px solid #FCA5A5;
+          border-radius: 6px;
+          padding: 7px 10px;
+          margin: 6px 0;
+          font-family: 'Jost', sans-serif;
+        }
+        .cart-qty-btn:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
+        .cart-qty-max-note {
+          font-size: 10px;
+          color: #92400E;
+          margin-left: 6px;
+          font-family: 'Jost', sans-serif;
+        }
+        .cart-oos-banner {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+          background: #FEF2F2;
+          border: 0.5px solid #FCA5A5;
+          border-radius: 8px;
+          padding: 12px 16px;
+          margin-top: 16px;
+          font-family: 'Jost', sans-serif;
+          font-size: 12px;
+          color: #7F1D1D;
+          line-height: 1.6;
+        }
+        .cart-oos-banner svg { flex-shrink: 0; margin-top: 1px; color: #DC2626; }
+        .cart-row-sub-note--oos {
+          color: #DC2626 !important;
+          font-weight: 500;
+        }
+        .cart-summary-item--oos .cart-summary-item-name { color: #9a8880; }
+        .cart-summary-oos-tag { color: #DC2626; font-size: 10px; }
+        .btn-checkout--blocked {
+          background: #d4cbc7 !important;
+          cursor: not-allowed !important;
+          opacity: 1 !important;
+        }
+        .cart-checkout-blocked-note {
+          font-size: 11px;
+          color: #DC2626;
+          text-align: center;
+          margin-top: 6px;
+          font-family: 'Jost', sans-serif;
+        }
+        .cart-stock-refreshing {
+          font-size: 10px;
+          color: #9a8880;
+          font-family: 'Jost', sans-serif;
+          letter-spacing: .05em;
+          margin-left: auto;
+          animation: pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        .cb-wrap--disabled { opacity: 0.4; cursor: not-allowed; }
+      `}</style>
+
       <Footer />
     </main>
   )

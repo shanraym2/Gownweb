@@ -223,7 +223,7 @@ function FitMatcherBanner({ user }) {
         Log in and use FitMatcher to see your recommended size on every gown.
       </p>
       <div className="gp-sb-fm-btns">
-        <Link href="/size-recommender" className="gp-sb-fm-btn">Try it →</Link>
+        <Link href="/fitting-room" className="gp-sb-fm-btn">Try it →</Link>
         <Link href="/login?redirect=/gowns" className="gp-sb-fm-btn gp-sb-fm-btn--ghost">Log in</Link>
       </div>
     </div>

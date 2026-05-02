@@ -4,6 +4,18 @@ import { isRealName, passwordMeetsRules } from '@/app/utils/authValidation'
 import path from 'path'
 import fs   from 'fs'
 
+// ── Production safety guard ───────────────────────────────────────────────────
+// JSON file mode stores user data (including bcrypt hashes) in a flat file on
+// disk. This is only acceptable for local development. If this guard throws on
+// startup it means USE_DB=true is missing from your DigitalOcean environment
+// variables — add it in App Platform → Settings → Environment Variables.
+if (process.env.NODE_ENV === 'production' && process.env.USE_DB !== 'true') {
+  throw new Error(
+    'FATAL: USE_DB must be "true" in production. ' +
+    'JSON file mode must not be used in a deployed environment.'
+  )
+}
+
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'users.json')
 
@@ -65,10 +77,15 @@ export async function POST(request) {
       )
     }
 
-    const passwordHash = await bcrypt.hash(cleanPass, 12)
+    // Cost factor 10: consistent with all other auth routes in this project.
+    // Factor 12 risks hitting Next.js serverless timeout on basic DigitalOcean
+    // droplets (~1–3s at factor 12 vs ~300ms at factor 10).
+    const passwordHash = await bcrypt.hash(cleanPass, 10)
     const role         = getRole(cleanEmail)
 
-    // ── JSON mode ─────────────────────────────────────────────────────────
+    // ── JSON mode ─────────────────────────────────────────────────────────────
+    // Only reachable locally (USE_DB=false). The production guard at the top of
+    // this file prevents this path from ever running in a deployed environment.
     if (!USE_DB) {
       const users    = loadUsers()
       const existing = users.find(u => String(u.email || '').toLowerCase() === cleanEmail)
@@ -106,10 +123,14 @@ export async function POST(request) {
       })
     }
 
-    // ── DB mode ───────────────────────────────────────────────────────────
+    // ── DB mode ───────────────────────────────────────────────────────────────
     const { query } = await import('@/lib/db')
 
-    const existing = await query('SELECT id FROM users WHERE email = $1', [cleanEmail])
+    const existing = await query(
+      'SELECT id FROM users WHERE email = $1',
+      [cleanEmail]
+    )
+
     if (existing.length > 0) {
       return NextResponse.json(
         { ok: false, error: 'An account with this email already exists.' },
@@ -118,9 +139,21 @@ export async function POST(request) {
     }
 
     const rows = await query(
-      `INSERT INTO users (first_name, last_name, email, password_hash, role)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, first_name, last_name, email, role, created_at`,
+      `INSERT INTO users (
+          first_name,
+          last_name,
+          email,
+          password_hash,
+          role
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING
+          id,
+          first_name,
+          last_name,
+          email,
+          role,
+          created_at`,
       [cleanFirst, cleanLast, cleanEmail, passwordHash, role]
     )
 

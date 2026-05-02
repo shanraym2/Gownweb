@@ -624,3 +624,5 @@ WHERE heading LIKE '%\n%';
 UPDATE public.cms_hero_slides
 SET body = replace(body, 'â€"', '—')
 WHERE body LIKE '%â€"%';
+
+

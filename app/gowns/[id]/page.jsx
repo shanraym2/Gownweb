@@ -21,6 +21,13 @@ function countInCart(cart, id) {
   return cart.filter(i => String(i.id) === String(id)).reduce((s, i) => s + (i.qty || 1), 0)
 }
 
+// How many units of a specific gown+size are already in the cart
+function qtyInCartForSize(cart, id, size) {
+  return cart
+    .filter(i => String(i.id) === String(id) && (i.size ?? null) === (size ?? null))
+    .reduce((s, i) => s + (i.qty || 1), 0)
+}
+
 function scoreGown(g, ref) {
   let s = 0
   if (ref.type       && g.type       === ref.type)       s += 3
@@ -39,8 +46,6 @@ function stockLabel(stock) {
 }
 
 // ─── FitMatcher Badge ─────────────────────────────────────────────────────────
-// Replaces the old static FitMatcher CTA with a live recommendation when
-// the user has saved measurements on file.
 
 function FitMatcherSection({ gown, user }) {
   const supplierId = gown?.supplierId ?? null
@@ -48,7 +53,6 @@ function FitMatcherSection({ gown, user }) {
 
   const { recommendation, loading } = useSizeRecommender({ supplierId, userId })
 
-  // ── No user: show generic CTA ─────────────────────────────────────────────
   if (!userId) {
     return (
       <div className="dp-fm">
@@ -67,7 +71,6 @@ function FitMatcherSection({ gown, user }) {
     )
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="dp-fm dp-fm--loading">
@@ -79,7 +82,6 @@ function FitMatcherSection({ gown, user }) {
     )
   }
 
-  // ── Has recommendation ────────────────────────────────────────────────────
   if (recommendation) {
     const conf    = Math.min(Math.round(100 - recommendation.score * 3), 95)
     const confClr = conf >= 75 ? '#1D9E75' : conf >= 55 ? '#EF9F27' : '#E24B4A'
@@ -101,12 +103,10 @@ function FitMatcherSection({ gown, user }) {
             </div>
           </div>
 
-          {/* Confidence bar */}
           <div className="dp-fm-conf-track">
             <div className="dp-fm-conf-fill" style={{ width: `${conf}%`, background: confClr }}/>
           </div>
 
-          {/* Adjacent sizes */}
           {recommendation.adjacent?.length > 1 && (
             <div className="dp-fm-pills">
               {recommendation.adjacent.map(sz => (
@@ -120,7 +120,6 @@ function FitMatcherSection({ gown, user }) {
             </div>
           )}
 
-          {/* Measurements used */}
           <div className="dp-fm-meas-row">
             {[
               { label: 'Bust',  val: recommendation.measurements?.bust_cm  },
@@ -140,7 +139,7 @@ function FitMatcherSection({ gown, user }) {
           )}
 
           <div className="dp-fm-actions">
-            <Link href={`/size-recommender?gown=${gown.id}`} className="dp-fm-btn dp-fm-btn--ghost">
+            <Link href={`/fitting-room?gown=${gown.id}`} className="dp-fm-btn dp-fm-btn--ghost">
               Update measurements
             </Link>
           </div>
@@ -149,7 +148,6 @@ function FitMatcherSection({ gown, user }) {
     )
   }
 
-  // ── Logged in but no measurements saved yet ───────────────────────────────
   return (
     <div className="dp-fm dp-fm--cta">
       <div className="dp-fm-content">
@@ -159,7 +157,7 @@ function FitMatcherSection({ gown, user }) {
           Use your camera or enter your measurements. We'll tell you exactly which
           size fits this dress — and flag if alterations might be needed.
         </p>
-        <Link href={`/size-recommender?gown=${gown.id}`} className="dp-fm-btn">
+        <Link href={`/fitting-room?gown=${gown.id}`} className="dp-fm-btn">
           Find my size →
         </Link>
       </div>
@@ -321,12 +319,48 @@ export default function GownDetailPage() {
   const thisInCart   = isInCart(cart, id, selectedSize)
   const totalInCart  = countInCart(cart, id)
 
+  // ── Stock computation for selected size ────────────────────────────────────
+  const selectedSizeObj = gown?.sizeStock?.find(s => s.size === selectedSize)
+
+  // Available = stock minus reserved (for accurate cap; fall back to raw stock)
+  const availableForSize = selectedSizeObj
+    ? Math.max(0,
+        (selectedSizeObj.stock    ?? selectedSizeObj.stock_qty    ?? 0) -
+        (selectedSizeObj.reserved ?? selectedSizeObj.reserved_qty ?? 0)
+      )
+    : null
+
+  // Units of this gown+size already sitting in the cart
+  const alreadyInCartForSize = qtyInCartForSize(cart, id, selectedSize)
+
+  // How many more the user can add right now
+  const maxAddable = availableForSize !== null
+    ? Math.max(0, availableForSize - alreadyInCartForSize)
+    : null
+
+  // Whether the + button should be disabled
+  const atStockLimit = maxAddable !== null && qty >= maxAddable
+
+  // ── Add to cart ────────────────────────────────────────────────────────────
   const handleAdd = () => {
     if (!getCurrentUser()) { setShowAuth(true); return }
     if (!selectedSize)     { setSizeErr(true);  return }
-    const sizeObj = gown?.sizeStock?.find(s => s.size === selectedSize)
-    if (sizeObj && sizeObj.stock === 0) { setSizeErr(true); return }
-    addToCart(gown.id, qty, { size: selectedSize })
+
+    if (selectedSizeObj && (selectedSizeObj.stock ?? selectedSizeObj.stock_qty ?? 0) === 0) {
+      setSizeErr(true)
+      return
+    }
+
+    // Block if already at the stock limit
+    if (maxAddable !== null && maxAddable === 0) {
+      setSizeErr(true)
+      return
+    }
+
+    addToCart(gown.id, qty, {
+      size:   selectedSize,
+      maxQty: availableForSize, // cartClient will hard-cap total in-cart qty
+    })
     refreshCart()
     setAddedToast({ name: gown.name, size: selectedSize, qty })
     setQty(1)
@@ -497,9 +531,12 @@ export default function GownDetailPage() {
             {sizeStock.length > 0 ? (
               <>
                 <div className="dp-sizes">
-                  {sizeStock.map(({ size, stock }) => {
-                    const lbl     = stockLabel(stock)
-                    const soldOut = stock === 0
+                  {sizeStock.map(({ size, stock, reserved }) => {
+                    const rawStock = stock ?? 0
+                    const rawReserved = reserved ?? 0
+                    const available = Math.max(0, rawStock - rawReserved)
+                    const lbl     = stockLabel(rawStock)
+                    const soldOut = rawStock === 0
                     const inCart  = isInCart(cart, id, size)
                     return (
                       <button
@@ -547,9 +584,14 @@ export default function GownDetailPage() {
 
                 {sizeErr && (
                   <p className="dp-size-err">
-                    {sizeStock.find(s => s.size === selectedSize)?.stock === 0
-                      ? 'This size is sold out.'
-                      : 'Please select a size to continue.'}
+                    {(() => {
+                      const so = sizeStock.find(s => s.size === selectedSize)
+                      if (so && (so.stock ?? so.stock_qty ?? 0) === 0)
+                        return 'This size is sold out.'
+                      if (selectedSize && maxAddable === 0)
+                        return 'You already have the maximum available stock in your cart for this size.'
+                      return 'Please select a size to continue.'
+                    })()}
                   </p>
                 )}
 
@@ -565,7 +607,7 @@ export default function GownDetailPage() {
             )}
           </div>
 
-          {/* ── FitMatcher (live recommendation or CTA) ── */}
+          {/* ── FitMatcher ── */}
           <div className="dp-section">
             <FitMatcherSection gown={gown} user={user} />
           </div>
@@ -599,7 +641,8 @@ export default function GownDetailPage() {
                     <button
                       type="button"
                       className="dp-qty-btn"
-                      onClick={() => setQty(q => q + 1)}
+                      disabled={atStockLimit}
+                      onClick={() => setQty(q => maxAddable !== null ? Math.min(q + 1, maxAddable) : q + 1)}
                       aria-label="Increase quantity"
                     >+</button>
                   </div>
@@ -629,6 +672,16 @@ export default function GownDetailPage() {
                     </Link>
                   )}
                 </div>
+
+                {/* Stock limit note — shown when a size is selected and limit reached */}
+                {selectedSize && atStockLimit && (
+                  <p className="dp-qty-max-note">
+                    {maxAddable === 0
+                      ? `All available stock is already in your cart for size ${selectedSize}.`
+                      : `Max ${availableForSize} available for size ${selectedSize} — ${alreadyInCartForSize} already in your cart.`
+                    }
+                  </p>
+                )}
 
                 <Link href="/contact" className="dp-btn-inquire">
                   Inquire About This Piece
@@ -661,7 +714,6 @@ export default function GownDetailPage() {
 
       <Footer />
 
-      {/* FitMatcher result styles — scoped inline to avoid global CSS changes */}
       <style>{`
         .dp-fm--result {
           background: linear-gradient(135deg, #f5f0ff 0%, #eef8f3 100%);
@@ -699,6 +751,23 @@ export default function GownDetailPage() {
           font-size: 12px; padding: 7px 14px;
         }
         .dp-fm-btn--ghost:hover { background: rgba(127,119,221,.08); }
+
+        /* ── Stock limit styles ── */
+        .dp-qty-max-note {
+          font-size: 11px;
+          color: #92400E;
+          background: #FEF3C7;
+          border: 0.5px solid #FCD34D;
+          border-radius: 6px;
+          padding: 6px 12px;
+          margin-top: 8px;
+          font-family: 'Jost', sans-serif;
+          line-height: 1.5;
+        }
+        .dp-qty-btn:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
       `}</style>
     </main>
   )

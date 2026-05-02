@@ -14,11 +14,6 @@ function saveJson(orders) {
   fs.writeFileSync(dataFile, JSON.stringify(orders, null, 2))
 }
 
-// ── Order number generator ────────────────────────────────────────────────────
-//
-// DB path: uses order_seq sequence — no race condition.
-// JSON path: falls back to MAX-based approach (acceptable for dev/JSON mode).
-
 async function makeOrderNumberDb(conn) {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const { rows } = await conn.query(`SELECT nextval('order_seq') AS n`)
@@ -35,7 +30,7 @@ function makeOrderNumberJson(existing = []) {
   return prefix + String(next).padStart(4, '0')
 }
 
-// ── GET — fetch orders for a user only; admin must use /api/admin/orders ──────
+// ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const userId = searchParams.get('userId')
@@ -81,6 +76,9 @@ export async function GET(request) {
       deliveryMethod:  r.delivery_method,
       deliveryAddress: r.delivery_address,
       subtotal:        Number(r.subtotal),
+      discountTotal:   Number(r.discount_total),
+      shippingFee:     Number(r.shipping_fee),
+      tax:             Number(r.tax ?? 0),
       total:           Number(r.total),
       notes:           r.notes,
       placedAt:        r.placed_at,
@@ -94,7 +92,7 @@ export async function GET(request) {
   }
 }
 
-// ── POST — create a new order ─────────────────────────────────────────────────
+// ── POST — create order, reduce stock immediately on placement ────────────────
 export async function POST(request) {
   const userId = request.headers.get('x-user-id')
 
@@ -109,7 +107,7 @@ export async function POST(request) {
   const {
     customerEmail, customerName,
     paymentMethod, deliveryMethod, deliveryAddress,
-    items, subtotal, total, notes,
+    items, subtotal, shippingFee, tax, total, notes,
   } = body
 
   if (!customerEmail)  return NextResponse.json({ ok: false, error: 'Email required' },           { status: 400 })
@@ -130,7 +128,7 @@ export async function POST(request) {
   // ── JSON path ─────────────────────────────────────────────────────────────
   if (!USE_DB) {
     const all         = loadJson()
-    const orderNumber = makeOrderNumberJson(all)   // ← JSON-specific generator
+    const orderNumber = makeOrderNumberJson(all)
     const newOrder = {
       id:              Date.now(),
       orderNumber,
@@ -142,10 +140,11 @@ export async function POST(request) {
       paymentStatus:   'unpaid',
       deliveryMethod,
       deliveryAddress: (deliveryAddress || '').trim() || null,
-      subtotal:        Number(subtotal) || 0,
+      subtotal:        Number(subtotal)    || 0,
       discountTotal:   0,
-      shippingFee:     0,
-      total:           Number(total) || 0,
+      shippingFee:     Number(shippingFee) || 0,
+      tax:             Number(tax)         || 0,
+      total:           Number(total)       || 0,
       notes:           (notes || '').trim(),
       placedAt:        new Date().toISOString(),
       items:           items.map((i, idx) => ({
@@ -166,18 +165,11 @@ export async function POST(request) {
   // ── DB path ───────────────────────────────────────────────────────────────
   try {
     const { getClient } = await import('@/lib/db')
-
-    // FIX: conn must be obtained BEFORE makeOrderNumberDb is called,
-    // since makeOrderNumberDb needs the connection to call nextval().
-    // The previous version called makeOrderNumber(conn) before `conn` was
-    // declared, which threw: ReferenceError: Cannot access 'conn' before
-    // initialization.
     const conn = await getClient()
 
     try {
       await conn.query('BEGIN')
 
-      // Generate order number inside the transaction using the DB sequence
       const orderNumber = await makeOrderNumberDb(conn)
 
       const { rows: [order] } = await conn.query(
@@ -185,16 +177,18 @@ export async function POST(request) {
           (order_number, user_id, customer_email, customer_name,
            status, payment_method, payment_status,
            delivery_method, delivery_address,
-           subtotal, discount_total, shipping_fee, total, notes)
-         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,0,$9,$10)
+           subtotal, discount_total, shipping_fee, tax, total, notes)
+         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,$9,$10,$11)
          RETURNING *`,
         [
           orderNumber, userId,
           customerEmail.trim().toLowerCase(), (customerName || '').trim(),
           paymentMethod,
           deliveryMethod, (deliveryAddress || '').trim() || null,
-          Number(subtotal) || 0,
-          Number(total)    || 0,
+          Number(subtotal)    || 0,
+          Number(shippingFee) || 0,
+          Number(tax)         || 0,
+          Number(total)       || 0,
           (notes || '').trim(),
         ]
       )
@@ -214,19 +208,19 @@ export async function POST(request) {
           ]
         )
 
+        // ── INVENTORY: deduct stock_qty directly on order placement ──────────
+        // We reduce actual stock immediately so other customers see accurate
+        // availability. No reservation pattern — stock goes down on order.
         if (item.gownId && item.sizeLabel) {
           const { rowCount } = await conn.query(
             `UPDATE gown_inventory
-             SET reserved_qty = reserved_qty + $1
+             SET stock_qty = stock_qty - $1
              WHERE gown_id    = $2
                AND size_label = $3
-               AND (stock_qty - reserved_qty) >= $1`,
+               AND stock_qty  >= $1`,  
             [qty, item.gownId, item.sizeLabel]
           )
 
-          // rowCount === 0 means insufficient available stock — roll back
-          // and return a clear, customer-facing error instead of silently
-          // placing an order that can't be fulfilled.
           if (rowCount === 0) {
             await conn.query('ROLLBACK')
             return NextResponse.json(
@@ -281,7 +275,6 @@ export async function PATCH(request) {
     return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 })
   }
 
-  // Customers can only mark as 'completed' (confirm receipt)
   if (!isAdmin && status && status !== 'completed') {
     return NextResponse.json({ ok: false, error: 'Unauthorized status change' }, { status: 403 })
   }
@@ -333,6 +326,8 @@ async function sendOrderEmail(order) {
   const itemLines = (order.items || [])
     .map(i => `  • ${i.gownName}${i.sizeLabel ? ` (${i.sizeLabel})` : ''} ×${i.quantity} — ₱${Number(i.unitPrice).toLocaleString('en-PH')}`)
     .join('\n')
+  const tax      = Number(order.tax || 0)
+  const shipping = Number(order.shippingFee || order.shipping_fee || 0)
   await transporter.sendMail({
     from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
     to:      order.customerEmail || order.customer_email,
@@ -347,7 +342,8 @@ Status: Placed — awaiting payment confirmation
 Items:
 ${itemLines}
 
-Total: ₱${Number(order.total).toLocaleString('en-PH')}
+Subtotal:      ₱${Number(order.subtotal).toLocaleString('en-PH')}
+${shipping > 0 ? `Shipping fee:  ₱${shipping.toLocaleString('en-PH')}\n` : ''}${tax > 0 ? `VAT (12%):     ₱${tax.toLocaleString('en-PH')}\n` : ''}Total:         ₱${Number(order.total).toLocaleString('en-PH')}
 
 Payment method: ${order.paymentMethod || order.payment_method}
 ${(order.paymentMethod || order.payment_method) !== 'cash' ? 'Please upload your proof of payment within 24 hours to avoid cancellation.' : ''}
