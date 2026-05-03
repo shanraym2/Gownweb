@@ -279,56 +279,61 @@ function TestimonialRow({ t, onEdit, onDelete, onToggle }) {
   )
 }
 
+
 function ImageUploadField({ value, onChange }) {
-  const [dragging, setDragging] = useState(false)
+  const [dragging,  setDragging ] = useState(false)
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef(null)
-
+ 
   async function handleFile(file) {
     if (!file || !file.type.startsWith('image/')) return
     setUploading(true)
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const res = await fetch('/api/admin/upload', {
-        method: 'POST',
+ 
+      const res  = await fetch('/api/admin/upload-tryon-image', {
+        method:  'POST',
         headers: { 'X-Admin-Secret': getAdminSecret() || '' },
+        // No Content-Type header — browser sets multipart boundary automatically
         body: formData,
       })
       const data = await res.json()
-      if (data.url) onChange(data.url)
-      else throw new Error(data.error || 'Upload failed')
+      if (!data.ok) throw new Error(data.error || 'Upload failed')
+      onChange(data.url)   // route now returns both `url` and `path`
     } catch (e) {
       alert(e.message)
     } finally {
       setUploading(false)
     }
   }
-
+ 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {/* Drop zone */}
       <div
-        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragOver={e  => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={e => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
         onClick={() => inputRef.current?.click()}
         style={{
-          border: `2px dashed ${dragging ? 'var(--adm-accent)' : 'var(--adm-border-em)'}`,
+          border:       `2px dashed ${dragging ? 'var(--adm-accent)' : 'var(--adm-border-em)'}`,
           borderRadius: 'var(--adm-radius-md)',
-          padding: '18px 14px',
-          textAlign: 'center',
-          cursor: 'pointer',
-          background: dragging ? 'var(--adm-accent-bg)' : 'var(--adm-surface-alt)',
-          transition: 'all .15s',
-          fontSize: 13,
-          color: 'var(--adm-text-3)',
+          padding:      '18px 14px',
+          textAlign:    'center',
+          cursor:       'pointer',
+          background:   dragging ? 'var(--adm-accent-bg)' : 'var(--adm-surface-alt)',
+          transition:   'all .15s',
+          fontSize:     13,
+          color:        'var(--adm-text-3)',
         }}
       >
         {uploading
           ? '⏳ Uploading…'
-          : <>📁 <strong>Choose file</strong> or drag &amp; drop an image</>}
+          : <><strong>Choose file</strong> or drag &amp; drop an image</>
+        }
       </div>
+ 
       <input
         ref={inputRef}
         type="file"
@@ -336,7 +341,7 @@ function ImageUploadField({ value, onChange }) {
         style={{ display: 'none' }}
         onChange={e => handleFile(e.target.files[0])}
       />
-
+ 
       {/* Manual URL fallback */}
       <input
         type="text"
@@ -345,12 +350,19 @@ function ImageUploadField({ value, onChange }) {
         value={value}
         onChange={e => onChange(e.target.value)}
       />
-
+ 
       {/* Preview */}
       {value && (
-        <div style={{ borderRadius: 8, overflow: 'hidden', height: 100, background: 'var(--adm-surface-alt)', border: '1px solid var(--adm-border)' }}>
-          <img src={value} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
-            onError={e => { e.target.style.opacity = '0.15' }} />
+        <div style={{
+          borderRadius: 8, overflow: 'hidden', height: 100,
+          background: 'var(--adm-surface-alt)',
+          border: '1px solid var(--adm-border)',
+        }}>
+          <img
+            src={value} alt=""
+            style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }}
+            onError={e => { e.target.style.opacity = '0.15' }}
+          />
         </div>
       )}
     </div>
@@ -369,32 +381,54 @@ function SlideModal({ slide, onSave, onClose, saving }) {
     sort_order: slide?.sort_order ?? 0,
     is_active:  slide?.is_active  ?? true,
   })
-
+ 
   useEffect(() => {
     const fn = e => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
   }, [onClose])
-
+ 
   return (
     <div className="adm-confirm-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="adm-confirm-box" style={{ maxWidth: 560 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <p className="adm-confirm-title" style={{ margin: 0 }}>{isNew ? 'Add hero slide' : 'Edit hero slide'}</p>
+      <div style={{
+        background:    'var(--adm-surface)',
+        border:        '1px solid var(--adm-border-em)',
+        borderRadius:  'var(--adm-radius-lg)',
+        width:         '100%',
+        maxWidth:      560,
+        maxHeight:     '90vh',
+        display:       'flex',
+        flexDirection: 'column',
+        boxShadow:     'var(--adm-shadow-lg)',
+        overflow:      'hidden',
+      }}>
+        {/* Header */}
+        <div style={{
+          display:        'flex',
+          justifyContent: 'space-between',
+          alignItems:     'center',
+          padding:        '18px 22px 14px',
+          borderBottom:   '1px solid var(--adm-border)',
+          flexShrink:     0,
+        }}>
+          <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--adm-text)' }}>
+            {isNew ? 'Add hero slide' : 'Edit hero slide'}
+          </p>
           <button className="adm-modal-close" onClick={onClose}>✕</button>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
+ 
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="adm-form-row">
             <label className="adm-label">Image</label>
             <ImageUploadField value={form.image_url} onChange={v => setForm(p => ({ ...p, image_url: v }))} />
           </div>
-
+ 
           {[
-            { key: 'subtitle',   label: 'Subtitle',                          type: 'text',     placeholder: 'DESIGNER COLLECTION' },
-            { key: 'heading',    label: 'Heading (use \\n for line break)',   type: 'text',     placeholder: 'Your New\nDream Look.' },
-            { key: 'body',       label: 'Body text',                         type: 'textarea', placeholder: 'Description…' },
-            { key: 'sort_order', label: 'Sort order',                        type: 'number',   placeholder: '0' },
+            { key: 'subtitle',   label: 'Subtitle',                        type: 'text',     placeholder: 'DESIGNER COLLECTION' },
+            { key: 'heading',    label: 'Heading (use \\n for line break)', type: 'text',     placeholder: 'Your New\nDream Look.' },
+            { key: 'body',       label: 'Body text',                       type: 'textarea', placeholder: 'Description…' },
+            { key: 'sort_order', label: 'Sort order',                      type: 'number',   placeholder: '0' },
           ].map(f => (
             <div key={f.key} className="adm-form-row">
               <label className="adm-label">{f.label}</label>
@@ -402,28 +436,38 @@ function SlideModal({ slide, onSave, onClose, saving }) {
                 ? <textarea rows={3} className="adm-input" placeholder={f.placeholder} value={form[f.key]}
                     onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
                 : <input type={f.type} className="adm-input" placeholder={f.placeholder}
-                    value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} />
+                    value={form[f.key]}
+                    onChange={e => setForm(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} />
               }
             </div>
           ))}
-
+ 
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: 'var(--adm-text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
             Visible to visitors
           </label>
-
         </div>
-        <div className="adm-confirm-actions" style={{ marginTop: 22 }}>
+ 
+        {/* Sticky footer — always visible */}
+        <div style={{
+          display:        'flex',
+          gap:            10,
+          justifyContent: 'flex-end',
+          padding:        '14px 22px',
+          borderTop:      '1px solid var(--adm-border)',
+          background:     'var(--adm-surface-alt)',
+          flexShrink:     0,
+        }}>
           <button className="adm-btn-outline" onClick={onClose}>Cancel</button>
           <button className="adm-btn" disabled={saving} onClick={() => onSave(form)}>
             {saving ? 'Saving…' : isNew ? 'Add slide' : 'Save changes'}
           </button>
         </div>
       </div>
-    </div>  
+    </div>
   )
 }
-
+ 
 function TestimonialModal({ item, onSave, onClose, saving }) {
   const isNew = !item?.id
   const [form, setForm] = useState({
@@ -433,47 +477,82 @@ function TestimonialModal({ item, onSave, onClose, saving }) {
     sort_order:  item?.sort_order  ?? 0,
     is_active:   item?.is_active   ?? true,
   })
-
+ 
   useEffect(() => {
     const fn = e => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
   }, [onClose])
-
+ 
   return (
     <div className="adm-confirm-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="adm-confirm-box" style={{ maxWidth: 520 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <p className="adm-confirm-title" style={{ margin: 0 }}>{isNew ? 'Add testimonial' : 'Edit testimonial'}</p>
+      <div style={{
+        background:    'var(--adm-surface)',
+        border:        '1px solid var(--adm-border-em)',
+        borderRadius:  'var(--adm-radius-lg)',
+        width:         '100%',
+        maxWidth:      520,
+        maxHeight:     '90vh',
+        display:       'flex',
+        flexDirection: 'column',
+        boxShadow:     'var(--adm-shadow-lg)',
+        overflow:      'hidden',
+      }}>
+        {/* Header */}
+        <div style={{
+          display:        'flex',
+          justifyContent: 'space-between',
+          alignItems:     'center',
+          padding:        '18px 22px 14px',
+          borderBottom:   '1px solid var(--adm-border)',
+          flexShrink:     0,
+        }}>
+          <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--adm-text)' }}>
+            {isNew ? 'Add testimonial' : 'Edit testimonial'}
+          </p>
           <button className="adm-modal-close" onClick={onClose}>✕</button>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-         <div className="adm-form-row">
-          <label className="adm-label">Photo</label>
-          <ImageUploadField value={form.image_url} onChange={v => setForm(p => ({ ...p, image_url: v }))} />
-        </div>
-        {[
-          { key: 'quote_text',  label: 'Quote',       type: 'textarea', placeholder: 'Customer quote…' },
-          { key: 'author_name', label: 'Author name', type: 'text',     placeholder: 'Karina Ayacocho' },
-          { key: 'sort_order',  label: 'Sort order',  type: 'number',   placeholder: '0' },
-        ].map(f => (
-          <div key={f.key} className="adm-form-row">
-            <label className="adm-label">{f.label}</label>
-            {f.type === 'textarea'
-              ? <textarea rows={3} className="adm-input" placeholder={f.placeholder} value={form[f.key]}
-                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
-              : <input type={f.type} className="adm-input" placeholder={f.placeholder}
-                  value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} />
-            }
+ 
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="adm-form-row">
+            <label className="adm-label">Photo</label>
+            <ImageUploadField value={form.image_url} onChange={v => setForm(p => ({ ...p, image_url: v }))} />
           </div>
-        ))}
-       
+ 
+          {[
+            { key: 'quote_text',  label: 'Quote',       type: 'textarea', placeholder: 'Customer quote…' },
+            { key: 'author_name', label: 'Author name', type: 'text',     placeholder: 'Karina Ayacocho' },
+            { key: 'sort_order',  label: 'Sort order',  type: 'number',   placeholder: '0' },
+          ].map(f => (
+            <div key={f.key} className="adm-form-row">
+              <label className="adm-label">{f.label}</label>
+              {f.type === 'textarea'
+                ? <textarea rows={3} className="adm-input" placeholder={f.placeholder} value={form[f.key]}
+                    onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
+                : <input type={f.type} className="adm-input" placeholder={f.placeholder}
+                    value={form[f.key]}
+                    onChange={e => setForm(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} />
+              }
+            </div>
+          ))}
+ 
           <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: 'var(--adm-text-2)', cursor: 'pointer' }}>
             <input type="checkbox" checked={form.is_active} onChange={e => setForm(p => ({ ...p, is_active: e.target.checked }))} />
             Visible to visitors
           </label>
         </div>
-        <div className="adm-confirm-actions" style={{ marginTop: 22 }}>
+ 
+        {/* Sticky footer — always visible */}
+        <div style={{
+          display:        'flex',
+          gap:            10,
+          justifyContent: 'flex-end',
+          padding:        '14px 22px',
+          borderTop:      '1px solid var(--adm-border)',
+          background:     'var(--adm-surface-alt)',
+          flexShrink:     0,
+        }}>
           <button className="adm-btn-outline" onClick={onClose}>Cancel</button>
           <button className="adm-btn" disabled={saving} onClick={() => onSave(form)}>
             {saving ? 'Saving…' : isNew ? 'Add testimonial' : 'Save changes'}
