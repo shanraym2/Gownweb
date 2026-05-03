@@ -5,24 +5,31 @@ import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 
 const OBSERVER_OPTIONS = { threshold: 0.15 }
 
+const FALLBACK = {
+  quote_text:  'I have always had difficulties with buying clothes for every-day wear. Therefore, together with Linda, we decided to create our own brand.',
+  author_name: 'Karina Ayacocho',
+  image_url:   '/images/image2.png',
+}
+
 export default function Testimonial() {
   const { ref: textRef,  isVisible: textVisible  } = useIntersectionObserver(OBSERVER_OPTIONS)
   const { ref: imageRef, isVisible: imageVisible } = useIntersectionObserver(OBSERVER_OPTIONS)
 
-  const [testimonial, setTestimonial] = useState({
-    quote_text:  'I have always had difficulties with buying clothes for every-day wear. Therefore, together with Linda, we decided to create our own brand.',
-    author_name: 'Karina Ayacocho',
-    image_url:   '/images/image2.png',
-  })
+  const [testimonial, setTestimonial] = useState(FALLBACK)
 
   useEffect(() => {
     fetch('/api/cms/testimonials')
       .then(r => r.json())
       .then(d => {
-        const active = (d.testimonials || []).filter(t => t.is_active)
-        if (active.length) setTestimonial(active[0])
+        // The public API already filters WHERE is_active = TRUE in SQL,
+        // so we don't need to filter again here — that was causing the bug
+        // where is_active wasn't selected and everything was filtered out.
+        const list = d.testimonials || []
+        if (list.length > 0) setTestimonial(list[0])
       })
-      .catch(() => {})
+      .catch(() => {
+        // Network error — silently keep the fallback
+      })
   }, [])
 
   return (

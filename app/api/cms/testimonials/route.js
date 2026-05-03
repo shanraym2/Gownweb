@@ -12,9 +12,13 @@ export async function GET() {
 
   try {
     const { query } = await import('@/lib/db')
+    // FIX: include is_active in SELECT so the client-side .filter(t => t.is_active)
+    // receives the field and doesn't silently filter everything out as undefined/falsy.
     const testimonials = await query(
-      `SELECT id, quote_text, author_name, image_url, sort_order
-      FROM cms_testimonials WHERE is_active = TRUE ORDER BY sort_order ASC`
+      `SELECT id, quote_text, author_name, image_url, sort_order, is_active
+       FROM cms_testimonials
+       WHERE is_active = TRUE
+       ORDER BY sort_order ASC`
     )
     return NextResponse.json({ ok: true, testimonials })
   } catch (err) {
