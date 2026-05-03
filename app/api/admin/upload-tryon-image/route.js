@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
 
+// FIX: raise Next.js body size limit beyond the default 4MB.
+// Large phone photos (iPhone, Android) are typically 3–8MB.
+// App Router uses this export (Pages Router used config.api.bodyParser).
+export const maxDuration = 60  // seconds — prevents timeout on slow connections
+
 function checkAuth(request) {
   const secret = request.headers.get('x-admin-secret') || ''
   return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET

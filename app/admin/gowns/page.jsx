@@ -127,30 +127,50 @@ function SizePicker({ inventory, onAdd, error, onClearErr }) {
    Image uploader
 ───────────────────────────────────────────── */
 function ImageUploader({ label, hint, value, onChange, onError, error, badge }) {
-  const inputRef   = useRef(null)
-  const [dragging, setDragging] = useState(false)
-  const [uploading,setUploading]= useState(false)
-  const [uploadErr,setUploadErr]= useState('')
-
+  const inputRef    = useRef(null)
+  const [dragging,  setDragging ] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadErr, setUploadErr] = useState('')
+ 
   const upload = useCallback(async (file) => {
-    if (!file || !file.type.startsWith('image/')) { setUploadErr('Please select an image file.'); return }
-    setUploading(true); setUploadErr('')
+    if (!file || !file.type.startsWith('image/')) {
+      setUploadErr('Please select an image file.')
+      return
+    }
+    setUploading(true)
+    setUploadErr('')
     try {
-      const reader = new FileReader()
-      const dataUrl = await new Promise((res,rej) => { reader.onload=e=>res(e.target.result); reader.onerror=rej; reader.readAsDataURL(file) })
-      const res  = await fetch('/api/admin/upload-tryon-image', { method:'POST', headers:headers(), body:JSON.stringify({image:dataUrl}) })
+      const formData = new FormData()
+      formData.append('file', file)
+ 
+      const res  = await fetch('/api/admin/upload-tryon-image', {
+        method:  'POST',
+        // No Content-Type header — browser sets multipart boundary automatically
+        headers: { 'X-Admin-Secret': getAdminSecret() || '' },
+        body:    formData,
+      })
       const data = await res.json()
-      if (!data.ok) throw new Error(data.error||'Upload failed')
+      if (!data.ok) throw new Error(data.error || 'Upload failed')
       onChange(data.path)
-    } catch(e) { setUploadErr(e.message) }
-    finally    { setUploading(false) }
+    } catch (e) {
+      setUploadErr(e.message)
+    } finally {
+      setUploading(false)
+    }
   }, [onChange])
-
-  const onDrop = useCallback(e => { e.preventDefault(); setDragging(false); const f=e.dataTransfer.files?.[0]; if(f)upload(f) }, [upload])
-  const onPick = useCallback(e => { const f=e.target.files?.[0]; if(f)upload(f) }, [upload])
+ 
+  const onDrop = useCallback(e => {
+    e.preventDefault(); setDragging(false)
+    const f = e.dataTransfer.files?.[0]; if (f) upload(f)
+  }, [upload])
+ 
+  const onPick = useCallback(e => {
+    const f = e.target.files?.[0]; if (f) upload(f)
+  }, [upload])
+ 
   const hasImage = value && value !== '/images/'
   const err = uploadErr || (error ? 'Image failed to load' : '')
-
+ 
   return (
     <div className="iup-slot">
       <div className="iup-label-row">
@@ -158,35 +178,51 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
         {badge}
       </div>
       <div
-        className={`iup-dropzone${dragging?' dragging':''}${hasImage?' has-image':''}`}
-        onDragEnter={e=>{e.preventDefault();setDragging(true)}} onDragLeave={()=>setDragging(false)}
-        onDragOver={e=>e.preventDefault()} onDrop={onDrop}
-        onClick={()=>!uploading&&inputRef.current?.click()}
+        className={`iup-dropzone${dragging ? ' dragging' : ''}${hasImage ? ' has-image' : ''}`}
+        onDragEnter={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDragOver={e => e.preventDefault()}
+        onDrop={onDrop}
+        onClick={() => !uploading && inputRef.current?.click()}
         role="button" tabIndex={0}
-        onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')inputRef.current?.click()}}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click() }}
       >
-        <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}} onChange={onPick}/>
+        <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onPick} />
         {hasImage ? (
           <div className="iup-preview-wrap">
-            <img src={value} alt={label} className="iup-preview" onError={onError}/>
-            <div className="iup-preview-overlay"><span>{uploading?'Uploading…':'Replace'}</span></div>
+            <img src={value} alt={label} className="iup-preview" onError={onError} />
+            <div className="iup-preview-overlay"><span>{uploading ? 'Uploading…' : 'Replace'}</span></div>
           </div>
         ) : (
           <div className="iup-empty">
             {uploading ? (
-              <><span className="iup-spin"/><span className="iup-empty-text">Uploading…</span></>
+              <><span className="iup-spin" /><span className="iup-empty-text">Uploading…</span></>
             ) : (
-              <><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span className="iup-empty-text">Drop or click</span></>
+              <>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <rect x="3" y="3" width="18" height="18" rx="3"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <span className="iup-empty-text">Drop or click</span>
+              </>
             )}
           </div>
         )}
       </div>
-      <input className="iup-path-input" value={value||''} onChange={e=>onChange(e.target.value)} placeholder="/images/filename.png" spellCheck={false}/>
+      <input
+        className="iup-path-input"
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        placeholder="/images/filename.png"
+        spellCheck={false}
+      />
       {err && <p className="iup-error">{err}</p>}
       {hint && <p className="iup-hint">{hint}</p>}
     </div>
   )
 }
+ 
 
 /* ─────────────────────────────────────────────
    Background Remover
