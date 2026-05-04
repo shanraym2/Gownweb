@@ -175,11 +175,11 @@ export async function POST(request) {
       const { rows: [order] } = await conn.query(
         `INSERT INTO orders
           (order_number, user_id, customer_email, customer_name,
-           status, payment_method, payment_status,
-           delivery_method, delivery_address,
-           subtotal, discount_total, shipping_fee, tax, total, notes)
-         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,$9,$10,$11)
-         RETURNING *`,
+          status, payment_method, payment_status,
+          delivery_method, delivery_address,
+          subtotal, discount_total, shipping_fee, tax, total, notes)
+        VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,$9,$10,$11,$12)
+        RETURNING *`,
         [
           orderNumber, userId,
           customerEmail.trim().toLowerCase(), (customerName || '').trim(),
@@ -189,7 +189,7 @@ export async function POST(request) {
           Number(shippingFee) || 0,
           Number(tax)         || 0,
           Number(total)       || 0,
-          (notes || '').trim(),
+          (notes || '').trim(),   // $12
         ]
       )
 
