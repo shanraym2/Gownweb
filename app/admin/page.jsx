@@ -4,58 +4,70 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { getCurrentUser } from '../utils/authClient'
-import { getAdminSecret } from './adminSecret'
+import { getAdminSecret, setAdminSecret } from './adminSecret'
 
 const ORDER_STATUSES = ['placed', 'pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled', 'refunded']
 
 export default function AdminDashboardPage() {
   const router = useRouter()
-  const [user,       setUser      ] = useState(null)
-  const [ready,      setReady     ] = useState(false)
-  const [orderStats, setOrderStats] = useState(null)
-  const [gownCount,  setGownCount ] = useState(null)
+  const [user,         setUser        ] = useState(null)
+  const [ready,        setReady       ] = useState(false)
+  const [orderStats,   setOrderStats  ] = useState(null)
+  const [gownCount,    setGownCount   ] = useState(null)
+  const [secretPrompt, setSecretPrompt] = useState(false)   // show the secret input box?
+  const [secretInput,  setSecretInput ] = useState('')
+  const [secretError,  setSecretError ] = useState('')
 
-  // ── Auth guard (runs client-side, avoids hook-in-conditional) ─────────────
+  // ── Auth guard ────────────────────────────────────────────────────────────
   useEffect(() => {
     const u = getCurrentUser()
-    if (!u || !['admin', 'staff'].includes(u.role)) {
-      router.replace('/login')
-      return
-    }
-    if (u.role !== 'admin') {
-      router.replace('/staff')
-      return
-    }
+    if (!u || !['admin', 'staff'].includes(u.role)) { router.replace('/login'); return }
+    if (u.role !== 'admin')                          { router.replace('/staff'); return }
     setUser(u)
     setReady(true)
   }, [router])
 
-  // ── Data fetch (only after auth confirmed) ────────────────────────────────
+  // ── Data fetch ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready) return
     const secret = getAdminSecret()
-    if (!secret) return
+    if (!secret) { setSecretPrompt(true); return }   // no secret stored → show prompt
+    loadData(secret)
+  }, [ready])
 
+  function loadData(secret) {
     Promise.all([
       fetch('/api/admin/orders', { headers: { 'X-Admin-Secret': secret } }).then(r => r.json()).catch(() => null),
       fetch('/api/admin/gowns',  { headers: { 'X-Admin-Secret': secret } }).then(r => r.json()).catch(() => null),
     ]).then(([od, gd]) => {
       if (od?.ok) {
-        const orders = od.orders || []
-        const counts = {}
+        const orders  = od.orders || []
+        const counts  = {}
         for (const s of ORDER_STATUSES) counts[s] = 0
         for (const o of orders) if (o.status in counts) counts[o.status]++
-
-        // Use `total` and exclude cancelled + refunded — consistent with sales dashboard
         const revenue = orders
           .filter(o => !['cancelled', 'refunded'].includes(o.status))
           .reduce((s, o) => s + Number(o.total || 0), 0)
-
         setOrderStats({ total: orders.length, counts, revenue })
+      } else if (od?.error === 'unauthorized') {
+        // Stored secret is wrong → force re-prompt
+        setSecretError('Incorrect secret. Please try again.')
+        setSecretPrompt(true)
       }
       if (gd?.ok) setGownCount((gd.gowns || []).length)
     })
-  }, [ready])
+  }
+
+  function handleSecretSubmit(e) {
+    e.preventDefault()
+    const val = secretInput.trim()
+    if (!val) { setSecretError('Secret cannot be empty.'); return }
+    setAdminSecret(val)
+    setSecretPrompt(false)
+    setSecretError('')
+    setSecretInput('')
+    loadData(val)
+  }
 
   if (!ready) return null
 
@@ -67,6 +79,40 @@ export default function AdminDashboardPage() {
         <h1 className="adm-dash-heading">Dashboard</h1>
         {user && <p className="adm-dash-user">Signed in as {user.email}</p>}
       </div>
+
+      {/* ── Secret prompt / change-secret ── */}
+      {secretPrompt ? (
+        <form className="adm-secret-prompt" onSubmit={handleSecretSubmit}>
+          <p className="adm-secret-title">Enter admin secret</p>
+          {secretError && <p className="adm-secret-error">{secretError}</p>}
+          <input
+            className="adm-secret-input"
+            type="password"
+            placeholder="Admin secret"
+            value={secretInput}
+            onChange={e => setSecretInput(e.target.value)}
+            autoFocus
+          />
+          <div className="adm-secret-actions">
+            <button type="submit" className="adm-secret-btn-primary">Confirm</button>
+            <button
+              type="button"
+              className="adm-secret-btn-secondary"
+              onClick={() => router.push('/admin/change-secret')}
+            >
+              Change secret
+            </button>
+          </div>
+        </form>
+      ) : (
+        /* small "Change secret" link when already unlocked */
+        <button
+          className="adm-secret-change-link"
+          onClick={() => setSecretPrompt(true)}
+        >
+          Change stored secret
+        </button>
+      )}
 
       {orderStats && (
         <div className="adm-snapshot">
@@ -108,12 +154,12 @@ export default function AdminDashboardPage() {
 
       <div className="adm-nav-cards">
         {[
-          { href: '/admin/gowns',     title: 'Catalogue',       desc: 'Add, edit, or remove listings.'        },
-          { href: '/admin/orders',    title: 'Orders',          desc: 'View and manage all orders.'           },
-          { href: '/admin/dashboard', title: 'Sales dashboard', desc: 'Revenue charts and analytics.'         },
-          { href: '/admin/users',     title: 'Users',           desc: 'View registered accounts.'             },
-          { href: '/admin/contents',  title: 'Content',         desc: 'Edit homepage slides, copy, and theme.' },
-          { href: '/admin/change-secret', title: 'Change secret', desc: 'Update the admin secret with 2FA verification.' },
+          { href: '/admin/gowns',         title: 'Catalogue',       desc: 'Add, edit, or remove listings.'           },
+          { href: '/admin/orders',        title: 'Orders',          desc: 'View and manage all orders.'              },
+          { href: '/admin/dashboard',     title: 'Sales dashboard', desc: 'Revenue charts and analytics.'            },
+          { href: '/admin/users',         title: 'Users',           desc: 'View registered accounts.'                },
+          { href: '/admin/contents',      title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'   },
+          { href: '/admin/change-secret', title: 'Change secret',   desc: 'Update the admin secret with 2FA verification.' },
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">
             <div className="adm-nav-card-title">{title}</div>
