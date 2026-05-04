@@ -570,7 +570,8 @@ export default function AdminOrdersPage() {
 
   const filtered = orders
     .filter(o => {
-      const matchStatus = !filterStatus || o.status === filterStatus
+      const matchStatus = !filterStatus
+  || (filterStatus === '__proof__' ? o.proofStatus === 'pending' : o.status === filterStatus)
       const q = search.toLowerCase()
       const matchSearch = !q ||
         o.orderNumber?.toLowerCase().includes(q) ||
@@ -661,7 +662,12 @@ export default function AdminOrdersPage() {
         <div className="adm-filter-status">
           <button className={`adm-filter-pill${!filterStatus ? ' active' : ''}`}
             onClick={() => { setFilterStatus(''); loadOrders('') }}>All</button>
-          {['pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled'].map(s => (
+           <button
+              className={`adm-filter-pill${filterStatus === '__proof__' ? ' active' : ''}`}
+              onClick={() => { setFilterStatus('__proof__'); loadOrders('') }}>
+              ⚠ Proof pending{stats?.pendingProof > 0 ? ` (${stats.pendingProof})` : ''}
+            </button>
+            {['pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed', 'cancelled'].map(s =>(
             <button key={s}
               className={`adm-filter-pill${filterStatus === s ? ' active' : ''}`}
               onClick={() => { setFilterStatus(s); loadOrders(s) }}>
