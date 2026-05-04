@@ -1,30 +1,14 @@
 // app/api/admin/upload-tryon-image/route.js
-// Uploads images to DigitalOcean Spaces in production,
-// local public/images/ in development.
-//
-// Required environment variables (set in DO App Platform → Settings → Environment):
-//   DO_SPACES_KEY        — Spaces access key ID
-//   DO_SPACES_SECRET     — Spaces secret access key
-//   DO_SPACES_REGION     — e.g. "sgp1"
-//   DO_SPACES_BUCKET     — e.g. "jce-bridal"
-//   DO_SPACES_CDN_URL    — e.g. "https://jce-bridal.sgp1.cdn.digitaloceanspaces.com"
-//                          (or https://jce-bridal.sgp1.digitaloceanspaces.com if no CDN)
-//
-// Install the AWS SDK v3 S3 client (Spaces is S3-compatible):
-//   npm install @aws-sdk/client-s3
 
 import { NextResponse } from 'next/server'
-import path             from 'path'
-import fs               from 'fs'
+import path from 'path'
+import fs from 'fs'
 import { checkAdminAuth } from '@/lib/adminAuth'
 
-export const maxDuration = 60  // seconds
+export const maxDuration = 60
 
-
-// ── Spaces upload ─────────────────────────────────────────────────────────────
-
+// ── Spaces upload ────────────────────────────────────────────────
 async function uploadToSpaces(buffer, filename, mimeType) {
-  // Lazy-import so the module is only loaded when needed
   const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
 
   const region = process.env.DO_SPACES_REGION
@@ -34,38 +18,37 @@ async function uploadToSpaces(buffer, filename, mimeType) {
   const accessKey = process.env.DO_SPACES_KEY
   const secretKey = process.env.DO_SPACES_SECRET
 
+  // HARD FAIL (no silent fallback)
   if (!region || !bucket || !cdnUrl || !accessKey || !secretKey) {
-    throw new Error(
-      'Missing DO_SPACES_REGION, DO_SPACES_BUCKET, or DO_SPACES_CDN_URL env vars.'
-    )
+    throw new Error('Missing DigitalOcean Spaces environment variables.')
   }
 
   const client = new S3Client({
-    endpoint:        `https://${region}.digitaloceanspaces.com`,
+    endpoint: `https://${region}.digitaloceanspaces.com`,
     region,
     credentials: {
-      accessKeyId:     process.env.DO_SPACES_KEY     || '',
-      secretAccessKey: process.env.DO_SPACES_SECRET  || '',
+      accessKeyId: accessKey,
+      secretAccessKey: secretKey,
     },
     forcePathStyle: false,
   })
 
-  // Store under uploads/ prefix so it's easy to manage in the Spaces dashboard
   const key = `uploads/${filename}`
 
-  await client.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    Body: buffer,
-    ContentType: mimeType,
-  }))
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: mimeType,
+      ACL: 'public-read',
+    })
+  )
 
-  // Return the public CDN URL
   return `${cdnUrl}/${key}`
 }
 
-// ── Local disk upload (development only) ─────────────────────────────────────
-
+// ── Local upload (DEV ONLY) ─────────────────────────────────────
 function uploadToDisk(buffer, filename) {
   const outDir = path.join(process.cwd(), 'public', 'images')
   fs.mkdirSync(outDir, { recursive: true })
@@ -73,21 +56,23 @@ function uploadToDisk(buffer, filename) {
   return `/images/${filename}`
 }
 
-// ── POST handler ──────────────────────────────────────────────────────────────
-
+// ── POST handler ────────────────────────────────────────────────
 export async function POST(request) {
-  if (!await checkAdminAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth(request))) {
+    return NextResponse.json(
+      { ok: false, error: 'Unauthorized' },
+      { status: 401 }
+    )
   }
 
   try {
     const contentType = request.headers.get('content-type') || ''
     let buffer, filename, mimeType
 
+    // ── Multipart upload ─────────────────────────────
     if (contentType.includes('multipart/form-data')) {
-      // ── FormData upload ────────────────────────────────────────────────────
       const formData = await request.formData()
-      const file     = formData.get('file')
+      const file = formData.get('file')
 
       if (!file || typeof file === 'string') {
         return NextResponse.json(
@@ -97,53 +82,71 @@ export async function POST(request) {
       }
 
       mimeType = file.type || 'image/jpeg'
-      const ext = path.extname(file.name || '').toLowerCase() || '.jpg'
-      filename  = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`
-      buffer    = Buffer.from(await file.arrayBuffer())
+      const ext = path.extname(file.name || '') || '.jpg'
 
-    } else {
-      // ── Base64 JSON upload (BgRemover) ─────────────────────────────────────
-      const body  = await request.json()
+      filename = `upload-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}${ext}`
+
+      buffer = Buffer.from(await file.arrayBuffer())
+    }
+
+    // ── Base64 upload ────────────────────────────────
+    else {
+      const body = await request.json()
       const { image } = body
 
-      if (!image || !image.startsWith('data:image/')) {
+      if (!image?.startsWith('data:image/')) {
         return NextResponse.json(
-          { ok: false, error: 'Expected an image data URL.' },
+          { ok: false, error: 'Invalid image data URL.' },
           { status: 400 }
         )
       }
 
       const [header, base64] = image.split(',')
+
       const isPng = header.includes('png')
-      mimeType  = isPng ? 'image/png' : 'image/jpeg'
+      mimeType = isPng ? 'image/png' : 'image/jpeg'
+
       const ext = isPng ? '.png' : '.jpg'
-      filename  = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`
-      buffer    = Buffer.from(base64, 'base64')
+
+      filename = `upload-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}${ext}`
+
+      buffer = Buffer.from(base64, 'base64')
     }
 
-    // ── Route to the right storage backend ────────────────────────────────────
+    // ── ENV SAFETY CHECK (IMPORTANT FIX) ─────────────
     const isProduction = process.env.NODE_ENV === 'production'
-    const hasSpacesConfig = !!(
-      process.env.DO_SPACES_KEY &&
-      process.env.DO_SPACES_SECRET &&
-      process.env.DO_SPACES_BUCKET
-    )
 
-    let publicUrl
+    const hasSpacesConfig =
+      !!process.env.DO_SPACES_KEY &&
+      !!process.env.DO_SPACES_SECRET &&
+      !!process.env.DO_SPACES_BUCKET &&
+      !!process.env.DO_SPACES_REGION &&
+      !!process.env.DO_SPACES_CDN_URL
 
-    if (hasSpacesConfig) {
-      publicUrl = await uploadToSpaces(buffer, filename, mimeType)
+    let url
+
+    if (isProduction) {
+      if (!hasSpacesConfig) {
+        throw new Error('Spaces is required in production but not configured.')
+      }
+      url = await uploadToSpaces(buffer, filename, mimeType)
     } else {
-      publicUrl = uploadToDisk(buffer, filename)
+      url = uploadToDisk(buffer, filename)
     }
 
-    // Return both `path` and `url` so all callers work
-    return NextResponse.json({ ok: true, path: publicUrl, url: publicUrl })
-
+    // IMPORTANT: always return FULL URL only
+    return NextResponse.json({
+      ok: true,
+      url,
+    })
   } catch (err) {
     console.error('[upload-tryon-image]', err)
     return NextResponse.json(
-      { ok: false, error: err.message || 'Failed to save image.' },
+      { ok: false, error: err.message || 'Upload failed' },
       { status: 500 }
     )
   }
