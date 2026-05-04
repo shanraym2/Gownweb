@@ -83,7 +83,7 @@ function SecretGate({ onSuccess }) {
       })
       if (res.status === 401) {
         clearAdminSecret()
-        setError('Incorrect secret. Check ADMIN_SECRET in your .env.local.')
+        setError('Incorrect secret.')
         return
       }
       if (store) setAdminSecret(trimmed)
@@ -100,8 +100,7 @@ function SecretGate({ onSuccess }) {
     <div className="adm-secret-gate">
       <h1 className="adm-secret-title">Enter admin secret</h1>
       <p className="adm-secret-hint">
-        Set <code>ADMIN_SECRET</code> in your <code>.env.local</code> file,
-        then enter the same value here. It will be remembered until you clear it.
+        Please enter the admin secret to continue.
       </p>
       <form
         onSubmit={e => { e.preventDefault(); validateSecret(secret) }}
