@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'orders.json')
@@ -14,18 +15,12 @@ function saveJson(orders) {
   fs.writeFileSync(dataFile, JSON.stringify(orders, null, 2))
 }
 
-function requireAdmin(request) {
-  const secret = request.headers.get('x-admin-secret')
-  if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  return null
-}
-
 // ── GET /api/admin/orders?status=xxx ─────────────────────────────────────────
 
 export async function GET(request) {
-  const deny = requireAdmin(request)
-  if (deny) return deny
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const { searchParams } = new URL(request.url)
   const filterStatus = searchParams.get('status') || ''
@@ -33,7 +28,6 @@ export async function GET(request) {
   if (!USE_DB) {
     let orders = loadJson()
     if (filterStatus) orders = orders.filter(o => o.status === filterStatus)
-    // Map to camelCase and include proof fields
     orders = orders.map(o => ({
       id:               o.id,
       orderNumber:      o.orderNumber,
@@ -51,7 +45,6 @@ export async function GET(request) {
       placedAt:         o.placedAt,
       updatedAt:        o.updatedAt || null,
       items:            o.items || [],
-      // Proof fields — these are what the frontend checks
       proofStatus:      o.proofStatus      || (o.proofImage ? 'pending' : null),
       proofImageUrl:    o.proofImage        || null,
       proofReferenceNo: o.proofReferenceNo  || null,
@@ -122,11 +115,12 @@ export async function GET(request) {
 // actions: 'status' | 'verify-payment' | 'reject-payment'
 
 export async function PATCH(request) {
-  const deny = requireAdmin(request)
-  if (deny) return deny
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   let body
-  try { body = await request.json() } 
+  try { body = await request.json() }
   catch { return NextResponse.json({ error: 'Invalid body' }, { status: 400 }) }
 
   const { action, orderId, status, note, referenceNo, reason } = body
@@ -251,14 +245,14 @@ async function sendStatusEmail(order, status, note = '') {
   if (!to) return
 
   const templates = {
-    pending_payment: [`Awaiting payment — ${num}`,       `Hi ${name},\n\nWe're waiting for your proof of payment for order ${num}.\n\nPlease upload within 24 hours.\n\nJCE Bridal Boutique`],
-    paid:            [`Payment verified ✓ — ${num}`,     `Hi ${name},\n\nYour payment for order ${num} has been verified. We'll now begin preparing your order.\n\nJCE Bridal Boutique`],
-    processing:      [`Order being prepared — ${num}`,   `Hi ${name},\n\nYour order ${num} is now being prepared.\n\nJCE Bridal Boutique`],
-    ready:           [`Ready for pickup — ${num}`,       `Hi ${name},\n\nYour order ${num} is ready!\n\nJCE Bridal Boutique`],
-    shipped:         [`Order on its way — ${num}`,       `Hi ${name},\n\nOrder ${num} has been dispatched.\n\nJCE Bridal Boutique`],
-    completed:       [`Order completed — ${num}`,        `Hi ${name},\n\nOrder ${num} is complete. We hope you love your gown!\n\nWith love,\nJCE Bridal Boutique`],
-    cancelled:       [`Order cancelled — ${num}`,        `Hi ${name},\n\nYour order ${num} has been cancelled.${note ? `\n\nReason: ${note}` : ''}\n\nJCE Bridal Boutique`],
-    refunded:        [`Refund processed — ${num}`,       `Hi ${name},\n\nA refund for order ${num} has been processed. Allow 7–14 business days.\n\nJCE Bridal Boutique`],
+    pending_payment: [`Awaiting payment — ${num}`,     `Hi ${name},\n\nWe're waiting for your proof of payment for order ${num}.\n\nPlease upload within 24 hours.\n\nJCE Bridal Boutique`],
+    paid:            [`Payment verified ✓ — ${num}`,   `Hi ${name},\n\nYour payment for order ${num} has been verified. We'll now begin preparing your order.\n\nJCE Bridal Boutique`],
+    processing:      [`Order being prepared — ${num}`, `Hi ${name},\n\nYour order ${num} is now being prepared.\n\nJCE Bridal Boutique`],
+    ready:           [`Ready for pickup — ${num}`,     `Hi ${name},\n\nYour order ${num} is ready!\n\nJCE Bridal Boutique`],
+    shipped:         [`Order on its way — ${num}`,     `Hi ${name},\n\nOrder ${num} has been dispatched.\n\nJCE Bridal Boutique`],
+    completed:       [`Order completed — ${num}`,      `Hi ${name},\n\nOrder ${num} is complete. We hope you love your gown!\n\nWith love,\nJCE Bridal Boutique`],
+    cancelled:       [`Order cancelled — ${num}`,      `Hi ${name},\n\nYour order ${num} has been cancelled.${note ? `\n\nReason: ${note}` : ''}\n\nJCE Bridal Boutique`],
+    refunded:        [`Refund processed — ${num}`,     `Hi ${name},\n\nA refund for order ${num} has been processed. Allow 7–14 business days.\n\nJCE Bridal Boutique`],
   }
   const tmpl = templates[status]
   if (!tmpl) return

@@ -138,6 +138,9 @@ export async function GET(request) {
         o.customer_name,
         o.customer_phone,
         p.paid_at,
+        p.status        AS proof_status,
+        p.proof_image_url,
+        p.reference_no  AS proof_reference_no,
         json_agg(
           DISTINCT jsonb_build_object(
             'id',       oi.gown_id,
@@ -163,7 +166,7 @@ export async function GET(request) {
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN payments    p  ON p.order_id  = o.id
       WHERE o.user_id = $1
-      GROUP BY o.id, p.paid_at
+      GROUP BY o.id, p.paid_at, p.status, p.proof_image_url, p.reference_no
       ORDER BY o.placed_at DESC
     `, [userId])
 
@@ -198,6 +201,9 @@ export async function GET(request) {
         statusHistory: rawHistory.length > 0
           ? rawHistory
           : syntheticHistory(r),
+        proofStatus:      r.proof_status      || null,
+        proofImageUrl:    r.proof_image_url   || null,
+        proofReferenceNo: r.proof_reference_no || null,
       }
     })
 

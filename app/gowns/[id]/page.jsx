@@ -312,7 +312,7 @@ export default function GownDetailPage() {
   useEffect(() => {
     fetch('/api/cms/content?section=product-details')
       .then(r => r.json())
-      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .then(d => { if (d.ok && d.fields) setContent(prev => ({ ...prev, ...d.fields })) })
       .catch(() => {})
   }, [])
 
@@ -498,7 +498,7 @@ export default function GownDetailPage() {
               <span className="dp-tryon-eye">Virtual Try-On</span>
               <p className="dp-tryon-txt">See how this dress looks on your body type before you visit.</p>
             </div>
-            <Link href={`/virtual-try-on?gown=${gown.id}`} className="dp-tryon-btn">
+            <Link href={`/fitting-room?gown=${gown.id}`} className="dp-tryon-btn">
               Try it on →
             </Link>
           </div>
@@ -549,8 +549,8 @@ export default function GownDetailPage() {
                     const rawStock = stock ?? 0
                     const rawReserved = reserved ?? 0
                     const available = Math.max(0, rawStock - rawReserved)
-                    const lbl     = stockLabel(rawStock)
-                    const soldOut = rawStock === 0
+                    const lbl     = stockLabel(available)
+                    const soldOut = available === 0
                     const inCart  = isInCart(cart, id, size)
                     return (
                       <button
@@ -563,7 +563,7 @@ export default function GownDetailPage() {
                           soldOut ? 'dp-size-btn--out' : '',
                           inCart  ? 'dp-size-btn--incart' : '',
                         ].join(' ')}
-                        onClick={() => { if (!soldOut) { setSelectedSize(size); setSizeErr(false) } }}
+                        onClick={() => { if (!soldOut) { setSelectedSize(size); setSizeErr(false); setQty(1) } }}
                       >
                         <span className="dp-size-label">{size}</span>
                         {inCart && !soldOut && (
@@ -674,7 +674,7 @@ export default function GownDetailPage() {
                       <line x1="3" y1="6" x2="21" y2="6"/>
                       <path d="M16 10a4 4 0 01-8 0"/>
                     </svg>
-                    {thisInCart ? `Add more — ${content.add_to_cart_label}` : content.add_to_cart_label}
+                    {thisInCart && selectedSize ? `Add more — ${content.add_to_cart_label}` : content.add_to_cart_label}
                   </button>
 
                   {totalInCart > 0 && (

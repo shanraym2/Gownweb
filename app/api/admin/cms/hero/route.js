@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 const USE_DB = process.env.USE_DB === 'true'
 
-function checkAuth(request) {
-  const secret = request.headers.get('x-admin-secret') || ''
-  return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-}
-
 export async function GET(request) {
-  if (!checkAuth(request))
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request))
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 
   if (!USE_DB) {
     const { getHeroSlides } = await import('@/lib/cms')
@@ -28,8 +24,8 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  if (!checkAuth(request))
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request))
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 
   const { image_url, subtitle, heading, body, sort_order } = await request.json()
   if (!image_url || !heading)
@@ -53,8 +49,8 @@ export async function POST(request) {
 }
 
 export async function PUT(request) {
-  if (!checkAuth(request))
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request))
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 
   const body = await request.json()
   const { id, image_url, subtitle, heading, body: slideBody, sort_order, is_active } = body
@@ -83,8 +79,8 @@ export async function PUT(request) {
 }
 
 export async function DELETE(request) {
-  if (!checkAuth(request))
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request))
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')

@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server'
-
-function checkAuth(request) {
-  const secret = request.headers.get('x-admin-secret') || ''
-  return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-}
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 function fmtPhp(n) {
   return '₱' + Math.round(Number(n) || 0).toLocaleString('en-PH')
@@ -25,24 +21,20 @@ function escapeCsv(val) {
   return s
 }
 
-function rowToCsv(fields) {
-  return fields.map(escapeCsv).join(',')
-}
-
 // ── Revenue counting: completed orders only ───────────────────────────────────
 const isRevenueCounting = o => o.status === 'completed'
 
 // ── GET /api/admin/export?type=orders|summary|items|consolidated&from=YYYY-MM-DD&to=YYYY-MM-DD ──
 
 export async function GET(request) {
-  if (!checkAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
 
   const { searchParams } = new URL(request.url)
   const type     = searchParams.get('type') || 'orders'
-  const dateFrom = searchParams.get('from') || ''  // YYYY-MM-DD
-  const dateTo   = searchParams.get('to')   || ''  // YYYY-MM-DD
+  const dateFrom = searchParams.get('from') || ''
+  const dateTo   = searchParams.get('to')   || ''
 
   const USE_DB = process.env.USE_DB === 'true'
 
@@ -92,7 +84,6 @@ export async function GET(request) {
     }))
   }
 
-  // ── Date range filter ─────────────────────────────────────────────────────
   if (dateFrom || dateTo) {
     orders = orders.filter(o => {
       const d = (o.placedAt || o.createdAt || o.placed_at)?.slice(0, 10)
@@ -103,8 +94,8 @@ export async function GET(request) {
     })
   }
 
-  const now           = new Date().toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })
-  const rangeLabel    = dateFrom && dateTo
+  const now        = new Date().toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })
+  const rangeLabel = dateFrom && dateTo
     ? `${dateFrom} to ${dateTo}`
     : dateFrom ? `From ${dateFrom}`
     : dateTo   ? `To ${dateTo}`
@@ -116,8 +107,6 @@ export async function GET(request) {
 
   let csv      = ''
   let filename = ''
-
-  // ── Section builders (reused across consolidated) ─────────────────────────
 
   function buildReportHeader(title) {
     return [
@@ -134,7 +123,6 @@ export async function GET(request) {
     for (const o of orders) statusCounts[o.status] = (statusCounts[o.status] || 0) + 1
     const cancelCount  = (statusCounts['cancelled'] || 0) + (statusCounts['refunded'] || 0)
     const fulfillRate  = orders.length ? Math.round(completed.length / orders.length * 100) : 0
-
     return [
       ['OVERVIEW'],
       ['Metric', 'Value'],
@@ -222,7 +210,6 @@ export async function GET(request) {
     for (const o of completed)
       for (const it of (o.items || []))
         itemCounts[it.name || it.gown_name] = (itemCounts[it.name || it.gown_name] || 0) + (it.qty || it.quantity || 1)
-
     const topItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
     return [
       ['TOP 10 ITEMS SOLD (Completed Orders)'],
@@ -232,46 +219,39 @@ export async function GET(request) {
     ]
   }
 
-  // ── Report types ──────────────────────────────────────────────────────────
-
   if (type === 'summary') {
     filename = `jce-summary-${Date.now()}.csv`
-    const lines = [
+    csv = [
       ...buildReportHeader('Sales Summary Report'),
       ...buildOverviewSection(),
       ...buildStatusSection(),
       ...buildTopItemsSection(),
-    ]
-    csv = lines.map(r => r.map(escapeCsv).join(',')).join('\n')
+    ].map(r => r.map(escapeCsv).join(',')).join('\n')
 
   } else if (type === 'items') {
     filename = `jce-line-items-${Date.now()}.csv`
-    const lines = [
+    csv = [
       ...buildReportHeader('Line Items Report'),
       ...buildItemsSection(),
-    ]
-    csv = lines.map(r => r.map(escapeCsv).join(',')).join('\n')
+    ].map(r => r.map(escapeCsv).join(',')).join('\n')
 
   } else if (type === 'consolidated') {
     filename = `jce-consolidated-report-${Date.now()}.csv`
-    const lines = [
+    csv = [
       ...buildReportHeader('Consolidated Report'),
       ...buildOverviewSection(),
       ...buildStatusSection(),
       ...buildOrdersSection(),
       ...buildItemsSection(),
       ...buildTopItemsSection(),
-    ]
-    csv = lines.map(r => r.map(escapeCsv).join(',')).join('\n')
+    ].map(r => r.map(escapeCsv).join(',')).join('\n')
 
   } else {
-    // Default: orders
     filename = `jce-orders-${Date.now()}.csv`
-    const lines = [
+    csv = [
       ...buildReportHeader('Orders Report'),
       ...buildOrdersSection(),
-    ]
-    csv = lines.map(r => r.map(escapeCsv).join(',')).join('\n')
+    ].map(r => r.map(escapeCsv).join(',')).join('\n')
   }
 
   return new NextResponse(csv, {

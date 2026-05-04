@@ -45,22 +45,23 @@ function Modal({ title, onClose, children }) {
 // Shown when admin/staff clicks any non-self user row.
 // Displays: full name, email, phone, address. Nothing is editable.
 
+// Replace the entire ViewUserModal function in admin/users/page.jsx
+// FIX: was using var(--color-text-primary), var(--color-background-primary) etc.
+//      which are storefront tokens that don't exist in the admin panel.
+//      All inline styles now use var(--adm-*) tokens defined in admin.css.
+
 function ViewUserModal({ user, onClose }) {
   const fullName = user.name
     || `${user.firstName || ''} ${user.lastName || ''}`.trim()
     || '—'
 
-  // Resolve address: may be a plain string or a structured object from user_addresses
   const address = (() => {
     const a = user.defaultAddress || user.address
     if (!a) return null
     if (typeof a === 'string') return a
     const parts = [
       a.recipientName || a.recipient_name,
-      a.line1,
-      a.line2,
-      a.city,
-      a.province,
+      a.line1, a.line2, a.city, a.province,
       a.postalCode || a.postal_code,
       a.country !== 'PH' ? a.country : null,
     ].filter(Boolean)
@@ -73,13 +74,13 @@ function ViewUserModal({ user, onClose }) {
       gridTemplateColumns: '110px 1fr',
       gap: '6px 12px',
       padding: '9px 0',
-      borderBottom: '1px solid var(--color-border-tertiary)',
+      borderBottom: '1px solid var(--adm-border)',
       alignItems: 'start',
     }}>
-      <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', fontWeight: 500, paddingTop: 1 }}>
+      <span style={{ fontSize: 11, color: 'var(--adm-text-3)', fontWeight: 500, paddingTop: 1 }}>
         {label}
       </span>
-      <span style={{ fontSize: 13, color: value ? 'var(--color-text-primary)' : 'var(--color-text-tertiary)' }}>
+      <span style={{ fontSize: 13, color: value ? 'var(--adm-text)' : 'var(--adm-text-3)' }}>
         {value || '—'}
       </span>
     </div>
@@ -87,20 +88,20 @@ function ViewUserModal({ user, onClose }) {
 
   return (
     <Modal title="User Information" onClose={onClose}>
-      <div className="modal-body" style={{ padding: '0 20px 4px' }}>
-        {/* Avatar + name header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0 14px' }}>
+      <div className="modal-body" style={{ padding: '0 20px 4px', background: 'var(--adm-surface)', color: 'var(--adm-text)' }}>
+        {/* Avatar + name header */}  
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0 14px', background: 'var(--adm-surface)' }}>
           <div style={{
             width: 48, height: 48, borderRadius: '50%',
-            background: 'var(--color-text-primary)',
-            color: 'var(--color-background-primary)',
+            background: 'var(--adm-accent)',
+            color: '#ffffff',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 20, fontWeight: 700, flexShrink: 0,
           }}>
             {(user.firstName || user.name || user.email || '?')[0].toUpperCase()}
           </div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--adm-text)' }}>
               {fullName}
             </div>
             <div style={{ fontSize: 11, marginTop: 3 }}>
@@ -118,7 +119,7 @@ function ViewUserModal({ user, onClose }) {
         <Row label="Status"  value={user.isActive ? 'Active' : 'Archived'} />
 
         <p style={{
-          fontSize: 11, color: 'var(--color-text-tertiary)',
+          fontSize: 11, color: 'var(--adm-text-3)',
           margin: '14px 0 6px', lineHeight: 1.5,
         }}>
           User information can only be changed by the account owner.
@@ -228,7 +229,7 @@ function EditSelfModal({ user, secret, onSave, onClose }) {
 
         <label className="modal-label">
           New password{' '}
-          <span style={{ color: 'var(--color-text-tertiary)', fontWeight: 400 }}>(leave blank to keep)</span>
+          <span style={{ color: 'var(--adm-text-3)', fontWeight: 400 }}>(leave blank to keep)</span>
           <input
             className="modal-input"
             type="password"
@@ -362,7 +363,7 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
             </p>
           </div>
 
-          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '12px 0 8px' }}>
+          <p style={{ fontSize: 12, color: 'var(--adm-text-3)', margin: '12px 0 8px' }}>
             Temporary password (send to user securely):
           </p>
 
@@ -370,8 +371,8 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
             display: 'flex',
             gap: 6,
             padding: 10,
-            background: 'var(--color-background-secondary)',
-            border: '1px solid var(--color-border-tertiary)',
+            background: 'var(--adm-surface-alt)',
+            border: '1px solid var(--adm-border-em)',
             borderRadius: 6,
             alignItems: 'center',
           }}>
@@ -380,7 +381,7 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
               fontSize: 14,
               fontWeight: 600,
               fontFamily: '"Courier New", monospace',
-              color: 'var(--color-text-primary)',
+              color: 'var(--adm-text)',
               letterSpacing: 1,
             }}>
               {tempPassword}
@@ -392,7 +393,7 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
                 border: 'none',
                 cursor: 'pointer',
                 fontSize: 12,
-                color: copied ? '#16a34a' : 'var(--color-text-secondary)',
+                color:copied ? 'var(--adm-success)' : 'var(--adm-text-3)',
                 fontWeight: 500,
                 transition: 'color .15s',
               }}
@@ -403,7 +404,7 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
 
           <p style={{
             fontSize: 11,
-            color: 'var(--color-text-tertiary)',
+            color: 'var(--adm-text-3)',
             margin: '12px 0 0',
             lineHeight: 1.5,
           }}>
@@ -455,7 +456,7 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
           </label>
         )}
 
-        <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: '8px 0 0', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 11, color: 'var(--adm-text-3)', margin: '8px 0 0', lineHeight: 1.5 }}>
           A temporary password will be generated. The user can change it after logging in.
         </p>
       </div>
@@ -501,7 +502,7 @@ function ChangeRoleModal({ user, secret, onSave, onClose }) {
     <Modal title="Change Role" onClose={onClose}>
       <div className="modal-body">
         {error && <div className="modal-error">{error}</div>}
-        <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+        <p style={{ fontSize: 13, color: 'var(--adm-text-2)', marginBottom: 12 }}>
           Changing role for <strong>{user.name || user.email}</strong>.
         </p>
         <label className="modal-label">Role
@@ -511,7 +512,7 @@ function ChangeRoleModal({ user, secret, onSave, onClose }) {
             ))}
           </select>
         </label>
-        <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: '8px 0 0', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 11, color: 'var(--adm-text-3)', margin: '8px 0 0', lineHeight: 1.5 }}>
           Only Staff accounts can have their role changed. Customer roles are fixed.
         </p>
       </div>
@@ -704,7 +705,7 @@ export default function AdminUsersPage() {
             <div className="adm-my-profile-info">
               <span className="adm-my-profile-name">
                 {selfRecord.name || `${selfRecord.firstName || ''} ${selfRecord.lastName || ''}`.trim() || current?.email}
-                <span style={{ marginLeft: 6, fontSize: '.68rem', color: 'var(--color-text-tertiary)', fontWeight: 400 }}>
+                <span style={{ marginLeft: 6, fontSize: '.68rem', color: 'var(--adm-text-3)', fontWeight: 400 }}>
                   (you)
                 </span>
               </span>
@@ -808,8 +809,7 @@ export default function AdminUsersPage() {
                     <div className="adm-user-name">
                       {fullName}
                       {isSelf && (
-                        <span style={{ marginLeft: 6, fontSize: '.68rem', color: 'var(--color-text-tertiary)', fontWeight: 400 }}>
-                          (you)
+                       <span style={{ marginLeft: 6, fontSize: '.68rem', color: 'var(--adm-text-3)', fontWeight: 400 }}>
                         </span>
                       )}
                       {!u.isActive && (

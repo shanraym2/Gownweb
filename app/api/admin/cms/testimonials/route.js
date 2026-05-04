@@ -1,14 +1,10 @@
 import { NextResponse } from 'next/server'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 const USE_DB = process.env.USE_DB === 'true'
 
-function checkAuth(request) {
-  const secret = request.headers.get('x-admin-secret') || ''
-  return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-}
-
 export async function GET(request) {
-  if (!checkAuth(request))
+  if (!await checkAdminAuth(request))
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
 
   if (!USE_DB) {
@@ -29,7 +25,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  if (!checkAuth(request))
+  if (!await checkAdminAuth(request))
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
 
   const { quote_text, author_name, image_url, sort_order } = await request.json()
@@ -54,7 +50,7 @@ export async function POST(request) {
 }
 
 export async function PUT(request) {
-  if (!checkAuth(request))
+  if (!await checkAdminAuth(request))
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
@@ -91,7 +87,7 @@ export async function PUT(request) {
 }
 
 export async function DELETE(request) {
-  if (!checkAuth(request))
+  if (!await checkAdminAuth(request))
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)

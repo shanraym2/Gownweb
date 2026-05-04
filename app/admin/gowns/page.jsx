@@ -151,7 +151,7 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Upload failed')
-      onChange(data.path)
+      onChange(data.url)
     } catch (e) {
       setUploadErr(e.message)
     } finally {
@@ -270,7 +270,7 @@ function BgRemover({ src, onDone, onClose }) {
     try{
       const res=await fetch('/api/admin/upload-tryon-image',{method:'POST',headers:headers(),body:JSON.stringify({image:result})})
       const data=await res.json(); if(!data.ok)throw new Error(data.error||'Upload failed')
-      onDone(data.path)
+      onDone(data.url)
     }catch(e){setError(e.message)}
     finally{setSaving(false)}
   }

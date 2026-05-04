@@ -10,17 +10,15 @@ import { getCurrentUser } from '../../utils/authClient'
 // ─── Proof upload ─────────────────────────────────────────────────────────────
 
 function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
-  const [image, setImage] = useState(null)
-  const [preview, setPreview] = useState(null)
-  const [refNo, setRefNo] = useState('')
+  const [image,     setImage    ] = useState(null)
+  const [preview,   setPreview  ] = useState(null)
+  const [refNo,     setRefNo    ] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [done, setDone] = useState(false)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
-
+  const [done,      setDone     ] = useState(false)
+  const [error,     setError    ] = useState('')
 
   const fileRef = useRef(null)
-  const user = getCurrentUser()
+  const user    = getCurrentUser()
 
   const handleFile = useCallback((file) => {
     if (!file) return
@@ -34,10 +32,7 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
     }
     setError('')
     const reader = new FileReader()
-    reader.onload = (e) => {
-      setImage(e.target.result)
-      setPreview(e.target.result)
-    }
+    reader.onload = (e) => { setImage(e.target.result); setPreview(e.target.result) }
     reader.readAsDataURL(file)
   }, [])
 
@@ -45,42 +40,24 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
     e.preventDefault()
     handleFile(e.dataTransfer.files?.[0])
   }, [handleFile])
-  
-  const handleUpload = async () => {
-    if (!image) {
-      setError('Please select your proof of payment image.')
-      return
-    }
 
-    if (!user) {
-      setError('You must be logged in.')
+  const handleUpload = async () => {
+    if (!image && !refNo.trim()) {
+      setError('Please provide a proof of payment image and/or a reference number.')
       return
     }
+    if (!user) { setError('You must be logged in.'); return }
 
     setUploading(true)
     setError('')
-
     try {
-      const res = await fetch('/api/orders/upload-proof', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id,
-        },
-        body: JSON.stringify({
-          orderId,
-          image,
-          referenceNo: refNo,
-        }),
+      const res  = await fetch('/api/orders/upload-proof', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        body:    JSON.stringify({ orderId, image, referenceNo: refNo }),
       })
-
       const data = await res.json()
-
-      if (!res.ok || !data.ok) {
-        setError(data.error || 'Upload failed.')
-        return
-      }
-
+      if (!res.ok || !data.ok) { setError(data.error || 'Upload failed.'); return }
       setDone(true)
       onUploaded?.()
     } catch {
@@ -89,38 +66,9 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
       setUploading(false)
     }
   }
-  const fetchOrder = useCallback(() => {
-    if (!orderId || !user) return
-    fetch(`/api/orders?userId=${user.id}`, {
-      headers: { 'x-user-id': user.id },
-    })
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) {
-          setError('Could not load order.')
-          return
-        }
-        const found = (d.orders || []).find(o => String(o.id) === String(orderId))
-        if (!found) setError('Order not found.')
-      })
-      .catch(() => setError('Could not connect.'))
-      .finally(() => setLoading(false))
-  }, [orderId, user])
 
-  
-
-  useEffect(() => {
-    fetchOrder()
-  }, [fetchOrder])
-
-  // ✅ SAFE: return AFTER hooks
   if (paymentMethod === 'cash') return null
-
-  if (done) return (
-    <div className="conf-proof-done">
-      ✔ Proof uploaded
-    </div>
-  )
+  if (done) return <div className="conf-proof-done">✔ Proof uploaded</div>
 
   return (
     <div className="conf-proof">
@@ -152,23 +100,35 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
         style={{ display:'none' }} onChange={e => handleFile(e.target.files?.[0])} />
 
       {preview && (
-        <button className="conf-change-img" onClick={() => fileRef.current?.click()}>Change image</button>
+        <button className="conf-change-img" onClick={() => fileRef.current?.click()}>
+          Change image
+        </button>
       )}
 
       <div className="conf-field">
         <label className="conf-label">
-          Reference / transaction number <span>(optional but recommended)</span>
+          Reference / transaction number
+          <span className="conf-label-note"> — required if no image uploaded</span>
         </label>
-        <input type="text" className="conf-input"
+        <input
+          type="text" className="conf-input"
           placeholder="e.g. GCash ref 123456789"
-          value={refNo} onChange={e => setRefNo(e.target.value)} />
+          value={refNo} onChange={e => setRefNo(e.target.value)}
+        />
       </div>
+
+      {!image && !refNo.trim() && (
+        <p className="conf-upload-hint">
+          Please upload a screenshot, enter a reference number, or both.
+        </p>
+      )}
 
       {error && <p className="conf-error">{error}</p>}
 
       <button
         className={`conf-upload-btn${uploading ? ' conf-upload-btn--loading' : ''}`}
-        onClick={handleUpload} disabled={uploading || !image}
+        onClick={handleUpload}
+        disabled={uploading || (!image && !refNo.trim())}
       >
         {uploading ? 'Uploading…' : content.submit_label}
       </button>
@@ -182,9 +142,9 @@ export default function OrderConfirmationPage() {
   const params  = useParams()
   const orderId = params?.id
 
-  const [order,    setOrder   ] = useState(null)
-  const [loading,  setLoading ] = useState(true)
-  const [error,    setError   ] = useState('')
+  const [order,      setOrder     ] = useState(null)
+  const [loading,    setLoading   ] = useState(true)
+  const [error,      setError     ] = useState('')
   const [confirming, setConfirming] = useState(false)
 
   const [content, setContent] = useState({
@@ -203,24 +163,26 @@ export default function OrderConfirmationPage() {
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    if (!orderId || !user) { setLoading(false); return }
-
-    // Fetch all user orders then find by id — same as Phase 1 but now with
-    // proper header-based auth. Server verifies x-user-id matches userId.
+  // ── fetchOrder in page scope so handleConfirmReceipt can call it ──────────
+  const fetchOrder = useCallback(() => {
+    if (!orderId || !user) return
     fetch(`/api/orders?userId=${user.id}`, {
       headers: { 'x-user-id': user.id },
     })
       .then(r => r.json())
       .then(d => {
         if (!d.ok) { setError('Could not load order.'); return }
-        const found = (d.orders||[]).find(o => String(o.id) === String(orderId))
+        const found = (d.orders || []).find(o => String(o.id) === String(orderId))
         if (!found) setError('Order not found.')
         else setOrder(found)
       })
       .catch(() => setError('Could not connect.'))
       .finally(() => setLoading(false))
-  }, [orderId])  // intentionally omit user to avoid re-fetch loop
+  }, [orderId, user])
+
+  useEffect(() => {
+    fetchOrder()
+  }, [fetchOrder])
 
   const handleConfirmReceipt = async () => {
     if (!user || !order) return
@@ -232,14 +194,34 @@ export default function OrderConfirmationPage() {
         body:    JSON.stringify({ orderId: order.id, status: 'completed' }),
       })
       const data = await res.json()
-      if (data.ok) fetchOrder()  // ← re-fetch instead of manual state patch
+      if (data.ok) fetchOrder()
     } catch {}
     finally { setConfirming(false) }
   }
 
-  const fmt  = n => n != null ? '₱'+Number(n).toLocaleString('en-PH') : '—'
-  const payL = { gcash:'GCash', bdo:'BDO Bank Transfer', cash:'Cash on Pickup' }
-  const delL = { pickup:'Store Pickup', lalamove:'Lalamove Delivery' }
+  const fmt  = n => n != null ? '₱' + Number(n).toLocaleString('en-PH') : '—'
+  const payL = { gcash: 'GCash', bdo: 'BDO Bank Transfer', cash: 'Cash on Pickup' }
+  const delL = { pickup: 'Store Pickup', lalamove: 'Lalamove Delivery' }
+
+  // ── 7-day void check (UI only — no DB change) ─────────────────────────────
+  const isVoided = (() => {
+    if (!order) return false
+    if (['paid','processing','ready','shipped','completed','cancelled','refunded']
+        .includes(order.status)) return false
+    if (['paid','verified'].includes(order.paymentStatus)) return false
+    const days = (new Date() - new Date(order.placedAt)) / (1000 * 60 * 60 * 24)
+    return days >= 7
+  })()
+
+  const daysRemaining = (() => {
+    if (!order || isVoided) return null
+    if (['paid','processing','ready','shipped','completed','cancelled','refunded']
+        .includes(order.status)) return null
+    if (['paid','verified'].includes(order.paymentStatus)) return null
+    const days = (new Date() - new Date(order.placedAt)) / (1000 * 60 * 60 * 24)
+    const remaining = Math.ceil(7 - days)
+    return remaining <= 3 ? remaining : null
+  })()
 
   return (
     <main className="conf-page">
@@ -268,7 +250,9 @@ export default function OrderConfirmationPage() {
               </svg>
             </div>
             <h1 className="conf-hero-title">Order placed!</h1>
-            <p className="conf-hero-sub">Thank you, {user?.firstName || 'friend'}. We've received your order.</p>
+            <p className="conf-hero-sub">
+              Thank you, {user?.firstName || 'friend'}. We've received your order.
+            </p>
             <div className="conf-order-number">
               <span className="conf-order-label">Order number</span>
               <span className="conf-order-value">{order.orderNumber}</span>
@@ -278,50 +262,82 @@ export default function OrderConfirmationPage() {
           <div className="conf-layout">
             <div className="conf-main">
 
-              {/* What's next */}
-              <div className="conf-card">
-                <p className="conf-card-title">What happens next</p>
-                <ol className="conf-steps-list">
-                  {order.paymentMethod !== 'cash' ? (
-                    <>
-                      <li>Upload your proof of payment below</li>
-                      <li>Our team verifies your payment (usually within 1–2 hours)</li>
-                      <li>You'll receive an email when your order is confirmed and being prepared</li>
-                      {order.deliveryMethod === 'pickup'   && <li>We'll notify you when your order is ready for pickup</li>}
-                      {order.deliveryMethod === 'lalamove' && <li>We'll arrange Lalamove and notify you of the delivery fee</li>}
-                    </>
-                  ) : (
-                    <>
-                      <li>Bring the exact amount when you collect your order</li>
-                      <li>Our team will prepare your order and notify you when it's ready</li>
-                      <li>Collect at the boutique — Mon–Sat 9AM–6PM</li>
-                    </>
-                  )}
-                </ol>
-              </div>
-
-              <ProofUpload
-                orderId={order.id}
-                paymentMethod={order.paymentMethod}
-                onUploaded={() => setOrder(o => ({ ...o, paymentStatus: 'pending' }))}
-                content={content}
-              />
-
-              {['ready','shipped'].includes(order.status) && (
-                <div className="conf-card conf-card--action">
-                  <p className="conf-card-title">Received your order?</p>
-                  <p className="conf-card-sub">Confirm receipt once you have your gown.</p>
-                  <button className="conf-btn-primary" onClick={handleConfirmReceipt} disabled={confirming}>
-                    {confirming ? 'Confirming…' : "Yes, I've received my order"}
-                  </button>
+              {/* 3-day warning banner */}
+              {daysRemaining !== null && (
+                <div className="conf-card conf-card--warning">
+                  <p className="conf-card-title">⚠ Payment required soon</p>
+                  <p className="conf-card-sub">
+                    This order expires in{' '}
+                    <strong>{daysRemaining} day{daysRemaining !== 1 ? 's' : ''}</strong>.
+                    Please upload your proof of payment before then to avoid cancellation.
+                  </p>
                 </div>
               )}
 
-              {order.status === 'completed' && (
-                <div className="conf-receipt-done">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  Order received and completed. Thank you!
+              {/* Expired state (UI only) */}
+              {isVoided ? (
+                <div className="conf-card conf-card--voided">
+                  <p className="conf-card-title">Order Expired</p>
+                  <p className="conf-card-sub">
+                    This order was placed more than 7 days ago without payment confirmation.
+                    Please contact us or place a new order if you still wish to proceed.
+                  </p>
+                  <Link href="/gowns" className="conf-btn-primary">Browse collection</Link>
                 </div>
+              ) : (
+                <>
+                  {/* What's next */}
+                  <div className="conf-card">
+                    <p className="conf-card-title">What happens next</p>
+                    <ol className="conf-steps-list">
+                      {order.paymentMethod !== 'cash' ? (
+                        <>
+                          <li>Upload your proof of payment below</li>
+                          <li>Our team verifies your payment (usually within 1–2 hours)</li>
+                          <li>You'll receive an email when your order is confirmed and being prepared</li>
+                          {order.deliveryMethod === 'pickup'   && <li>We'll notify you when your order is ready for pickup</li>}
+                          {order.deliveryMethod === 'lalamove' && <li>We'll arrange Lalamove and notify you of the delivery fee</li>}
+                        </>
+                      ) : (
+                        <>
+                          <li>Bring the exact amount when you collect your order</li>
+                          <li>Our team will prepare your order and notify you when it's ready</li>
+                          <li>Collect at the boutique — Mon–Sat 9AM–6PM</li>
+                        </>
+                      )}
+                    </ol>
+                  </div>
+
+                  <ProofUpload
+                    orderId={order.id}
+                    paymentMethod={order.paymentMethod}
+                    onUploaded={() => setOrder(o => ({ ...o, paymentStatus: 'pending' }))}
+                    content={content}
+                  />
+
+                  {['ready','shipped'].includes(order.status) && (
+                    <div className="conf-card conf-card--action">
+                      <p className="conf-card-title">Received your order?</p>
+                      <p className="conf-card-sub">Confirm receipt once you have your gown.</p>
+                      <button
+                        className="conf-btn-primary"
+                        onClick={handleConfirmReceipt}
+                        disabled={confirming}
+                      >
+                        {confirming ? 'Confirming…' : "Yes, I've received my order"}
+                      </button>
+                    </div>
+                  )}
+
+                  {order.status === 'completed' && (
+                    <div className="conf-receipt-done">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Order received and completed. Thank you!
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -329,10 +345,10 @@ export default function OrderConfirmationPage() {
               <div className="conf-card">
                 <p className="conf-card-title">Order summary</p>
                 <div className="conf-summary-rows">
-                  {(order.items||[]).map((item,idx) => (
+                  {(order.items || []).map((item, idx) => (
                     <div key={idx} className="conf-summary-item">
-                      <span>{item.gownName}{item.sizeLabel ? ` (${item.sizeLabel})` : ''} ×{item.quantity||1}</span>
-                      <span>{fmt((item.unitPrice||0)*(item.quantity||1))}</span>
+                      <span>{item.gownName}{item.sizeLabel ? ` (${item.sizeLabel})` : ''} ×{item.quantity || 1}</span>
+                      <span>{fmt((item.unitPrice || 0) * (item.quantity || 1))}</span>
                     </div>
                   ))}
                 </div>
@@ -342,10 +358,12 @@ export default function OrderConfirmationPage() {
                 </div>
                 <div className="conf-summary-meta">
                   <div className="conf-meta-row">
-                    <span>Payment</span><span>{payL[order.paymentMethod]||order.paymentMethod}</span>
+                    <span>Payment</span>
+                    <span>{payL[order.paymentMethod] || order.paymentMethod}</span>
                   </div>
                   <div className="conf-meta-row">
-                    <span>Delivery</span><span>{delL[order.deliveryMethod]||order.deliveryMethod}</span>
+                    <span>Delivery</span>
+                    <span>{delL[order.deliveryMethod] || order.deliveryMethod}</span>
                   </div>
                   {order.deliveryAddress && (
                     <div className="conf-meta-row conf-meta-row--col">
@@ -355,7 +373,7 @@ export default function OrderConfirmationPage() {
                   <div className="conf-meta-row">
                     <span>Order status</span>
                     <span className={`conf-status conf-status--${order.status}`}>
-                      {(order.status||'').replace(/_/g,' ')}
+                      {(order.status || '').replace(/_/g, ' ')}
                     </span>
                   </div>
                   <div className="conf-meta-row">

@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), purpose: 'reset-password' }),
+        body: JSON.stringify({ email: email.trim(), purpose: 'password_reset' }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.ok) {
@@ -79,7 +79,7 @@ export default function ForgotPasswordPage() {
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'reset-password' }),
+        body: JSON.stringify({ email: email.trim(), otp: otp.trim(), purpose: 'password_reset' }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.ok) {

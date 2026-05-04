@@ -1,17 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../adminSecret'
+import { setAdminSecret } from '../adminSecret'
 
 export default function ChangeSecretPage() {
-  const [currentSecret, setCurrentSecret] = useState('')
-
-  // Read from localStorage after mount (client-only)
-  useEffect(() => {
-    setCurrentSecret(getAdminSecret() || '')
-  }, [])
-
   const [stage,      setStage     ] = useState('password')
   const [adminEmail, setAdminEmail] = useState('')
   const [password,   setPassword  ] = useState('')
@@ -33,10 +26,7 @@ export default function ChangeSecretPage() {
     try {
       const res  = await fetch('/api/admin/change-secret', {
         method:  'POST',
-        headers: {
-          'Content-Type':   'application/json',
-          'X-Admin-Secret': currentSecret,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ step: 'send_otp', adminEmail, password }),
       })
       const data = await res.json()
@@ -61,14 +51,12 @@ export default function ChangeSecretPage() {
     try {
       const res  = await fetch('/api/admin/change-secret', {
         method:  'POST',
-        headers: {
-          'Content-Type':   'application/json',
-          'X-Admin-Secret': currentSecret,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ step: 'change', adminEmail, password, otp, newSecret }),
       })
       const data = await res.json()
       if (!data.ok) { setError(data.error || 'Failed.'); return }
+      setAdminSecret(newSecret.trim())   
       setStage('done')
     } catch {
       setError('Could not connect. Please try again.')
@@ -76,7 +64,6 @@ export default function ChangeSecretPage() {
       setLoading(false)
     }
   }
-
   // ── Stage: password ───────────────────────────────────────────────────────
   if (stage === 'password') return (
     <div className="adm-page" style={{ maxWidth: 480 }}>
@@ -199,9 +186,8 @@ export default function ChangeSecretPage() {
             </div>
 
             <p className="adm-field-hint">
-                The new secret will be written to <code>.env.local</code>. You must{' '}
-                <strong>restart the server</strong> for it to take effect, then clear
-                your stored secret and re-enter the new one.
+                The new secret will be written to <code>.env.local</code> and saved to your browser.
+                You must <strong>restart the server</strong> for it to take effect.
             </p>
 
             <div className="adm-form-actions">
@@ -234,13 +220,12 @@ export default function ChangeSecretPage() {
           background: 'var(--adm-success-bg)', color: 'var(--adm-success)',
           border: '1px solid rgba(22,101,52,0.25)', marginBottom: 20,
         }}>
-          ✓ <strong>Admin secret updated</strong> in <code>.env.local</code>.
+          ✓ <strong>Admin secret updated</strong> in <code>.env.local</code> and saved to your browser.
         </div>
 
         <ol style={{ fontSize: 14, color: 'var(--adm-text-2)', paddingLeft: 20, margin: '0 0 24px', lineHeight: 2.2 }}>
           <li>Restart the dev server (<code>Ctrl+C</code> then <code>npm run dev</code>).</li>
-          <li>Click <strong>Clear secret</strong> in the sidebar.</li>
-          <li>Enter your new secret when prompted.</li>
+          <li>Return to the dashboard — your new secret is already stored.</li>
         </ol>
 
         <Link href="/admin" className="adm-btn" style={{ display: 'inline-flex', textDecoration: 'none' }}>
@@ -248,5 +233,4 @@ export default function ChangeSecretPage() {
         </Link>
       </div>
     </div>
-  )
-}
+  )}

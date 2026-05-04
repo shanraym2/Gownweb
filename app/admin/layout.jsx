@@ -7,10 +7,6 @@ import { getCurrentUser, setCurrentUserRole, logoutUser } from '../utils/authCli
 import { getAdminSecret, setAdminSecret, clearAdminSecret } from './adminSecret'
 export { getAdminSecret, setAdminSecret, clearAdminSecret }
 
-// ── Nav links per role ────────────────────────────────────────────────────────
-// Admin-only routes: dashboard, users, contents
-// Staff routes: catalogue, orders, sales, customers (no users/contents/dashboard mgmt)
-
 const ADMIN_NAV_LINKS = [
   { href: '/admin',           label: 'Dashboard', exact: true },
   { href: '/admin/gowns',     label: 'Catalogue'              },
@@ -28,10 +24,7 @@ const STAFF_NAV_LINKS = [
   { href: '/admin/users',     label: 'Customers'              },
 ]
 
-// Routes that are restricted to admins only
 const ADMIN_ONLY_ROUTES = ['/admin/contents', '/admin/users']
-
-// ── Theme hook ────────────────────────────────────────────────────────────────
 
 function useAdminTheme() {
   const [theme, setTheme] = useState('system')
@@ -44,9 +37,9 @@ function useAdminTheme() {
 
   function applyTheme(t) {
     const root = document.documentElement
-    if (t === 'light')       root.setAttribute('data-adm-theme', 'light')
-    else if (t === 'dark')   root.setAttribute('data-adm-theme', 'dark')
-    else                     root.removeAttribute('data-adm-theme')
+    if (t === 'light')     root.setAttribute('data-adm-theme', 'light')
+    else if (t === 'dark') root.setAttribute('data-adm-theme', 'dark')
+    else                   root.removeAttribute('data-adm-theme')
   }
 
   function toggle() {
@@ -119,6 +112,10 @@ function SecretGate({ onSuccess }) {
         <button type="submit" disabled={validating} className="adm-btn">
           {validating ? 'Checking…' : 'Continue'}
         </button>
+        {/* ── Change secret link ── */}
+        <Link href="/admin/change-secret" className="adm-secret-change-link">
+          Change secret
+        </Link>
       </form>
     </div>
   )
@@ -204,7 +201,6 @@ export default function AdminLayout({ children }) {
     return () => { document.body.style.overflow = '' }
   }, [sidebarOpen])
 
-  // Block staff from admin-only routes
   useEffect(() => {
     if (!user) return
     if (user.role === 'staff' && ADMIN_ONLY_ROUTES.some(r => pathname.startsWith(r))) {
@@ -244,7 +240,6 @@ export default function AdminLayout({ children }) {
     setSecretOk(false)
     setUser(null)
     setSidebarOpen(false)
-    // Redirect to the appropriate panel login, not the homepage
     router.replace(role === 'staff' ? '/staff' : '/admin')
   }
 
@@ -303,8 +298,6 @@ export default function AdminLayout({ children }) {
           --c-warn:#d4943a; --c-warn-dim:rgba(212,148,58,.12);
           --radius:8px; --radius-lg:12px; --radius-xl:16px; --sidebar-w:480px;
         }
-
-        /* 2 ── OS light preference — only when no manual override is set */
         @media (prefers-color-scheme: light) {
           :root:not([data-adm-theme="dark"]) {
             --c-bg:#f5f4f0; --c-surface:#ffffff; --c-surface2:#f0eeea;
@@ -317,8 +310,6 @@ export default function AdminLayout({ children }) {
             --c-warn:#9a5a10; --c-warn-dim:rgba(154,90,16,.09);
           }
         }
-
-        /* 3 ── Manual toggle: highest specificity, always wins */
         [data-adm-theme="light"] {
           --c-bg:#f5f4f0; --c-surface:#ffffff; --c-surface2:#f0eeea;
           --c-border:rgba(0,0,0,.10); --c-border2:rgba(0,0,0,.18);
@@ -404,6 +395,10 @@ export default function AdminLayout({ children }) {
           >
             Clear secret
           </button>
+          {/* ── Change secret link ── */}
+          <Link href="/admin/change-secret" className="adm-footer-btn" onClick={() => setSidebarOpen(false)}>
+            Change secret
+          </Link>
           <button
             className="adm-footer-btn adm-footer-btn--logout"
             onClick={handleLogout}
@@ -415,7 +410,7 @@ export default function AdminLayout({ children }) {
 
       {/* Main */}
       <main className="adm-main">
-        {!secretOk
+        {!secretOk && pathname !== '/admin/change-secret'
           ? <SecretGate onSuccess={() => setSecretOk(true)} />
           : children
         }

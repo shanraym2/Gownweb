@@ -641,58 +641,95 @@ WHERE body LIKE '%â€"%';
 --
 -- We need to add all new section keys.  PostgreSQL requires dropping the old
 -- constraint and adding a new one (constraints cannot be altered in-place).
-
+-- Drop and re-add constraint once
 ALTER TABLE public.cms_content_blocks
   DROP CONSTRAINT IF EXISTS cms_content_blocks_section_check;
 
 ALTER TABLE public.cms_content_blocks
   ADD CONSTRAINT cms_content_blocks_section_check
   CHECK (section IN (
-    -- original sections
-    'about',
-    'collection-spotlight',
-    'contact',
-    'footer',
-    'theme-config',
-    -- new sections
-    'header',
-    'announcement-bar',
-    'catalogue',
-    'product-details',
-    'login',
-    'cart',
-    'checkout',
-    'upload-proof',
-    'profile',
-    'my-orders',
-    'fitting-room',
-    'global-seo'
+    'about', 'collection-spotlight', 'contact', 'footer', 'theme-config',
+    'header', 'announcement-bar', 'catalogue', 'product-details', 'login',
+    'cart', 'checkout', 'upload-proof', 'profile', 'my-orders',
+    'fitting-room', 'global-seo'
   ));
 
-
--- ── 2. Seed default content for every new section ────────────────────────────
---
--- Uses ON CONFLICT (section) DO NOTHING so existing customisations are never
--- overwritten.  If you want to RESET a section to defaults, change DO NOTHING
--- to DO UPDATE SET fields = EXCLUDED.fields for that specific INSERT.
-
+-- theme-config — matches live CSS (#faf7f4 bg, #2c2420 text)
 INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('theme-config', '{
+    "colors": { "navBg": "#faf7f4", "primary": "#2c2420" },
+    "fonts":  { "body": "Jost, sans-serif" }
+  }'::jsonb)
+ON CONFLICT (section) DO UPDATE SET fields = EXCLUDED.fields;
 
+-- header — nav labels
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('header', '{
     "nav_catalogue_label": "Catalogue",
     "nav_fitting_label":   "My Fitting Room",
     "nav_contact_label":   "Contact"
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO UPDATE SET fields = EXCLUDED.fields;
 
+-- announcement-bar — disabled by default, matching ivory/charcoal theme
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('announcement-bar', '{
     "enabled":    "false",
     "text":       "",
     "link_url":   "",
     "link_label": "",
-    "bg_color":   "#1a1a2e",
-    "txt_color":  "#f5e9d0"
-  }'::jsonb),
+    "bg_color":   "#faf7f4",
+    "txt_color":  "#2c2420"
+  }'::jsonb)
+ON CONFLICT (section) DO UPDATE SET fields = EXCLUDED.fields;
 
+-- about — matches hardcoded About section content
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('about', '{
+    "eyebrow_label": "ABOUT US",
+    "heading":       "Comfort and Quality Come First.",
+    "body_1":        "JCE Bridal has always dreamed of comfortable women''s clothing that would look appropriate in any circumstances.",
+    "body_2":        "This is how the JCE Bridal brand appeared — it is a brand for women who like to feel confident, seductive, and stylish in any situation.",
+    "image_url":     "/images/aboutus.png"
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
+
+-- collection-spotlight
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('collection-spotlight', '{
+    "eyebrow_label": "THE COLLECTION",
+    "heading":       "Handpicked Elegance"
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
+
+-- contact — matches CMS contact block content
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('contact', '{
+    "heading":       "Get in Touch",
+    "subheading":    "We''d love to hear from you.",
+    "address":       "4I-19 Soler Wing 168 Mall Recto Mla, Manila, Philippines",
+    "phone":         "0917 843 2531",
+    "email":         "jceboutique@gmail.com",
+    "hours":         "Mon - Sat  10:00 AM - 7:00 PM\nPhilippine Standard Time",
+    "facebook":      "https://www.facebook.com/JCEbridalboutique",
+    "instagram":     "#",
+    "map_embed_url": ""
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
+
+-- footer
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
+  ('footer', '{
+    "brand_name": "JCE Bridal.",
+    "instagram":  "#",
+    "facebook":   "#",
+    "pinterest":  "#",
+    "copyright":  "© 2026 JCE Bridal Boutique. All rights reserved."
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
+
+-- catalogue
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('catalogue', '{
     "eyebrow":           "JCE Bridal Boutique",
     "heading":           "Gowns & Dresses",
@@ -702,15 +739,21 @@ INSERT INTO public.cms_content_blocks (section, fields) VALUES
     "empty_state_body":  "Try adjusting your filters or clearing the search.",
     "empty_state_cta":   "Clear all filters",
     "promo_banner":      ""
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- product-details
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('product-details', '{
     "enquiry_prompt":    "Interested in this gown? Book a fitting appointment with us.",
     "add_to_cart_label": "Add to Fitting Room",
     "sizing_note":       "All gowns are sample sizes. Alterations are available upon request.",
     "share_label":       "Share this look"
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- login
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('login', '{
     "login_heading":    "Welcome back",
     "login_subheading": "Sign in to your account",
@@ -718,16 +761,22 @@ INSERT INTO public.cms_content_blocks (section, fields) VALUES
     "tc_label":         "Terms & Conditions",
     "tc_url":           "/terms",
     "promo_text":       ""
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- cart
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('cart', '{
     "heading":        "Your Fitting Room",
     "empty_title":    "Your cart is empty",
     "empty_body":     "Browse our catalogue to add gowns to your fitting room.",
     "checkout_label": "Proceed to Checkout",
     "promo_banner":   ""
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- checkout — matches TNC and submit label in checkout/page.jsx
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('checkout', '{
     "heading":         "Complete Your Booking",
     "subheading":      "Fill in your details below.",
@@ -736,94 +785,81 @@ INSERT INTO public.cms_content_blocks (section, fields) VALUES
     "tc_url":          "/terms",
     "success_heading": "Order placed!",
     "success_body":    "Thank you! We will be in touch shortly to confirm your appointment."
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- upload-proof
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('upload-proof', '{
     "heading":      "Upload Payment Proof",
     "instructions": "Please upload a clear screenshot or photo of your payment confirmation.",
     "accepted_fmt": "JPG, PNG or PDF — max 10 MB",
     "submit_label": "Send proof"
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- profile
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('profile', '{
     "heading":    "My Profile",
     "save_label": "Save changes",
     "help_text":  "Update your name, email address, or password below."
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- my-orders
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('my-orders', '{
     "heading":     "My Orders",
     "empty_title": "No orders yet",
     "empty_body":  "Once you place an order it will appear here."
-  }'::jsonb),
+  }'::jsonb)
+ON CONFLICT (section) DO NOTHING;
 
+-- fitting-room
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('fitting-room', '{
     "heading":     "My Fitting Room",
     "subheading":  "Gowns you have saved for your appointment.",
     "empty_title": "Nothing saved yet",
     "empty_body":  "Browse the catalogue and save gowns you love.",
     "cta_label":   "Browse catalogue"
-  }'::jsonb),
-
-  ('global-seo', '{
-    "site_name": "JCE Bridal Boutique",
-    "meta_desc": "Luxury bridal gowns and dresses in Manila. Book your fitting appointment today.",
-    "og_image":  "/images/og-default.jpg"
   }'::jsonb)
-
 ON CONFLICT (section) DO NOTHING;
 
--- Step 1: drop the old constraint
-ALTER TABLE public.cms_content_blocks
-  DROP CONSTRAINT IF EXISTS cms_content_blocks_section_check;
-
--- Step 2: add the new one covering all sections
-ALTER TABLE public.cms_content_blocks
-  ADD CONSTRAINT cms_content_blocks_section_check
-  CHECK (section IN (
-    'about',
-    'collection-spotlight',
-    'contact',
-    'footer',
-    'theme-config',
-    'header',
-    'announcement-bar',
-    'catalogue',
-    'product-details',
-    'login',
-    'cart',
-    'checkout',
-    'upload-proof',
-    'profile',
-    'my-orders',
-    'fitting-room',
-    'global-seo'
-  ));
-
-  INSERT INTO public.cms_content_blocks (section, fields) VALUES
-  ('theme-config', '{
-    "colors": { "navBg": "#faf7f4", "primary": "#2c2420" },
-    "fonts":  { "body": "Jost, sans-serif" }
-  }'::jsonb),
-  ('header', '{
-    "nav_catalogue_label": "Catalogue",
-    "nav_fitting_label":   "My Fitting room",
-    "nav_contact_label":   "Contact"
-  }'::jsonb),
-  ('announcement-bar', '{
-    "enabled": "false", "text": "", "link_url": "", "link_label": "",
-    "bg_color": "#faf7f4", "txt_color": "#2c2420"
-  }'::jsonb),
-  ('catalogue', '{
-    "eyebrow": "JCE Bridal Boutique", "heading": "Gowns & Dresses",
-    "subheading": "Every silhouette. Every occasion. Filter to find the gown made for you.",
-    "filter_heading": "Filters", "empty_state_title": "No gowns match",
-    "empty_state_body": "Try adjusting your filters or clearing the search.",
-    "empty_state_cta": "Clear all filters", "promo_banner": ""
-  }'::jsonb),
+-- global-seo
+INSERT INTO public.cms_content_blocks (section, fields) VALUES
   ('global-seo', '{
     "site_name": "JCE Bridal Boutique",
     "meta_desc": "Luxury bridal gowns and dresses in Manila. Book your fitting appointment today.",
     "og_image":  "/images/og-default.jpg"
   }'::jsonb)
 ON CONFLICT (section) DO NOTHING;
+
+ALTER TABLE public.cms_hero_slides
+  ADD COLUMN IF NOT EXISTS focal_point text NOT NULL DEFAULT 'center',
+  ADD COLUMN IF NOT EXISTS scroll_fx   text NOT NULL DEFAULT 'none'
+    CHECK (scroll_fx IN ('none', 'parallax', 'zoom-out', 'fade'));
+
+UPDATE public.cms_hero_slides
+SET
+  focal_point = 'center',
+  scroll_fx   = 'none'
+WHERE focal_point IS NULL
+   OR scroll_fx   IS NULL;
+
+  CREATE TABLE admin_config (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+INSERT INTO admin_config (key, value) VALUES ('admin_secret', '1234567812345678t');
+
+ALTER TABLE public.orders
+ADD COLUMN IF NOT EXISTS tax numeric(12,2) NOT NULL DEFAULT 0
+ CHECK (tax >= 0);
+
+ UPDATE public.orders
+SET status = 'cancelled'
+WHERE status IN ('placed', 'pending_payment')
+  AND payment_status IN ('unpaid', 'pending')
+  AND placed_at < now() - INTERVAL '7 days';

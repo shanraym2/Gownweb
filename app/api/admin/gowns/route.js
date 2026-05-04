@@ -1,41 +1,16 @@
 import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'gowns.json')
-
-// FIX #11: checkAuth now returns 500 when ADMIN_SECRET is not configured at all,
-// instead of silently locking everyone out with a misleading 401.
-function checkAuth(request) {
-  if (!process.env.ADMIN_SECRET) {
-    // Misconfiguration — surface it loudly in server logs
-    console.error('ADMIN_SECRET environment variable is not set.')
-    return 'misconfigured'
-  }
-  const secret = request.headers.get('x-admin-secret') || ''
-  return secret === process.env.ADMIN_SECRET ? 'ok' : 'unauthorized'
-}
-
-function authResponse(result) {
-  if (result === 'misconfigured')
-    return NextResponse.json(
-      { ok: false, error: 'Server misconfiguration: ADMIN_SECRET not set.' },
-      { status: 500 }
-    )
-  if (result === 'unauthorized')
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  return null // 'ok' — no error response needed
-}
 
 function loadJson() {
   if (!fs.existsSync(dataFile)) return []
   return JSON.parse(fs.readFileSync(dataFile, 'utf8'))
 }
 
-// FIX #12: atomic write using a temp file + rename to avoid corruption on
-// concurrent requests (last-write-wins is still possible but the file is
-// never left in a half-written state).
 function saveJson(gowns) {
   fs.mkdirSync(path.dirname(dataFile), { recursive: true })
   const tmp = dataFile + '.tmp.' + process.hrtime.bigint()
@@ -73,9 +48,9 @@ function rowToGown(row) {
 
 // ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET(request) {
-  const auth = checkAuth(request)
-  const errRes = authResponse(auth)
-  if (errRes) return errRes
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const { searchParams } = new URL(request.url)
   const archived = searchParams.get('tab') === 'archived'
@@ -143,9 +118,9 @@ export async function GET(request) {
 
 // ── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(request) {
-  const auth = checkAuth(request)
-  const errRes = authResponse(auth)
-  if (errRes) return errRes
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const body = await request.json()
   const {
@@ -251,9 +226,9 @@ export async function POST(request) {
 
 // ── PUT ───────────────────────────────────────────────────────────────────────
 export async function PUT(request) {
-  const auth = checkAuth(request)
-  const errRes = authResponse(auth)
-  if (errRes) return errRes
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const body = await request.json()
   const { id, restore } = body
@@ -281,7 +256,8 @@ export async function PUT(request) {
       return NextResponse.json({ ok: false, error: 'Failed to restore gown' }, { status: 500 })
     }
   }
-// ── Inventory-only update (from StockModal) ───────────────────────────────
+
+  // ── Inventory-only update ─────────────────────────────────────────────────
   if (id && body.inventory !== undefined &&
       !body.name && !body.price && !body.image) {
 
@@ -338,6 +314,7 @@ export async function PUT(request) {
       return NextResponse.json({ ok: false, error: 'Failed to update inventory' }, { status: 500 })
     }
   }
+
   const {
     name, price, image, alt,
     tryonImage, tryonCalibration,
@@ -402,7 +379,6 @@ export async function PUT(request) {
         [image.trim(), (alt||name).trim(), id]
       )
 
-      // Upsert front try-on image
       const resolvedTryon = (tryonImage || '').trim()
       if (resolvedTryon) {
         await conn.query(
@@ -417,7 +393,6 @@ export async function PUT(request) {
         )
       }
 
-      // Upsert back try-on image
       const resolvedBack = (body.tryonImageBack || '').trim()
       await conn.query(
         `DELETE FROM gown_images WHERE gown_id = $1 AND is_tryon_back = TRUE`,
@@ -440,8 +415,7 @@ export async function PUT(request) {
         if (newSizeLabels.length > 0) {
           await conn.query(
             `DELETE FROM gown_inventory
-            WHERE gown_id = $1
-              AND size_label != ALL($2::text[])`,
+            WHERE gown_id = $1 AND size_label != ALL($2::text[])`,
             [id, newSizeLabels]
           )
         } else {
@@ -483,9 +457,9 @@ export async function PUT(request) {
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
 export async function DELETE(request) {
-  const auth = checkAuth(request)
-  const errRes = authResponse(auth)
-  if (errRes) return errRes
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const { searchParams } = new URL(request.url)
   const id        = searchParams.get('id')
@@ -498,8 +472,6 @@ export async function DELETE(request) {
     const idx   = gowns.findIndex(g => String(g.id) === String(id))
     if (idx === -1) return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
     if (permanent) {
-      // FIX #13: strict boolean check — is_active missing/undefined is treated
-      // as active (safe default), preventing accidental permanent deletion.
       const isActive = gowns[idx].is_active
       if (isActive !== false) {
         return NextResponse.json(
