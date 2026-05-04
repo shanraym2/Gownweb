@@ -8,15 +8,22 @@
     "start": "next start",
     "lint": "next lint",
     "db:setup": "node database/setup-local.js",
+    "db:setup-digitalocean": "node database/setup-digitalocean.js",
+    "db:import-json": "node database/import-json-to-postgres.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui"
   },
-  "keywords": ["bridal", "ecommerce", "luxury"],
+  "keywords": [
+    "bridal",
+    "ecommerce",
+    "luxury"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
     "jspdf": "^4.2.1",
