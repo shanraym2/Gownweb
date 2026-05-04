@@ -3,8 +3,6 @@ import { query } from '@/lib/db'
 import { sendOtp } from '@/lib/sendOtp'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
-import fs from 'fs'
-import path from 'path'
 
 const WINDOW_MS     = 15 * 60 * 1000
 const MAX_PWD_FAILS = 5
@@ -51,23 +49,14 @@ function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp).trim()).digest('hex')
 }
 
-function writeEnvSecret(newSecret) {
-  const envPath = path.resolve(process.cwd(), '.env.local')
-  let contents = ''
-  try { contents = fs.readFileSync(envPath, 'utf8') } catch { /* new file */ }
-
-  const line    = `ADMIN_SECRET=${newSecret}`
-  const pattern = /^ADMIN_SECRET=.*$/m
-
-  if (pattern.test(contents)) {
-    contents = contents.replace(pattern, line)
-  } else {
-    contents = contents.endsWith('\n') || contents === ''
-      ? contents + line + '\n'
-      : contents + '\n' + line + '\n'
-  }
-
-  fs.writeFileSync(envPath, contents, 'utf8')
+// ── Persist secret to DB instead of .env.local ────────────────────────────────
+async function writeSecretToDb(newSecret) {
+  await query(
+    `INSERT INTO admin_config (key, value)
+     VALUES ('admin_secret', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [newSecret]
+  )
 }
 
 export async function POST(request) {
@@ -135,7 +124,6 @@ export async function POST(request) {
 
     clearFails(pwdFailMap, ip)
 
-    // ── Direct call — no internal HTTP fetch ──────────────────────────────
     const otpData = await sendOtp(cleanEmail, 'password_reset')
     if (!otpData.ok) {
       return NextResponse.json(
@@ -259,12 +247,13 @@ export async function POST(request) {
       [nextAttempts, record.id]
     )
 
+    // ── Save new secret to DB (works on DigitalOcean, no restart needed) ──
     try {
-      writeEnvSecret(newSecret.trim())
+      await writeSecretToDb(newSecret.trim())
     } catch (err) {
       console.error('Failed to persist new admin secret:', err)
       return NextResponse.json(
-        { ok: false, error: 'Could not save the new secret. Check server permissions.' },
+        { ok: false, error: 'Could not save the new secret. Check database connection.' },
         { status: 500 }
       )
     }
