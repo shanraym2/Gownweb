@@ -1,19 +1,15 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
+import { sendOtp } from '@/lib/sendOtp'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 
-// ── Rate limiting (in-memory, per IP) ────────────────────────────────────────
-// Resets after WINDOW_MS. In a multi-instance deployment, use Redis instead.
+const WINDOW_MS     = 15 * 60 * 1000
+const MAX_PWD_FAILS = 5
 
-const WINDOW_MS        = 15 * 60 * 1000  // 15-minute rolling window
-const MAX_SECRET_FAILS = 5               // wrong X-Admin-Secret attempts per IP
-const MAX_PWD_FAILS    = 5               // wrong password attempts per IP
-
-const secretFailMap = new Map()  // ip → { count, resetAt }
-const pwdFailMap    = new Map()  // ip → { count, resetAt }
+const pwdFailMap = new Map()
 
 function getIp(request) {
   return (
@@ -51,28 +47,10 @@ function clearFails(map, ip) {
   map.delete(ip)
 }
 
-// ── Auth check with rate limiting ─────────────────────────────────────────────
-function checkAuth(request, ip) {
-  const limit = checkRateLimit(secretFailMap, ip, MAX_SECRET_FAILS)
-  if (limit.blocked) return { ok: false, locked: true, secsLeft: limit.secsLeft }
-
-  const secret = request.headers.get('x-admin-secret') || ''
-  const valid  = process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-  if (!valid) {
-    recordFail(secretFailMap, ip)
-    return { ok: false, locked: false }
-  }
-
-  clearFails(secretFailMap, ip)
-  return { ok: true }
-}
-
-// ── OTP helper ────────────────────────────────────────────────────────────────
 function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp).trim()).digest('hex')
 }
 
-// ── Secret writer ─────────────────────────────────────────────────────────────
 function writeEnvSecret(newSecret) {
   const envPath = path.resolve(process.cwd(), '.env.local')
   let contents = ''
@@ -92,14 +70,8 @@ function writeEnvSecret(newSecret) {
   fs.writeFileSync(envPath, contents, 'utf8')
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/admin/change-secret
-// step: 'send_otp'  — verify password, send OTP to admin email
-// step: 'change'    — verify OTP + new secret, persist
-// Both steps require a valid X-Admin-Secret header.
-// ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request) {
-  const ip      = getIp(request)
+  const ip = getIp(request)
 
   let body
   try {
@@ -116,14 +88,12 @@ export async function POST(request) {
 
   const cleanEmail = adminEmail.trim().toLowerCase()
 
-  // ── Confirm active admin account ──────────────────────────────────────────
   const userRows = await query(
     `SELECT id, password_hash, role FROM users WHERE email = $1 AND is_active = TRUE`,
     [cleanEmail]
   ).catch(() => [])
 
   if (!userRows.length || userRows[0].role !== 'admin') {
-    // Generic message — don't reveal whether the email exists
     return NextResponse.json(
       { ok: false, error: 'Incorrect email or password.' },
       { status: 403 }
@@ -136,11 +106,9 @@ export async function POST(request) {
   if (step === 'send_otp') {
     const { password } = body
 
-    if (!password) {
+    if (!password)
       return NextResponse.json({ ok: false, error: 'Password is required.' }, { status: 400 })
-    }
 
-    // Check password rate limit
     const pwdLimit = checkRateLimit(pwdFailMap, ip, MAX_PWD_FAILS)
     if (pwdLimit.blocked) {
       return NextResponse.json(
@@ -167,21 +135,12 @@ export async function POST(request) {
 
     clearFails(pwdFailMap, ip)
 
-    // Delegate OTP send to existing route
-    const otpRes  = await fetch(
-      new URL('/api/auth/send-otp', request.url).toString(),
-      {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email: cleanEmail, purpose: 'password_reset' }),
-      }
-    )
-    const otpData = await otpRes.json()
-
+    // ── Direct call — no internal HTTP fetch ──────────────────────────────
+    const otpData = await sendOtp(cleanEmail, 'password_reset')
     if (!otpData.ok) {
       return NextResponse.json(
         { ok: false, error: otpData.error || 'Could not send verification code.' },
-        { status: 500 }
+        { status: otpData.status || 500 }
       )
     }
 
@@ -205,7 +164,6 @@ export async function POST(request) {
       )
     }
 
-    // Re-verify password with rate limit (replay protection)
     const pwdLimit = checkRateLimit(pwdFailMap, ip, MAX_PWD_FAILS)
     if (pwdLimit.blocked) {
       return NextResponse.json(
@@ -232,7 +190,6 @@ export async function POST(request) {
 
     clearFails(pwdFailMap, ip)
 
-    // Validate new secret
     if (newSecret.trim().length < 16) {
       return NextResponse.json(
         { ok: false, error: 'New secret must be at least 16 characters.' },
@@ -246,7 +203,6 @@ export async function POST(request) {
       )
     }
 
-    // Verify OTP
     const otpRows = await query(
       `SELECT id, code_hash, attempts, max_attempts, expires_at
        FROM otp_codes
@@ -298,13 +254,11 @@ export async function POST(request) {
       )
     }
 
-    // ✅ OTP correct — consume it
     await query(
       `UPDATE otp_codes SET consumed_at = NOW(), attempts = $1 WHERE id = $2`,
       [nextAttempts, record.id]
     )
 
-    // Persist the new secret
     try {
       writeEnvSecret(newSecret.trim())
     } catch (err) {
@@ -315,7 +269,6 @@ export async function POST(request) {
       )
     }
 
-    clearFails(secretFailMap, ip)
     clearFails(pwdFailMap, ip)
 
     return NextResponse.json({ ok: true })
