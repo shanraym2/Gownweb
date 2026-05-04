@@ -1,40 +1,48 @@
-# MySQL setup
+# PostgreSQL setup
 
 ## Local database
 
-1. Install MySQL (or XAMPP) on your PC and start the MySQL service.
+1. Install PostgreSQL on your PC and start the PostgreSQL service.
 2. Add to `.env.local`:
    ```
-   DATABASE_URL=mysql://root:yourpassword@localhost:3306/gownweb
+   DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/gownweb
    ```
 3. Run:
    ```bash
    npm run db:setup
    ```
    This creates the database, runs the schema, and seeds sample gowns.
+4. Import existing JSON data (`data/gowns.json` and `data/orders.json`) into PostgreSQL:
+   ```bash
+   npm run db:import-json
+   ```
+5. Ensure `.env.local` has:
+   ```bash
+   USE_DB=true
+   ```
 
 ---
 
-## Hosted database (PlanetScale, Railway, etc.)
+## Hosted database (Railway, Supabase, Neon, etc.)
 
 1. Create the database:
    ```sql
-   CREATE DATABASE gownweb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE DATABASE gownweb;
    ```
 
 2. Run the schema:
    ```bash
-   mysql -u your_user -p gownweb < database/schema.sql
+   psql "$DATABASE_URL" -f database/schema.sql
    ```
 
 3. (Optional) Seed sample gowns:
    ```bash
-   mysql -u your_user -p gownweb < database/seed-gowns.sql
+   psql "$DATABASE_URL" -f database/seed-gowns.sql
    ```
 
 4. Add your connection string to `.env.local`:
    ```
-   DATABASE_URL=mysql://user:password@localhost:3306/gownweb
+   DATABASE_URL=postgresql://postgres:password@localhost:5432/gownweb
    ```
 
-5. Restart the dev server. When `DATABASE_URL` is set, the app reads and writes gowns and orders from MySQL. If the DB is unavailable, gown routes fall back to `data/gowns.json` and `data/orders.json`.
+6. Restart the dev server. With `USE_DB=true`, the app reads and writes gowns and orders from PostgreSQL.
