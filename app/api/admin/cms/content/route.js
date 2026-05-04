@@ -1,32 +1,7 @@
-// Replace only the PUT handler's query — everything else in the file stays identical.
-// Old query (full replace):
-//   INSERT INTO cms_content_blocks (section, fields)
-//   VALUES ($1,$2)
-//   ON CONFLICT (section) DO UPDATE SET fields=$2, updated_at=NOW()
-//
-// New query (deep merge — existing keys not present in the incoming payload are preserved):
-//   INSERT INTO cms_content_blocks (section, fields)
-//   VALUES ($1,$2)
-//   ON CONFLICT (section) DO UPDATE
-//     SET fields     = cms_content_blocks.fields || $2,
-//         updated_at = NOW()
-//
-// The || operator in PostgreSQL merges two jsonb objects, with right-hand keys
-// winning on conflict.  This means:
-//   - Sending { subheading: "new" } only updates that one key.
-//   - All other keys in the existing row are untouched.
-//   - To deliberately blank a key, the client must send { key: "" } explicitly.
-//
-// ── Drop-in replacement for app/api/admin/cms/content/route.js ───────────────
-
 import { NextResponse } from 'next/server'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 const USE_DB = process.env.USE_DB === 'true'
-
-function checkAuth(request) {
-  const secret = request.headers.get('x-admin-secret') || ''
-  return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-}
 
 const VALID_SECTIONS = [
   'about', 'collection-spotlight', 'contact', 'footer', 'theme-config',
@@ -36,8 +11,9 @@ const VALID_SECTIONS = [
 ]
 
 export async function GET(request) {
-  if (!checkAuth(request))
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const { searchParams } = new URL(request.url)
   const section = searchParams.get('section')
@@ -67,8 +43,9 @@ export async function GET(request) {
 }
 
 export async function PUT(request) {
-  if (!checkAuth(request))
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+  }
 
   const { section, fields } = await request.json()
   if (!section || !VALID_SECTIONS.includes(section))

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 export async function POST(req) {
   // Auth check

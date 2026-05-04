@@ -1,11 +1,7 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import bcrypt from 'bcryptjs'
-
-function checkAuth(request) {
-  const secret = request.headers.get('x-admin-secret') || ''
-  return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-}
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 function mapUser(row) {
   return {
@@ -21,10 +17,19 @@ function mapUser(row) {
   }
 }
 
+function generateTempPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz'
+  let pwd = ''
+  for (let i = 0; i < 12; i++) {
+    pwd += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return pwd
+}
+
 // GET — list all users
 export async function GET(request) {
-  if (!checkAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
   try {
     const rows = await query(`
@@ -39,20 +44,10 @@ export async function GET(request) {
   }
 }
 
-// Helper to generate a random temporary password
-function generateTempPassword() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz'
-  let pwd = ''
-  for (let i = 0; i < 12; i++) {
-    pwd += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return pwd
-}
-
 // POST — create user
 export async function POST(request) {
-  if (!checkAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
   try {
     const { firstName, lastName, email, password, role } = await request.json()
@@ -67,21 +62,15 @@ export async function POST(request) {
         { status: 409 }
       )
     }
-    // Generate temporary password if not provided
     const finalPassword = password || generateTempPassword()
-    const passwordHash = await bcrypt.hash(finalPassword, 12)
-    // ── Accept customer, staff, and admin ──
-    const validRole = ['customer', 'staff', 'admin'].includes(role) ? role : 'customer'
+    const passwordHash  = await bcrypt.hash(finalPassword, 12)
+    const validRole     = ['customer', 'staff', 'admin'].includes(role) ? role : 'customer'
     const rows = await query(
       `INSERT INTO users (first_name, last_name, email, password_hash, role)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [firstName.trim(), lastName.trim(), cleanEmail, passwordHash, validRole]
     )
-    return NextResponse.json({ 
-      ok: true, 
-      user: mapUser(rows[0]),
-      tempPassword: finalPassword 
-    })
+    return NextResponse.json({ ok: true, user: mapUser(rows[0]), tempPassword: finalPassword })
   } catch (err) {
     console.error('Admin users POST error:', err)
     return NextResponse.json({ ok: false, error: 'Failed to create user.' }, { status: 500 })
@@ -90,8 +79,8 @@ export async function POST(request) {
 
 // PUT — update user (name, email, role, password, is_active)
 export async function PUT(request) {
-  if (!checkAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
   try {
     const { id, firstName, lastName, email, password, role, isActive } = await request.json()
@@ -112,7 +101,6 @@ export async function PUT(request) {
       setClauses.push(`email=$${p++}`); values.push(cleanEmail)
     }
     if (role !== undefined) {
-      // ── Accept customer, staff, and admin ──
       const validRole = ['customer', 'staff', 'admin'].includes(role) ? role : 'customer'
       setClauses.push(`role=$${p++}`); values.push(validRole)
     }
@@ -143,8 +131,8 @@ export async function PUT(request) {
 
 // DELETE — deactivate (soft) or hard delete
 export async function DELETE(request) {
-  if (!checkAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
   try {
     const { searchParams } = new URL(request.url)

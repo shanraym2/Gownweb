@@ -1,20 +1,13 @@
 import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
-// FIX: raise Next.js body size limit beyond the default 4MB.
-// Large phone photos (iPhone, Android) are typically 3–8MB.
-// App Router uses this export (Pages Router used config.api.bodyParser).
-export const maxDuration = 60  // seconds — prevents timeout on slow connections
-
-function checkAuth(request) {
-  const secret = request.headers.get('x-admin-secret') || ''
-  return process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET
-}
+export const maxDuration = 60
 
 export async function POST(request) {
-  if (!checkAuth(request)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
+  if (!await checkAdminAuth(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
 
   try {
@@ -22,7 +15,6 @@ export async function POST(request) {
     let buffer, filename
 
     if (contentType.includes('multipart/form-data')) {
-      // ── FormData upload (from CMS ImageUploadField or fixed BgRemover) ──
       const formData = await request.formData()
       const file     = formData.get('file')
 
@@ -35,7 +27,6 @@ export async function POST(request) {
       buffer     = Buffer.from(await file.arrayBuffer())
 
     } else {
-      // ── Base64 JSON upload (original gowns page BgRemover) ──
       const body = await request.json()
       const { image } = body
 
@@ -54,9 +45,6 @@ export async function POST(request) {
     fs.writeFileSync(path.join(outDir, filename), buffer)
 
     const filePath = `/images/${filename}`
-
-    // Return both `path` (original field) and `url` (used by CMS uploader)
-    // so both callers work without any changes on the client side.
     return NextResponse.json({ ok: true, path: filePath, url: filePath })
 
   } catch (err) {

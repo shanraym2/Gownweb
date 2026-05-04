@@ -3,6 +3,7 @@ import { query } from '@/lib/db'
 import { sendOtp } from '@/lib/sendOtp'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
+import { checkAdminAuth } from '@/lib/adminAuth'
 
 const WINDOW_MS     = 15 * 60 * 1000
 const MAX_PWD_FAILS = 5
