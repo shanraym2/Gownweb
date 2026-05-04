@@ -104,15 +104,7 @@ export default function AdminDashboardPage() {
             </button>
           </div>
         </form>
-      ) : (
-        /* small "Change secret" link when already unlocked */
-        <button
-          className="adm-secret-change-link"
-          onClick={() => setSecretPrompt(true)}
-        >
-          Change stored secret
-        </button>
-      )}
+      ) : null}
 
       {orderStats && (
         <div className="adm-snapshot">

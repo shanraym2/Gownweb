@@ -411,7 +411,7 @@ export default function AdminLayout({ children }) {
 
       {/* Main */}
       <main className="adm-main">
-        {!secretOk
+        {!secretOk && pathname !== '/admin/change-secret'
           ? <SecretGate onSuccess={() => setSecretOk(true)} />
           : children
         }

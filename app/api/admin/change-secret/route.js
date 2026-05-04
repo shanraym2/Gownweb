@@ -100,17 +100,6 @@ function writeEnvSecret(newSecret) {
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request) {
   const ip      = getIp(request)
-  const authRes = checkAuth(request, ip)
-
-  if (!authRes.ok) {
-    if (authRes.locked) {
-      return NextResponse.json(
-        { ok: false, error: `Too many failed attempts. Try again in ${authRes.secsLeft} seconds.` },
-        { status: 429 }
-      )
-    }
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
   let body
   try {
