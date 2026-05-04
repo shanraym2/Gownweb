@@ -150,13 +150,39 @@ function getGownLayout(kps, cal={}, vw=640, vh=480) {
 }
 
 function drawGown(ctx, img, layout, opacity) {
-  const{topY,bottomY,cx,topW,botW}=layout; const h=bottomY-topY; if(h<=0)return
-  ctx.save(); ctx.globalAlpha=opacity
-  ctx.beginPath()
-  ctx.moveTo(cx-topW/2,topY); ctx.lineTo(cx+topW/2,topY)
-  ctx.lineTo(cx+botW/2,bottomY); ctx.lineTo(cx-botW/2,bottomY)
-  ctx.closePath(); ctx.clip()
-  ctx.drawImage(img,cx-botW/2,topY,botW,h); ctx.restore()
+  const { topY, bottomY, cx, topW, botW } = layout
+  const h = bottomY - topY
+  if (h <= 0) return
+ 
+  // ── Offscreen canvas for the gown ────────────────────────────────────────
+  // Draw the gown onto its own canvas first so we can composite it cleanly.
+  // The offscreen canvas is transparent by default — no white background.
+  const oc   = document.createElement('canvas')
+  oc.width   = ctx.canvas.width  / (window.devicePixelRatio || 1)
+  oc.height  = ctx.canvas.height / (window.devicePixelRatio || 1)
+  const octx = oc.getContext('2d')
+ 
+  // Clip to the trapezoid shape
+  octx.beginPath()
+  octx.moveTo(cx - topW / 2, topY)
+  octx.lineTo(cx + topW / 2, topY)
+  octx.lineTo(cx + botW / 2, bottomY)
+  octx.lineTo(cx - botW / 2, bottomY)
+  octx.closePath()
+  octx.clip()
+ 
+  // Draw the gown image — PNG alpha is preserved because the offscreen canvas
+  // starts fully transparent (no video frame underneath to pollute the blend).
+  octx.drawImage(img, cx - botW / 2, topY, botW, h)
+ 
+  // ── Composite onto the main canvas ───────────────────────────────────────
+  // 'source-over' with globalAlpha — semi-transparent PNG edges blend with
+  // the video frame that's already on the main canvas, not with white.
+  ctx.save()
+  ctx.globalAlpha       = opacity
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.drawImage(oc, 0, 0)
+  ctx.restore()
 }
 
 async function applySegmentation(segmenter, video, ctx, w, h) {
