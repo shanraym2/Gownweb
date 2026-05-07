@@ -417,6 +417,14 @@
   border: 1px solid var(--ch); padding: 24px; background: #fff;
 }
 .conf-card--action { border-color: var(--go); }
+.conf-card--warning {
+  border-color: #f57f17;
+  background: #fff8e1;
+}
+.conf-card--voided {
+  border-color: var(--ro);
+  background: #ffebee;
+}
 .conf-card-title {
   font-size: 9px; letter-spacing: .35em; text-transform: uppercase;
   color: var(--mu); margin: 0 0 16px;
@@ -478,6 +486,19 @@
 .conf-input:focus { border-color: var(--es); }
 
 .conf-error { font-size: 12px; color: var(--ro); margin: 8px 0 0; }
+
+/* ── Upload hint — always in DOM to prevent layout-shift flicker ── */
+/* The hint text previously used conditional rendering ({!image && !refNo && <p>}).
+   That caused a feedback loop: hovering near the dropzone bottom shifted the
+   layout, which moved the boundary, which re-triggered hover — flickering at
+   ~30fps. Fix: keep the element always rendered, toggle visibility only. */
+.conf-upload-hint {
+  font-size: 12px; color: var(--mu);
+  margin: 0 0 12px; line-height: 1.5;
+  min-height: 1.5em;      /* reserves space so layout never shifts */
+  visibility: hidden;
+}
+.conf-upload-hint--visible { visibility: visible; }
 
 .conf-upload-btn {
   display: block; width: 100%; padding: 13px;

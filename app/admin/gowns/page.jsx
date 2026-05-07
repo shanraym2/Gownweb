@@ -227,28 +227,92 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
 /* ─────────────────────────────────────────────
    Background Remover
 ───────────────────────────────────────────── */
-function removeBg(imgSrc, tolerance=32) {
-  return new Promise((resolve,reject) => {
-    const img=new Image(); img.crossOrigin='anonymous'
-    img.onload=()=>{
-      const w=img.naturalWidth,h=img.naturalHeight
-      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h
-      const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0)
-      let data
-      try { data=ctx.getImageData(0,0,w,h) }
-      catch(e) { reject(new Error('Image is cross-origin or tainted. Host it on the same origin.')); return }
-      const d=data.data
-      const seeds=[]
-      const pts=[[0,0],[w-1,0],[0,h-1],[w-1,h-1],[Math.floor(w/2),0],[Math.floor(w/2),h-1],[0,Math.floor(h/2)],[w-1,Math.floor(h/2)]]
-      pts.forEach(([x,y])=>{ const i=(y*w+x)*4; seeds.push({r:d[i],g:d[i+1],b:d[i+2]}) })
-      function isBg(x,y){ const i=(y*w+x)*4; return d[i+3]<10||seeds.some(s=>Math.abs(d[i]-s.r)+Math.abs(d[i+1]-s.g)+Math.abs(d[i+2]-s.b)<tolerance*3) }
-      const visited=new Uint8Array(w*h); const queue=new Uint32Array(w*h); let head=0,tail=0
-      function enq(x,y){ if(x<0||y<0||x>=w||y>=h)return; const idx=y*w+x; if(visited[idx])return; visited[idx]=1; if(isBg(x,y))queue[tail++]=idx }
-      for(let x=0;x<w;x++){enq(x,0);enq(x,h-1)} for(let y=0;y<h;y++){enq(0,y);enq(w-1,y)}
-      while(head<tail){ const idx=queue[head++]; const x=idx%w,y=(idx-x)/w; d[idx*4+3]=0; enq(x-1,y);enq(x+1,y);enq(x,y-1);enq(x,y+1) }
-      ctx.putImageData(data,0,0); resolve(canvas.toDataURL('image/png'))
+async function toSafeUrl(src) {
+  if (src.startsWith('blob:') || src.startsWith('data:') || src.startsWith('/')) {
+    return src
+  }
+  const res = await fetch(`/api/admin/proxy-img?url=${encodeURIComponent(src)}`, {
+    headers: { 'X-Admin-Secret': getAdminSecret() || '' },
+  })
+  if (!res.ok) throw new Error('Could not load image for processing.')
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+function removeBg(imgSrc, tolerance = 32) {
+  return new Promise(async (resolve, reject) => {
+    let objectUrl = null
+    try {
+      const safeSrc = await toSafeUrl(imgSrc)
+      if (safeSrc !== imgSrc) objectUrl = safeSrc
+
+      const img = new Image()
+      img.onload = () => {
+        const w = img.naturalWidth, h = img.naturalHeight
+        const canvas = document.createElement('canvas')
+        canvas.width = w; canvas.height = h
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+
+        let data
+        try {
+          data = ctx.getImageData(0, 0, w, h)
+        } catch (e) {
+          reject(new Error('Canvas is tainted — image could not be processed.'))
+          return
+        }
+
+        const d = data.data
+        const seeds = []
+        const pts = [
+          [0,0],[w-1,0],[0,h-1],[w-1,h-1],
+          [Math.floor(w/2),0],[Math.floor(w/2),h-1],
+          [0,Math.floor(h/2)],[w-1,Math.floor(h/2)]
+        ]
+        pts.forEach(([x,y]) => {
+          const i = (y * w + x) * 4
+          seeds.push({ r: d[i], g: d[i+1], b: d[i+2] })
+        })
+
+        function isBg(x, y) {
+          const i = (y * w + x) * 4
+          return d[i+3] < 10 || seeds.some(s =>
+            Math.abs(d[i] - s.r) + Math.abs(d[i+1] - s.g) + Math.abs(d[i+2] - s.b) < tolerance * 3
+          )
+        }
+
+        const visited = new Uint8Array(w * h)
+        const queue  = new Uint32Array(w * h)
+        let head = 0, tail = 0
+
+        function enq(x, y) {
+          if (x < 0 || y < 0 || x >= w || y >= h) return
+          const idx = y * w + x
+          if (visited[idx]) return
+          visited[idx] = 1
+          if (isBg(x, y)) queue[tail++] = idx
+        }
+
+        for (let x = 0; x < w; x++) { enq(x, 0); enq(x, h-1) }
+        for (let y = 0; y < h; y++) { enq(0, y); enq(w-1, y) }
+
+        while (head < tail) {
+          const idx = queue[head++]
+          const x = idx % w, y = (idx - x) / w
+          d[idx * 4 + 3] = 0
+          enq(x-1, y); enq(x+1, y); enq(x, y-1); enq(x, y+1)
+        }
+
+        ctx.putImageData(data, 0, 0)
+        resolve(canvas.toDataURL('image/png'))
+      }
+      img.onerror = () => reject(new Error('Could not load image.'))
+      img.src = safeSrc
+    } catch (e) {
+      reject(e)
+    } finally {
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 5000)
     }
-    img.onerror=()=>reject(new Error('Could not load image.')); img.src=imgSrc
   })
 }
 

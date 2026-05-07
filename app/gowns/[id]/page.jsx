@@ -300,7 +300,7 @@ export default function GownDetailPage() {
 
   const [content, setContent] = useState({
     enquiry_prompt:    'Interested in this gown? Book a fitting appointment with us.',
-    add_to_cart_label: 'Add to Fitting Room',
+    add_to_cart_label: 'Add to Cart',
     sizing_note:       'All gowns are sample sizes. Alterations are available upon request.',
     share_label:       'Share this look',
   })

@@ -9,7 +9,7 @@ import { getCurrentUser } from '../../utils/authClient'
 
 // ─── Proof upload ─────────────────────────────────────────────────────────────
 
-function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
+function ProofUpload({ orderId, userId, paymentMethod, onUploaded, content }) {
   const [image,     setImage    ] = useState(null)
   const [preview,   setPreview  ] = useState(null)
   const [refNo,     setRefNo    ] = useState('')
@@ -18,7 +18,6 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
   const [error,     setError    ] = useState('')
 
   const fileRef = useRef(null)
-  const user    = getCurrentUser()
 
   const handleFile = useCallback((file) => {
     if (!file) return
@@ -32,7 +31,10 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
     }
     setError('')
     const reader = new FileReader()
-    reader.onload = (e) => { setImage(e.target.result); setPreview(e.target.result) }
+    reader.onload = (e) => {
+      setImage(e.target.result)
+      setPreview(e.target.result)
+    }
     reader.readAsDataURL(file)
   }, [])
 
@@ -46,14 +48,14 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
       setError('Please provide a proof of payment image and/or a reference number.')
       return
     }
-    if (!user) { setError('You must be logged in.'); return }
+    if (!userId) { setError('You must be logged in.'); return }
 
     setUploading(true)
     setError('')
     try {
       const res  = await fetch('/api/orders/upload-proof', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
         body:    JSON.stringify({ orderId, image, referenceNo: refNo }),
       })
       const data = await res.json()
@@ -68,7 +70,7 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
   }
 
   if (paymentMethod === 'cash') return null
-  if (done) return <div className="conf-proof-done">✔ Proof uploaded</div>
+  if (done) return <div className="conf-proof-done">✔ Proof uploaded — we'll verify shortly</div>
 
   return (
     <div className="conf-proof">
@@ -80,12 +82,22 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
         onClick={() => fileRef.current?.click()}
         onDrop={handleDrop}
         onDragOver={e => e.preventDefault()}
-        role="button" tabIndex={0}
+        role="button"
+        tabIndex={0}
         onKeyDown={e => { if (e.key === 'Enter') fileRef.current?.click() }}
+        aria-label="Upload payment proof"
       >
         {preview
-          ? <img src={preview} alt="Proof preview" className="conf-dropzone-img" />
-          : <>
+          ? (
+            <img
+              src={preview}
+              alt="Proof preview"
+              className="conf-dropzone-img"
+              // dataUrl — no 404 risk, but guard anyway
+              onError={e => { e.target.onerror = null; e.target.style.display = 'none' }}
+            />
+          ) : (
+            <>
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="17 8 12 3 7 8"/>
@@ -94,10 +106,17 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
               <p>Click or drag your screenshot here</p>
               <p className="conf-dropzone-hint">{content.accepted_fmt}</p>
             </>
+          )
         }
       </div>
-      <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/jpg"
-        style={{ display:'none' }} onChange={e => handleFile(e.target.files?.[0])} />
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/jpg"
+        style={{ display: 'none' }}
+        onChange={e => handleFile(e.target.files?.[0])}
+      />
 
       {preview && (
         <button className="conf-change-img" onClick={() => fileRef.current?.click()}>
@@ -111,18 +130,18 @@ function ProofUpload({ orderId, paymentMethod, onUploaded, content }) {
           <span className="conf-label-note"> — required if no image uploaded</span>
         </label>
         <input
-          type="text" className="conf-input"
+          type="text"
+          className="conf-input"
           placeholder="e.g. GCash ref 123456789"
-          value={refNo} onChange={e => setRefNo(e.target.value)}
+          value={refNo}
+          onChange={e => setRefNo(e.target.value)}
         />
       </div>
 
-      {!image && !refNo.trim() && (
-        <p className="conf-upload-hint">
-          Please upload a screenshot, enter a reference number, or both.
-        </p>
-      )}
-
+      <p className={`conf-upload-hint${(!image && !refNo.trim()) ? ' conf-upload-hint--visible' : ''}`}>
+        Please upload a screenshot, enter a reference number, or both.
+      </p>
+      
       {error && <p className="conf-error">{error}</p>}
 
       <button
@@ -142,6 +161,12 @@ export default function OrderConfirmationPage() {
   const params  = useParams()
   const orderId = params?.id
 
+  // ── Stable user ref — computed once on mount, never recreated ─────────────
+  // CRITICAL: do NOT compute user inline during render or in a useCallback
+  // dependency. Every render creates a new object reference, causing
+  // fetchOrder to be recreated, which causes the useEffect to re-fire,
+  // which calls setOrder(), which triggers a render — infinite loop.
+  const [user,       setUser      ] = useState(null)
   const [order,      setOrder     ] = useState(null)
   const [loading,    setLoading   ] = useState(true)
   const [error,      setError     ] = useState('')
@@ -150,22 +175,29 @@ export default function OrderConfirmationPage() {
   const [content, setContent] = useState({
     heading:      'Upload Payment Proof',
     instructions: 'Please upload a clear screenshot or photo of your payment confirmation.',
-    accepted_fmt: 'JPG, PNG or PDF — max 10 MB',
+    accepted_fmt: 'JPG or PNG — max 5 MB',
     submit_label: 'Send proof',
   })
 
-  const user = typeof window !== 'undefined' ? getCurrentUser() : null
+  // Resolve user exactly once — stable for the lifetime of this page
+  useEffect(() => {
+    setUser(getCurrentUser())
+  }, [])
 
+  // CMS content — fires once
   useEffect(() => {
     fetch('/api/cms/content?section=upload-proof')
       .then(r => r.json())
-      .then(d => { if (d.ok && d.fields) setContent(d.fields) })
+      .then(d => { if (d.ok && d.fields) setContent(prev => ({ ...prev, ...d.fields })) })
       .catch(() => {})
   }, [])
 
-  // ── fetchOrder in page scope so handleConfirmReceipt can call it ──────────
+  // ── fetchOrder: depends on orderId and user.id (primitives, not objects) ──
+  // Using user?.id (a string) instead of user (an object) means this callback
+  // is only recreated when the actual user ID changes — not on every render.
   const fetchOrder = useCallback(() => {
-    if (!orderId || !user) return
+    if (!orderId || !user?.id) return
+    setLoading(true)
     fetch(`/api/orders?userId=${user.id}`, {
       headers: { 'x-user-id': user.id },
     })
@@ -174,18 +206,18 @@ export default function OrderConfirmationPage() {
         if (!d.ok) { setError('Could not load order.'); return }
         const found = (d.orders || []).find(o => String(o.id) === String(orderId))
         if (!found) setError('Order not found.')
-        else setOrder(found)
+        else { setError(''); setOrder(found) }
       })
       .catch(() => setError('Could not connect.'))
       .finally(() => setLoading(false))
-  }, [orderId, user])
+  }, [orderId, user?.id])  // ← primitive dependency, not the user object
 
   useEffect(() => {
     fetchOrder()
   }, [fetchOrder])
 
   const handleConfirmReceipt = async () => {
-    if (!user || !order) return
+    if (!user?.id || !order) return
     setConfirming(true)
     try {
       const res  = await fetch('/api/orders', {
@@ -195,30 +227,31 @@ export default function OrderConfirmationPage() {
       })
       const data = await res.json()
       if (data.ok) fetchOrder()
-    } catch {}
-    finally { setConfirming(false) }
+    } catch {
+      // silent — order state unchanged, user can retry
+    } finally {
+      setConfirming(false)
+    }
   }
 
-  const fmt  = n => n != null ? '₱' + Number(n).toLocaleString('en-PH') : '—'
+  const fmt  = n  => n  != null ? '₱' + Number(n).toLocaleString('en-PH') : '—'
   const payL = { gcash: 'GCash', bdo: 'BDO Bank Transfer', cash: 'Cash on Pickup' }
   const delL = { pickup: 'Store Pickup', lalamove: 'Lalamove Delivery' }
 
-  // ── 7-day void check (UI only — no DB change) ─────────────────────────────
+  // ── 7-day void check (UI only — server enforces separately) ──────────────
   const isVoided = (() => {
     if (!order) return false
-    if (['paid','processing','ready','shipped','completed','cancelled','refunded']
-        .includes(order.status)) return false
+    if (['paid','processing','ready','shipped','completed','cancelled','refunded'].includes(order.status)) return false
     if (['paid','verified'].includes(order.paymentStatus)) return false
-    const days = (new Date() - new Date(order.placedAt)) / (1000 * 60 * 60 * 24)
+    const days = (Date.now() - new Date(order.placedAt).getTime()) / 86_400_000
     return days >= 7
   })()
 
   const daysRemaining = (() => {
     if (!order || isVoided) return null
-    if (['paid','processing','ready','shipped','completed','cancelled','refunded']
-        .includes(order.status)) return null
+    if (['paid','processing','ready','shipped','completed','cancelled','refunded'].includes(order.status)) return null
     if (['paid','verified'].includes(order.paymentStatus)) return null
-    const days = (new Date() - new Date(order.placedAt)) / (1000 * 60 * 60 * 24)
+    const days      = (Date.now() - new Date(order.placedAt).getTime()) / 86_400_000
     const remaining = Math.ceil(7 - days)
     return remaining <= 3 ? remaining : null
   })()
@@ -251,7 +284,7 @@ export default function OrderConfirmationPage() {
             </div>
             <h1 className="conf-hero-title">Order placed!</h1>
             <p className="conf-hero-sub">
-              Thank you, {user?.firstName || 'friend'}. We've received your order.
+              Thank you, {user.firstName || user.name || 'friend'}. We've received your order.
             </p>
             <div className="conf-order-number">
               <span className="conf-order-label">Order number</span>
@@ -274,7 +307,7 @@ export default function OrderConfirmationPage() {
                 </div>
               )}
 
-              {/* Expired state (UI only) */}
+              {/* Expired (UI only) */}
               {isVoided ? (
                 <div className="conf-card conf-card--voided">
                   <p className="conf-card-title">Order Expired</p>
@@ -308,14 +341,16 @@ export default function OrderConfirmationPage() {
                     </ol>
                   </div>
 
+                  {/* Proof upload — passes userId as a prop (stable string) */}
                   <ProofUpload
                     orderId={order.id}
+                    userId={user.id}
                     paymentMethod={order.paymentMethod}
                     onUploaded={() => setOrder(o => ({ ...o, paymentStatus: 'pending' }))}
                     content={content}
                   />
 
-                  {['ready','shipped'].includes(order.status) && (
+                  {['ready', 'shipped'].includes(order.status) && (
                     <div className="conf-card conf-card--action">
                       <p className="conf-card-title">Received your order?</p>
                       <p className="conf-card-sub">Confirm receipt once you have your gown.</p>
@@ -341,20 +376,32 @@ export default function OrderConfirmationPage() {
               )}
             </div>
 
+            {/* Sidebar */}
             <aside className="conf-sidebar">
               <div className="conf-card">
                 <p className="conf-card-title">Order summary</p>
                 <div className="conf-summary-rows">
                   {(order.items || []).map((item, idx) => (
                     <div key={idx} className="conf-summary-item">
-                      <span>{item.gownName}{item.sizeLabel ? ` (${item.sizeLabel})` : ''} ×{item.quantity || 1}</span>
+                      <span>
+                        {item.gownName}
+                        {item.sizeLabel ? ` (${item.sizeLabel})` : ''}
+                        {' '}×{item.quantity || 1}
+                      </span>
                       <span>{fmt((item.unitPrice || 0) * (item.quantity || 1))}</span>
                     </div>
                   ))}
                 </div>
                 <div className="conf-summary-divider" />
+                {Number(order.shippingFee) > 0 && (
+                  <div className="conf-summary-item" style={{ opacity: 0.6, fontSize: 13 }}>
+                    <span>Shipping (est.)</span>
+                    <span>{fmt(order.shippingFee)}</span>
+                  </div>
+                )}
                 <div className="conf-summary-total">
-                  <span>Total</span><span>{fmt(order.total)}</span>
+                  <span>Total</span>
+                  <span>{fmt(order.total)}</span>
                 </div>
                 <div className="conf-summary-meta">
                   <div className="conf-meta-row">
@@ -367,7 +414,8 @@ export default function OrderConfirmationPage() {
                   </div>
                   {order.deliveryAddress && (
                     <div className="conf-meta-row conf-meta-row--col">
-                      <span>Address</span><span>{order.deliveryAddress}</span>
+                      <span>Address</span>
+                      <span>{order.deliveryAddress}</span>
                     </div>
                   )}
                   <div className="conf-meta-row">
@@ -384,6 +432,7 @@ export default function OrderConfirmationPage() {
                   </div>
                 </div>
               </div>
+
               <div className="conf-sidebar-links">
                 <Link href="/my-orders" className="conf-link">View all orders →</Link>
                 <Link href="/gowns"     className="conf-link">Continue browsing →</Link>
