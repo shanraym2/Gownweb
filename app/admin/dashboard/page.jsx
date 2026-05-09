@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, startTransition } from 'react'
 import Link from 'next/link'
 import {
   Chart as ChartJS,
@@ -38,20 +38,17 @@ const ACTIVE_STATUSES = new Set(['paid', 'processing', 'ready', 'shipped'])
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// jsPDF's built-in Helvetica font does not contain ₱ (U+20B1).
-// Use PHP prefix throughout PDF output to avoid the ± glyph fallback.
 function fmtPhp(n)    { return 'PHP ' + Math.round(n).toLocaleString('en-PH') }
-function fmtPhpUI(n)  { return '₱'   + Math.round(n).toLocaleString('en-PH') }  // UI only
+function fmtPhpUI(n)  { return '₱'   + Math.round(n).toLocaleString('en-PH') }
 function fmtDate(iso) {
   if (!iso) return ''
-  return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
+  return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
 }
-function isoDate(d)    { return d.toISOString().slice(0, 10) }
-function todayStr()    { return isoDate(new Date()) }
-function daysAgoStr(n) { const d = new Date(); d.setDate(d.getDate() - n); return isoDate(d) }
+function isoDate(d)      { return d.toISOString().slice(0, 10) }
+function todayStr()      { return isoDate(new Date()) }
+function daysAgoStr(n)   { const d = new Date(); d.setDate(d.getDate() - n); return isoDate(d) }
 function monthsAgoStr(n) { const d = new Date(); d.setMonth(d.getMonth() - n); return isoDate(d) }
 
-// Resolve customer name from any field shape the API might return
 function customerName(o) {
   return (
     o.customerName    ||
@@ -63,6 +60,54 @@ function customerName(o) {
     '—'
   )
 }
+
+// ── Export constants ──────────────────────────────────────────────────────────
+
+const REPORT_TYPES = [
+  { key: 'orders',       label: 'Orders',       desc: 'One row per order' },
+  { key: 'items',        label: 'Line items',   desc: 'One row per item' },
+  { key: 'summary',      label: 'Summary',      desc: 'Aggregated stats' },
+  { key: 'consolidated', label: 'Consolidated', desc: 'Full report (all sections)' },
+]
+
+// FIX (features): Presets store a datePreset key instead of literal date strings,
+// so "Last 30 days" always means the rolling last 30 days when restored.
+const DATE_PRESETS = [
+  { key: 'today',    label: 'Today',          from: () => todayStr(),       to: () => todayStr()  },
+  { key: 'last7',    label: 'Last 7 days',    from: () => daysAgoStr(7),    to: () => todayStr()  },
+  { key: 'last30',   label: 'Last 30 days',   from: () => daysAgoStr(30),   to: () => todayStr()  },
+  { key: 'last3mo',  label: 'Last 3 months',  from: () => monthsAgoStr(3),  to: () => todayStr()  },
+  { key: 'last12mo', label: 'Last 12 months', from: () => monthsAgoStr(12), to: () => todayStr()  },
+  { key: 'alltime',  label: 'All time',       from: () => '',               to: () => ''           },
+]
+
+// ── Column definitions ────────────────────────────────────────────────────────
+
+const ORDER_COLUMNS = [
+  { key: 'orderNumber',   label: 'Order #',          always: true,  getValue: o => o.orderNumber || o.order_number || '—' },
+  { key: 'date',          label: 'Date',             always: true,  getValue: o => fmtDate(o.placedAt || o.createdAt || o.placed_at) },
+  { key: 'customerName',  label: 'Customer name',    always: true,  getValue: o => customerName(o) },
+  { key: 'email',         label: 'Email',            always: false, getValue: o => o.customerEmail || o.customer_email || o.contact?.email || '—' },
+  { key: 'phone',         label: 'Phone',            always: false, getValue: o => o.customer_phone || o.contact?.phone || '—' },
+  { key: 'status',        label: 'Status',           always: true,  getValue: o => STATUS_META[o.status]?.label || o.status },
+  { key: 'paymentMethod', label: 'Payment method',   always: false, getValue: o => (o.paymentMethod || o.payment_method || '—').toUpperCase() },
+  { key: 'paymentStatus', label: 'Payment status',   always: false, getValue: o => o.payment_status || o.paymentStatus || '—' },
+  { key: 'proofStatus',   label: 'Proof status',     always: false, getValue: o => o.proofStatus   || o.proof_status   || '—' },
+  { key: 'subtotal',      label: 'Subtotal',         always: false, getValue: o => fmtPhp(o.subtotal       || 0) },
+  { key: 'discount',      label: 'Discount',         always: false, getValue: o => fmtPhp(o.discount_total || o.discountTotal || 0) },
+  { key: 'shippingFee',   label: 'Shipping fee',     always: false, getValue: o => fmtPhp(o.shipping_fee   || o.shippingFee   || 0) },
+  { key: 'total',         label: 'Total',            always: true,  getValue: o => fmtPhp(o.total          || 0) },
+  { key: 'notes',         label: 'Notes',            always: false, getValue: o => o.notes || o.note || '—' },
+  { key: 'deliveryAddr',  label: 'Delivery address', always: false, getValue: o => o.deliveryAddress || o.delivery_address || o.address || '—' },
+]
+
+const DEFAULT_ORDER_COL_KEYS = new Set([
+  'orderNumber', 'date', 'customerName', 'status', 'paymentMethod', 'total',
+])
+
+// FIX (performance): memoised once — ORDER_COLUMNS is a module-level constant so
+// there's no need to recompute this on every render.
+const TOGGLEABLE_COLS = ORDER_COLUMNS.filter(c => !c.always)
 
 // ── Revenue chart builder ─────────────────────────────────────────────────────
 
@@ -203,22 +248,16 @@ function Interpretation({ text, cls }) {
 }
 
 // ── PDF generator ─────────────────────────────────────────────────────────────
-// Notes:
-//   • jsPDF's built-in fonts (Helvetica/Times/Courier) lack ₱ (U+20B1).
-//     We use "PHP" prefix instead to avoid the ± fallback glyph.
-//   • autoTable column widths are tuned for A4 landscape (270 mm usable).
-//   • Customer name resolved via customerName() helper — handles camelCase,
-//     snake_case, and nested contact object from both JSON and DB paths.
 
-async function generatePDF(orders, dateFrom, dateTo, reportType) {
+async function generatePDF(orders, dateFrom, dateTo, reportType, activeColKeys) {
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
   ])
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-  const W   = doc.internal.pageSize.getWidth()   // 297
-  const H   = doc.internal.pageSize.getHeight()  // 210
+  const W   = doc.internal.pageSize.getWidth()
+  const H   = doc.internal.pageSize.getHeight()
   const now = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
 
   const rangeLabel = dateFrom && dateTo
@@ -231,7 +270,6 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
   const revenue   = completed.reduce((s, o) => s + Number(o.total || 0), 0)
   const aov       = completed.length ? revenue / completed.length : 0
 
-  // ── Colour palette ─────────────────────────────────────────────────────────
   const NAVY  = [26,  26,  46 ]
   const GOLD  = [200, 169, 110]
   const WHITE = [255, 255, 255]
@@ -239,13 +277,11 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
   const GREY  = [100, 100, 100]
   const LIGHT = [245, 245, 248]
 
-  // ── Shared table styles ────────────────────────────────────────────────────
-  const headStyles = { fillColor: NAVY, textColor: GOLD, fontSize: 8, fontStyle: 'bold', cellPadding: { top: 4, bottom: 4, left: 4, right: 4 } }
-  const bodyStyles = { fontSize: 8, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, textColor: DARK, overflow: 'ellipsize' }
+  const headStyles   = { fillColor: NAVY, textColor: GOLD, fontSize: 8, fontStyle: 'bold', cellPadding: { top: 4, bottom: 4, left: 4, right: 4 } }
+  const bodyStyles   = { fontSize: 8, cellPadding: { top: 3, bottom: 3, left: 4, right: 4 }, textColor: DARK, overflow: 'ellipsize' }
   const altRowStyles = { fillColor: LIGHT }
-  const margin = { left: 14, right: 14 }
+  const margin       = { left: 14, right: 14 }
 
-  // ── Helper: draw a section title ──────────────────────────────────────────
   function sectionTitle(text, y) {
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9)
@@ -257,7 +293,6 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
     return y + 6
   }
 
-  // ── Helper: add new page with mini header ─────────────────────────────────
   function addPage() {
     doc.addPage()
     doc.setFillColor(...NAVY)
@@ -272,31 +307,21 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
     return 16
   }
 
-  // ── Cover / header ─────────────────────────────────────────────────────────
+  // Cover
   doc.setFillColor(...NAVY)
   doc.rect(0, 0, W, 28, 'F')
-
-  // Gold accent bar
   doc.setFillColor(...GOLD)
   doc.rect(0, 28, W, 1.5, 'F')
-
   doc.setTextColor(...GOLD)
   doc.setFontSize(18)
   doc.setFont('helvetica', 'bold')
   doc.text('JCE Bridal Boutique', 14, 13)
 
-  const titleMap = {
-    orders:       'Orders Report',
-    items:        'Line Items Report',
-    summary:      'Sales Summary Report',
-    consolidated: 'Consolidated Report',
-  }
+  const titleMap = { orders: 'Orders Report', items: 'Line Items Report', summary: 'Sales Summary Report', consolidated: 'Consolidated Report' }
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(...WHITE)
   doc.text(titleMap[reportType] || 'Report', 14, 21)
-
-  // Right-aligned meta
   doc.setFontSize(8)
   doc.setTextColor(180, 180, 180)
   doc.text(`Generated: ${now}`, W - 14, 12, { align: 'right' })
@@ -305,38 +330,32 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
 
   let y = 38
 
-  // ── Overview stats (shown on every report type) ────────────────────────────
+  // Overview stats
   const statusCounts = {}
   for (const o of orders) statusCounts[o.status] = (statusCounts[o.status] || 0) + 1
   const cancelCount  = (statusCounts['cancelled'] || 0) + (statusCounts['refunded'] || 0)
   const fulfillRate  = orders.length ? Math.round(completed.length / orders.length * 100) : 0
 
   y = sectionTitle('Overview', y)
-
-  // 3-column stat grid
   const statGrid = [
-    ['Total Orders',          String(orders.length),              'Completed Orders',    String(completed.length)],
-    ['Revenue (completed)',   fmtPhp(revenue),                    'Avg Order Value',     fmtPhp(aov)            ],
-    ['Fulfillment Rate',      `${fulfillRate}%`,                  'Cancelled / Refunded',String(cancelCount)    ],
+    ['Total Orders',        String(orders.length),   'Completed Orders',     String(completed.length)],
+    ['Revenue (completed)', fmtPhp(revenue),         'Avg Order Value',      fmtPhp(aov)            ],
+    ['Fulfillment Rate',    `${fulfillRate}%`,        'Cancelled / Refunded', String(cancelCount)    ],
   ]
-
   autoTable(doc, {
-    startY: y,
-    head: [],
-    body: statGrid,
-    theme: 'plain',
+    startY: y, head: [], body: statGrid, theme: 'plain',
     styles: { ...bodyStyles, fontSize: 9 },
     columnStyles: {
       0: { fontStyle: 'bold', textColor: GREY,  cellWidth: 52 },
-      1: { textColor: DARK,   cellWidth: 50, fontStyle: 'bold', fontSize: 10 },
+      1: { textColor: DARK, cellWidth: 50, fontStyle: 'bold', fontSize: 10 },
       2: { fontStyle: 'bold', textColor: GREY,  cellWidth: 52 },
-      3: { textColor: DARK,   cellWidth: 50, fontStyle: 'bold', fontSize: 10 },
+      3: { textColor: DARK, cellWidth: 50, fontStyle: 'bold', fontSize: 10 },
     },
     margin,
   })
   y = doc.lastAutoTable.finalY + 8
 
-  // ── Status breakdown ───────────────────────────────────────────────────────
+  // Status breakdown
   const presentStatuses = STATUSES.filter(s => statusCounts[s] > 0)
   if (presentStatuses.length) {
     y = sectionTitle('Orders by Status', y)
@@ -348,62 +367,33 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
         statusCounts[s],
         `${Math.round(statusCounts[s] / orders.length * 100)}%`,
       ]),
-      theme: 'striped',
-      headStyles,
-      bodyStyles,
-      alternateRowStyles: altRowStyles,
-      columnStyles: {
-        0: { cellWidth: 55 },
-        1: { halign: 'right', cellWidth: 25 },
-        2: { halign: 'right', cellWidth: 35 },
-      },
+      theme: 'striped', headStyles, bodyStyles, alternateRowStyles: altRowStyles,
+      columnStyles: { 0: { cellWidth: 55 }, 1: { halign: 'right', cellWidth: 25 }, 2: { halign: 'right', cellWidth: 35 } },
       margin,
     })
     y = doc.lastAutoTable.finalY + 8
   }
 
-  // ── Orders table ───────────────────────────────────────────────────────────
+  // Orders table — honours activeColKeys
   if (reportType === 'orders' || reportType === 'consolidated') {
+    const cols = ORDER_COLUMNS.filter(c => c.always || activeColKeys.has(c.key))
     if (y > 160) { y = addPage() }
     y = sectionTitle('Order Details', y)
-
     autoTable(doc, {
       startY: y,
-      head: [['Order Number', 'Date', 'Customer Name', 'Email', 'Status', 'Payment', 'Total']],
-      body: orders.map(o => [
-        o.orderNumber || o.order_number || '—',
-        new Date(o.placedAt || o.createdAt || o.placed_at).toLocaleDateString('en-PH', {
-          month: 'short', day: 'numeric', year: 'numeric',
-        }),
-        customerName(o),
-        o.customerEmail || o.customer_email || o.contact?.email || '—',
-        STATUS_META[o.status]?.label || o.status,
-        (o.paymentMethod || o.payment_method || '—').toUpperCase(),
-        fmtPhp(o.total || 0),
-      ]),
-      theme: 'striped',
-      headStyles,
-      bodyStyles,
-      alternateRowStyles: altRowStyles,
-      columnStyles: {
-        0: { cellWidth: 38 },
-        1: { cellWidth: 28 },
-        2: { cellWidth: 48 },
-        3: { cellWidth: 52 },
-        4: { cellWidth: 28 },
-        5: { cellWidth: 22 },
-        6: { halign: 'right', cellWidth: 32 },
-      },
+      head: [cols.map(c => c.label)],
+      body: orders.map(o => cols.map(c => c.getValue(o))),
+      theme: 'striped', headStyles, bodyStyles, alternateRowStyles: altRowStyles,
       margin,
     })
     y = doc.lastAutoTable.finalY + 8
   }
 
-  // ── Line items table ───────────────────────────────────────────────────────
+  // Line items
   if (reportType === 'items' || reportType === 'consolidated') {
     const allItems = []
-    for (const o of orders) {
-      for (const it of (o.items || [])) {
+    for (const o of orders)
+      for (const it of (o.items || []))
         allItems.push([
           o.orderNumber || o.order_number || '—',
           customerName(o),
@@ -413,29 +403,18 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
           fmtPhp(it.unitPrice || it.unit_price || 0),
           fmtPhp(it.lineTotal || it.line_total || 0),
         ])
-      }
-    }
-
     if (allItems.length) {
       if (y > 160) { y = addPage() }
       y = sectionTitle('Line Items', y)
-
       autoTable(doc, {
         startY: y,
-        head: [['Order Number', 'Customer', 'Item', 'Size', 'Qty', 'Unit Price', 'Line Total']],
+        head: [['Order #', 'Customer', 'Item', 'Size', 'Qty', 'Unit Price', 'Line Total']],
         body: allItems,
-        theme: 'striped',
-        headStyles,
-        bodyStyles,
-        alternateRowStyles: altRowStyles,
+        theme: 'striped', headStyles, bodyStyles, alternateRowStyles: altRowStyles,
         columnStyles: {
-          0: { cellWidth: 38 },
-          1: { cellWidth: 45 },
-          2: { cellWidth: 68 },
-          3: { cellWidth: 16 },
-          4: { halign: 'right', cellWidth: 12 },
-          5: { halign: 'right', cellWidth: 32 },
-          6: { halign: 'right', cellWidth: 32 },
+          0: { cellWidth: 38 }, 1: { cellWidth: 45 }, 2: { cellWidth: 68 },
+          3: { cellWidth: 16 }, 4: { halign: 'right', cellWidth: 12 },
+          5: { halign: 'right', cellWidth: 32 }, 6: { halign: 'right', cellWidth: 32 },
         },
         margin,
       })
@@ -443,48 +422,33 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
     }
   }
 
-  // ── Top items (summary / consolidated) ────────────────────────────────────
+  // Top items
   if (reportType === 'summary' || reportType === 'consolidated') {
-    // Count across ALL items in completed orders (not just the outer completed array)
     const itemCounts = {}
-    for (const o of orders.filter(isRevenueCounting)) {
+    for (const o of orders.filter(isRevenueCounting))
       for (const it of (o.items || [])) {
+        // FIX (bug): use '(unknown)' fallback so unnamed items don't all merge
+        // under an `undefined` key. PDF version already did this; now consistent.
         const name = it.gownName || it.gown_name || it.name || '(unknown)'
         itemCounts[name] = (itemCounts[name] || 0) + Number(it.quantity || it.qty || 1)
       }
-    }
     const topItems = Object.entries(itemCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
-
     if (topItems.length) {
       if (y > 160) { y = addPage() }
       y = sectionTitle('Top Items Sold  (completed orders only)', y)
-
       const maxQty = topItems[0]?.[1] || 1
       autoTable(doc, {
         startY: y,
         head: [['Rank', 'Item Name', 'Units Sold', 'Share of Top 10']],
-        body: topItems.map(([name, qty], i) => [
-          `#${i + 1}`,
-          name,
-          String(qty),
-          `${Math.round(qty / maxQty * 100)}%`,
-        ]),
-        theme: 'striped',
-        headStyles,
-        bodyStyles,
-        alternateRowStyles: altRowStyles,
-        columnStyles: {
-          0: { cellWidth: 16, halign: 'center' },
-          1: { cellWidth: 120 },
-          2: { cellWidth: 28, halign: 'right' },
-          3: { cellWidth: 35, halign: 'right' },
-        },
+        body: topItems.map(([name, qty], i) => [`#${i + 1}`, name, String(qty), `${Math.round(qty / maxQty * 100)}%`]),
+        theme: 'striped', headStyles, bodyStyles, alternateRowStyles: altRowStyles,
+        columnStyles: { 0: { cellWidth: 16, halign: 'center' }, 1: { cellWidth: 120 }, 2: { cellWidth: 28, halign: 'right' }, 3: { cellWidth: 35, halign: 'right' } },
         margin,
       })
     }
   }
 
-  // ── Page footers ───────────────────────────────────────────────────────────
+  // Page footers
   const pageCount = doc.internal.getNumberOfPages()
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i)
@@ -502,93 +466,384 @@ async function generatePDF(orders, dateFrom, dateTo, reportType) {
   doc.save(`jce-${reportType}-report-${Date.now()}.pdf`)
 }
 
-// ── CSV export ────────────────────────────────────────────────────────────────
+// ── CSV generator (fully client-side) ────────────────────────────────────────
 
-async function downloadCSV(type, secret, dateFrom, dateTo, setExporting) {
-  setExporting(`${type}-csv`)
-  try {
-    const params = new URLSearchParams({ type })
-    if (dateFrom) params.set('from', dateFrom)
-    if (dateTo)   params.set('to',   dateTo)
-    const res = await fetch(`/api/admin/export?${params}`, { headers: { 'X-Admin-Secret': secret } })
-    if (!res.ok) { alert('Export failed. Please try again.'); return }
-    const blob     = await res.blob()
-    const url      = URL.createObjectURL(blob)
-    const a        = document.createElement('a')
-    const filename = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || `jce-${type}.csv`
-    a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
-  } catch { alert('Export failed. Please try again.') }
-  finally { setExporting(null) }
+function escapeCsv(val) {
+  if (val === null || val === undefined) return ''
+  const s = String(val)
+  if (s.includes(',') || s.includes('"') || s.includes('\n'))
+    return '"' + s.replace(/"/g, '""') + '"'
+  return s
 }
 
-// ── Export panel ──────────────────────────────────────────────────────────────
+function generateCSV(orders, dateFrom, dateTo, reportType, activeColKeys) {
+  const now        = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
+  const rangeLabel = dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : dateFrom ? `From ${dateFrom}` : dateTo ? `To ${dateTo}` : 'All time'
+  const completed  = orders.filter(isRevenueCounting)
+  const revenue    = completed.reduce((s, o) => s + Number(o.total || 0), 0)
+  const aov        = completed.length ? revenue / completed.length : 0
 
-const REPORT_TYPES = [
-  { key: 'orders',       label: 'Orders',      desc: 'One row per order' },
-  { key: 'items',        label: 'Line items',   desc: 'One row per item' },
-  { key: 'summary',      label: 'Summary',      desc: 'Aggregated stats' },
-  { key: 'consolidated', label: 'Consolidated', desc: 'Full report (all sections)' },
-]
+  function buildHeader(title) {
+    return [
+      [`JCE Bridal Boutique — ${title}`],
+      [`Generated: ${now}`],
+      [`Period: ${rangeLabel}`],
+      [`Total orders in range: ${orders.length}`],
+      [],
+    ]
+  }
 
-const DATE_PRESETS = [
-  { label: 'Today',         from: () => todayStr(),       to: () => todayStr()  },
-  { label: 'Last 7 days',   from: () => daysAgoStr(7),    to: () => todayStr()  },
-  { label: 'Last 30 days',  from: () => daysAgoStr(30),   to: () => todayStr()  },
-  { label: 'Last 3 months', from: () => monthsAgoStr(3),  to: () => todayStr()  },
-  { label: 'Last 12 months',from: () => monthsAgoStr(12), to: () => todayStr()  },
-  { label: 'All time',      from: () => '',               to: () => ''           },
-]
+  function buildOverview() {
+    const sc = {}
+    for (const o of orders) sc[o.status] = (sc[o.status] || 0) + 1
+    const cancelCount = (sc['cancelled'] || 0) + (sc['refunded'] || 0)
+    const fulfillRate = orders.length ? Math.round(completed.length / orders.length * 100) : 0
+    return [
+      ['OVERVIEW'],
+      ['Metric', 'Value'],
+      ['Total orders (in range)', orders.length],
+      ['Completed orders', completed.length],
+      ['Fulfillment rate', `${fulfillRate}%`],
+      ['Revenue (completed orders only)', fmtPhp(revenue)],
+      ['Average order value (completed)', fmtPhp(aov)],
+      ['Cancelled + Refunded', cancelCount],
+      ['Cancellation rate', `${orders.length ? Math.round(cancelCount / orders.length * 100) : 0}%`],
+      [],
+    ]
+  }
 
-function ExportPanel({ orders, secret, exporting, setExporting }) {
+  function buildStatus() {
+    const sc = {}
+    for (const o of orders) sc[o.status] = (sc[o.status] || 0) + 1
+    return [
+      ['ORDERS BY STATUS'],
+      ['Status', 'Count', 'Share'],
+      ...Object.entries(sc).map(([s, c]) => [s, c, `${Math.round(c / (orders.length || 1) * 100)}%`]),
+      [],
+    ]
+  }
+
+  function buildOrders() {
+    const cols = ORDER_COLUMNS.filter(c => c.always || activeColKeys.has(c.key))
+    return [
+      ['ORDER DETAILS'],
+      cols.map(c => c.label),
+      ...orders.map(o => cols.map(c => c.getValue(o))),
+      [],
+    ]
+  }
+
+  function buildItems() {
+    const rows = []
+    for (const o of orders)
+      for (const it of (o.items || []))
+        rows.push([
+          o.orderNumber || o.order_number || '',
+          fmtDate(o.placedAt || o.createdAt || o.placed_at),
+          o.status,
+          customerName(o),
+          it.gownName || it.gown_name || it.name || '',
+          it.sizeLabel || it.size_label || it.size || '',
+          it.quantity  || it.qty || 1,
+          fmtPhp(it.unitPrice || it.unit_price || 0),
+          fmtPhp(it.lineTotal || it.line_total || 0),
+        ])
+    return [
+      ['LINE ITEMS'],
+      ['Order #', 'Date', 'Status', 'Customer', 'Item', 'Size', 'Qty', 'Unit Price', 'Line Total'],
+      ...rows,
+      [],
+    ]
+  }
+
+  function buildTopItems() {
+    const ic = {}
+    for (const o of completed)
+      for (const it of (o.items || [])) {
+        // FIX (bug): '(unknown)' fallback prevents undefined key merging all
+        // unnamed items together — matches the PDF generator's existing behaviour.
+        const name = it.gownName || it.gown_name || it.name || '(unknown)'
+        ic[name] = (ic[name] || 0) + (it.quantity || it.qty || 1)
+      }
+    const top = Object.entries(ic).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    return [
+      ['TOP 10 ITEMS SOLD (Completed Orders)'],
+      ['Rank', 'Item', 'Units Sold'],
+      ...top.map(([name, qty], i) => [`#${i + 1}`, name, qty]),
+      [],
+    ]
+  }
+
+  let sections = []
+  if (reportType === 'summary')           sections = [...buildHeader('Sales Summary Report'),  ...buildOverview(), ...buildStatus(), ...buildTopItems()]
+  else if (reportType === 'items')        sections = [...buildHeader('Line Items Report'),      ...buildItems()]
+  else if (reportType === 'consolidated') sections = [...buildHeader('Consolidated Report'),   ...buildOverview(), ...buildStatus(), ...buildOrders(), ...buildItems(), ...buildTopItems()]
+  else                                    sections = [...buildHeader('Orders Report'),          ...buildOrders()]
+
+  return sections.map(r => r.map(escapeCsv).join(',')).join('\n')
+}
+
+function downloadCSVClient(orders, dateFrom, dateTo, reportType, activeColKeys) {
+  const csv  = generateCSV(orders, dateFrom, dateTo, reportType, activeColKeys)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = url
+  a.download = `jce-${reportType}-${Date.now()}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ── Preset helpers (localStorage) ────────────────────────────────────────────
+
+const PRESET_KEY = 'jce_export_presets'
+
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '[]') }
+  catch { return [] }
+}
+function savePresets(presets) {
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)) } catch {}
+}
+
+// FIX (features): resolve a saved datePreset key back to concrete from/to strings.
+// Presets that were saved before this change (with literal dateFrom/dateTo strings)
+// fall back gracefully — they just won't roll forward.
+function resolvePresetDates(config) {
+  if (config.datePreset) {
+    const p = DATE_PRESETS.find(x => x.key === config.datePreset)
+    if (p) return { dateFrom: p.from(), dateTo: p.to() }
+  }
+  return { dateFrom: config.dateFrom || '', dateTo: config.dateTo || '' }
+}
+
+// ── Shared style builders ─────────────────────────────────────────────────────
+
+const S = {
+  // FIX (code quality): pill styles moved to CSS classes (adm-report-pill /
+  // adm-report-pill--active) to avoid creating new objects on every render and
+  // to stay consistent with the adm-period-pill pattern used on the chart.
+  presetPill: {
+    padding: '4px 12px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
+    border: '1px solid var(--color-border-tertiary)',
+    background: 'var(--color-background-primary)',
+    color: 'var(--color-text-secondary)', transition: 'border-color .15s',
+  },
+  // FIX (UX): active preset pill so the selected date range is highlighted.
+  presetPillActive: {
+    padding: '4px 12px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
+    border: '1px solid var(--color-text-primary)',
+    background: 'var(--color-text-primary)',
+    color: 'var(--color-background-primary)', transition: 'all .15s',
+  },
+  label:   { fontSize: 11, fontWeight: 600, color: 'var(--color-text-tertiary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: .5 },
+  section: { marginBottom: 18 },
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function CheckRow({ checked, onChange, label, disabled, dotColor }) {
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1 }}>
+      <input
+        type="checkbox" checked={checked} onChange={onChange} disabled={disabled}
+        style={{ width: 14, height: 14, accentColor: 'var(--color-text-primary)', cursor: disabled ? 'default' : 'pointer' }}
+      />
+      {dotColor && <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />}
+      <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{label}</span>
+    </label>
+  )
+}
+
+function Collapse({ title, badge, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          padding: '0 0 6px', color: 'var(--color-text-tertiary)',
+          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5,
+        }}
+      >
+        {/* FIX (UX): optional badge beside title shows e.g. "3 of 9 active" so
+            users can immediately see when a filter is narrowing results without
+            having to open the collapse. */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {title}
+          {badge != null && (
+            <span style={{
+              fontSize: 10, fontWeight: 500, padding: '1px 7px', borderRadius: 10,
+              background: 'var(--color-border-tertiary)', color: 'var(--color-text-secondary)',
+              textTransform: 'none', letterSpacing: 0,
+            }}>
+              {badge}
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: 9, opacity: 0.55 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
+// FIX (code quality): named DateInput component instead of an opaque tuple map.
+// Accepts label, value, onChange, min, max — easy to extend.
+function DateInput({ label, value, onChange, min, max }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+      {label}
+      <input
+        type="date" value={value} onChange={e => onChange(e.target.value)}
+        min={min} max={max}
+        style={{
+          padding: '6px 10px', borderRadius: 6, fontSize: 12,
+          border: '1px solid var(--color-border-tertiary)',
+          background: 'var(--color-background-primary)',
+          color: 'var(--color-text-primary)',
+        }}
+      />
+    </label>
+  )
+}
+
+// ── ExportPanel ───────────────────────────────────────────────────────────────
+
+function ExportPanel({ orders = [] }) {
   const [open,       setOpen      ] = useState(false)
   const [reportType, setReportType] = useState('consolidated')
   const [dateFrom,   setDateFrom  ] = useState('')
   const [dateTo,     setDateTo    ] = useState('')
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [csvLoading, setCsvLoading] = useState(false)
 
-  const filteredForPDF = useMemo(() => {
-    if (!dateFrom && !dateTo) return orders
+  const [activeColKeys,   setActiveColKeys  ] = useState(new Set(DEFAULT_ORDER_COL_KEYS))
+  const [activeStatuses,  setActiveStatuses ] = useState(new Set(STATUSES))
+
+  // FIX (UX): lazy initial state — loadPresets() is called once at mount so
+  // the "Saved presets" collapse correctly reads presets.length > 0 on first render,
+  // rather than always starting as 0 before the useEffect fires.
+  const [presets,      setPresets    ] = useState(() => loadPresets())
+  const [presetName,   setPresetName ] = useState('')
+  const [presetSaved,  setPresetSaved] = useState(false)
+  const saveTimerRef = useRef(null)
+
+  // FIX (bug): clean up the "✓ Saved" timer on unmount to prevent setting state
+  // on an unmounted component.
+  useEffect(() => () => clearTimeout(saveTimerRef.current), [])
+
+  const filteredOrders = useMemo(() => {
     return orders.filter(o => {
       const d = (o.placedAt || o.createdAt)?.slice(0, 10)
-      if (!d) return false
       if (dateFrom && d < dateFrom) return false
       if (dateTo   && d > dateTo)   return false
+      if (!activeStatuses.has(o.status)) return false
       return true
     })
-  }, [orders, dateFrom, dateTo])
+  }, [orders, dateFrom, dateTo, activeStatuses])
 
-  const applyPreset = p => { setDateFrom(p.from()); setDateTo(p.to()) }
+  // FIX (UX): derive which date preset (if any) matches the current from/to so
+  // the active preset pill can be highlighted.
+  const activeDatePresetKey = useMemo(() => {
+    for (const p of DATE_PRESETS) {
+      if (p.from() === dateFrom && p.to() === dateTo) return p.key
+    }
+    return null
+  }, [dateFrom, dateTo])
+
+  const applyDatePreset = useCallback(p => { setDateFrom(p.from()); setDateTo(p.to()) }, [])
+  const toggleCol       = useCallback(key => {
+    setActiveColKeys(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }, [])
+  const toggleStatus    = useCallback(s => {
+    setActiveStatuses(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n })
+  }, [])
+  const toggleAllStatuses = useCallback(on => {
+    setActiveStatuses(on ? new Set(STATUSES) : new Set())
+  }, [])
+
+  // FIX (UX): reset to defaults in one click.
+  const handleReset = useCallback(() => {
+    setReportType('consolidated')
+    setDateFrom('')
+    setDateTo('')
+    setActiveColKeys(new Set(DEFAULT_ORDER_COL_KEYS))
+    setActiveStatuses(new Set(STATUSES))
+  }, [])
+
+  function currentConfig() {
+    // FIX (features): store the active datePreset key (if any) instead of literal
+    // strings so rolling presets like "Last 30 days" stay relative when restored.
+    return {
+      reportType,
+      datePreset: activeDatePresetKey ?? undefined,
+      // Keep literal dates too so custom ranges round-trip correctly.
+      dateFrom: activeDatePresetKey ? undefined : dateFrom,
+      dateTo:   activeDatePresetKey ? undefined : dateTo,
+      colKeys:   [...activeColKeys],
+      statuses:  [...activeStatuses],
+    }
+  }
+
+  function applyConfig(cfg) {
+    setReportType(cfg.reportType || 'consolidated')
+    const { dateFrom: df, dateTo: dt } = resolvePresetDates(cfg)
+    setDateFrom(df)
+    setDateTo(dt)
+    setActiveColKeys(new Set(cfg.colKeys || [...DEFAULT_ORDER_COL_KEYS]))
+    setActiveStatuses(new Set(cfg.statuses || STATUSES))
+  }
+
+  function handleSavePreset() {
+    const name = presetName.trim()
+    if (!name) return
+    const updated = [...presets.filter(p => p.name !== name), { name, config: currentConfig() }]
+    setPresets(updated); savePresets(updated); setPresetName('')
+    setPresetSaved(true)
+    clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => setPresetSaved(false), 2000)
+  }
+  function handleDeletePreset(name) {
+    const updated = presets.filter(p => p.name !== name)
+    setPresets(updated); savePresets(updated)
+  }
 
   const handlePDF = async () => {
     setPdfLoading(true)
     try {
-      await generatePDF(filteredForPDF, dateFrom, dateTo, reportType)
+      await generatePDF(filteredOrders, dateFrom, dateTo, reportType, activeColKeys)
     } catch (e) {
       console.error(e)
       alert('PDF generation failed.\n\nMake sure jspdf and jspdf-autotable are installed:\nnpm install jspdf jspdf-autotable')
-    } finally {
-      setPdfLoading(false)
-    }
+    } finally { setPdfLoading(false) }
   }
 
-  const handleCSV = () => downloadCSV(reportType, secret, dateFrom, dateTo, setExporting)
-  const isBusy = pdfLoading || !!exporting
-
-  const pill = (active) => ({
-    padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
-    cursor: 'pointer', transition: 'all .15s',
-    border: active ? '1px solid var(--color-text-primary)' : '1px solid var(--color-border-tertiary)',
-    background: active ? 'var(--color-text-primary)' : 'var(--color-background-primary)',
-    color: active ? 'var(--color-background-primary)' : 'var(--color-text-secondary)',
-  })
-
-  const presetPill = {
-    padding: '4px 12px', borderRadius: 20, fontSize: 11, cursor: 'pointer',
-    border: '1px solid var(--color-border-tertiary)',
-    background: 'var(--color-background-primary)',
-    color: 'var(--color-text-secondary)', transition: 'border-color .15s',
+  // FIX (code quality): use startTransition instead of setTimeout(..., 0) to
+  // yield to the browser for the loading spinner — the correct React 18 idiom.
+  const handleCSV = () => {
+    setCsvLoading(true)
+    startTransition(() => {
+      try { downloadCSVClient(filteredOrders, dateFrom, dateTo, reportType, activeColKeys) }
+      catch (e) { console.error(e); alert('CSV generation failed.') }
+      finally { setCsvLoading(false) }
+    })
   }
+
+  const isBusy         = pdfLoading || csvLoading
+  const statusesInData = useMemo(() => new Set(orders.map(o => o.status)), [orders])
+
+  // Status badge: how many statuses are active vs total that exist in data
+  const statusBadge = useMemo(() => {
+    const inData = STATUSES.filter(s => statusesInData.has(s))
+    const active = inData.filter(s => activeStatuses.has(s))
+    return active.length < inData.length ? `${active.length} of ${inData.length}` : null
+  }, [activeStatuses, statusesInData])
+
+  // FIX (features): warn when the order count is very large — PDF will be slow.
+  const largeExportWarning = filteredOrders.length > 500
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -614,17 +869,22 @@ function ExportPanel({ orders, secret, exporting, setExporting }) {
 
       {open && (
         <div style={{
-          marginTop: 8, padding: '18px 20px',
+          marginTop: 8, padding: '20px 22px',
           border: '1px solid var(--color-border-tertiary)', borderRadius: 12,
           background: 'var(--color-background-secondary)',
         }}>
 
-          {/* Report type */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-tertiary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: .5 }}>Report type</div>
+          {/* Report type — uses CSS classes to avoid new style objects per render */}
+          <div style={S.section}>
+            <div style={S.label}>Report type</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {REPORT_TYPES.map(r => (
-                <button key={r.key} onClick={() => setReportType(r.key)} title={r.desc} style={pill(reportType === r.key)}>
+                <button
+                  key={r.key}
+                  onClick={() => setReportType(r.key)}
+                  title={r.desc}
+                  className={`adm-period-pill${reportType === r.key ? ' active' : ''}`}
+                >
                   {r.label}
                 </button>
               ))}
@@ -632,28 +892,25 @@ function ExportPanel({ orders, secret, exporting, setExporting }) {
           </div>
 
           {/* Date range */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-tertiary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: .5 }}>Date range</div>
+          <div style={S.section}>
+            <div style={S.label}>Date range</div>
+            {/* FIX (UX): active preset pill is highlighted */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
               {DATE_PRESETS.map(p => (
-                <button key={p.label} onClick={() => applyPreset(p)} style={presetPill}>{p.label}</button>
+                <button
+                  key={p.key}
+                  onClick={() => applyDatePreset(p)}
+                  style={activeDatePresetKey === p.key ? S.presetPillActive : S.presetPill}
+                >
+                  {p.label}
+                </button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              {[['From', dateFrom, setDateFrom], ['To', dateTo, setDateTo]].map(([lbl, val, set]) => (
-                <label key={lbl} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--color-text-tertiary)' }}>
-                  {lbl}
-                  <input
-                    type="date" value={val} onChange={e => set(e.target.value)}
-                    style={{
-                      padding: '6px 10px', borderRadius: 6, fontSize: 12,
-                      border: '1px solid var(--color-border-tertiary)',
-                      background: 'var(--color-background-primary)',
-                      color: 'var(--color-text-primary)',
-                    }}
-                  />
-                </label>
-              ))}
+              {/* FIX (code quality): named DateInput instead of opaque tuple map;
+                  "To" enforces min=dateFrom so you can't accidentally set an invalid range. */}
+              <DateInput label="From" value={dateFrom} onChange={setDateFrom} max={dateTo || undefined} />
+              <DateInput label="To"   value={dateTo}   onChange={setDateTo}   min={dateFrom || undefined} />
               {(dateFrom || dateTo) && (
                 <button
                   onClick={() => { setDateFrom(''); setDateTo('') }}
@@ -663,39 +920,148 @@ function ExportPanel({ orders, secret, exporting, setExporting }) {
                 </button>
               )}
             </div>
-            <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 8 }}>
-              {(dateFrom || dateTo)
-                ? `${filteredForPDF.length} of ${orders.length} orders match this range`
-                : `All ${orders.length} orders will be included`}
-            </p>
           </div>
 
+          {/* Status filter — badge shows narrowed count at a glance */}
+          <Collapse title="Status filter" badge={statusBadge} defaultOpen={false}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+              <button onClick={() => toggleAllStatuses(true)}  style={{ ...S.presetPill, fontSize: 10 }}>All</button>
+              <button onClick={() => toggleAllStatuses(false)} style={{ ...S.presetPill, fontSize: 10 }}>None</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '6px 16px', marginBottom: 10 }}>
+              {STATUSES.map(s => (
+                <CheckRow
+                  key={s}
+                  checked={activeStatuses.has(s)}
+                  onChange={() => toggleStatus(s)}
+                  label={`${STATUS_META[s]?.label || s}${statusesInData.has(s) ? '' : ' (none)'}`}
+                  disabled={!statusesInData.has(s)}
+                  dotColor={STATUS_META[s]?.color}
+                />
+              ))}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: 0 }}>
+              {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} match current filters
+              {orders.length !== filteredOrders.length ? ` (of ${orders.length} total)` : ''}
+            </p>
+          </Collapse>
+
+          {/* Column selection */}
+          {(reportType === 'orders' || reportType === 'consolidated') && (
+            <Collapse title="Column selection (orders table)" defaultOpen={false}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '6px 16px', marginBottom: 10 }}>
+                {ORDER_COLUMNS.filter(c => c.always).map(c => (
+                  <CheckRow key={c.key} checked disabled label={`${c.label} (required)`} />
+                ))}
+                {/* FIX (performance): TOGGLEABLE_COLS is now a module-level constant
+                    computed once instead of being refiltered on every render. */}
+                {TOGGLEABLE_COLS.map(c => (
+                  <CheckRow
+                    key={c.key}
+                    checked={activeColKeys.has(c.key)}
+                    onChange={() => toggleCol(c.key)}
+                    label={c.label}
+                  />
+                ))}
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: 0 }}>
+                {ORDER_COLUMNS.filter(c => c.always || activeColKeys.has(c.key)).length} of {ORDER_COLUMNS.length} columns selected
+              </p>
+            </Collapse>
+          )}
+
+          {/* Saved presets */}
+          <Collapse title="Saved presets" defaultOpen={presets.length > 0}>
+            {presets.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                {presets.map(p => (
+                  <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <button
+                      onClick={() => applyConfig(p.config)}
+                      style={{
+                        padding: '4px 12px', borderRadius: '20px 0 0 20px', fontSize: 11,
+                        border: '1px solid var(--color-border-secondary)', borderRight: 'none',
+                        background: 'var(--color-background-primary)',
+                        color: 'var(--color-text-primary)', cursor: 'pointer',
+                      }}
+                    >
+                      {p.name}
+                    </button>
+                    <button
+                      onClick={() => handleDeletePreset(p.name)}
+                      title="Delete preset"
+                      style={{
+                        padding: '4px 8px', borderRadius: '0 20px 20px 0', fontSize: 10,
+                        border: '1px solid var(--color-border-secondary)',
+                        background: 'var(--color-background-primary)',
+                        color: 'var(--color-text-tertiary)', cursor: 'pointer', lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="text" placeholder="Preset name…" value={presetName}
+                onChange={e => setPresetName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSavePreset()}
+                style={{
+                  padding: '6px 10px', borderRadius: 6, fontSize: 12,
+                  border: '1px solid var(--color-border-tertiary)',
+                  background: 'var(--color-background-primary)',
+                  color: 'var(--color-text-primary)', width: 180,
+                }}
+              />
+              <button
+                onClick={handleSavePreset} disabled={!presetName.trim()}
+                style={{
+                  padding: '6px 14px', borderRadius: 6, fontSize: 12,
+                  cursor: presetName.trim() ? 'pointer' : 'not-allowed',
+                  border: '1px solid var(--color-border-secondary)',
+                  background: 'var(--color-background-primary)',
+                  color: 'var(--color-text-primary)', opacity: presetName.trim() ? 1 : 0.4,
+                }}
+              >
+                Save current config
+              </button>
+              {presetSaved && <span style={{ fontSize: 11, color: '#639922' }}>✓ Saved</span>}
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 8, marginBottom: 0 }}>
+              Presets are stored in your browser. Click a preset name to restore its settings.
+            </p>
+          </Collapse>
+
           {/* Download buttons */}
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
             <button
-              onClick={handleCSV} disabled={isBusy}
+              onClick={handleCSV} disabled={isBusy || filteredOrders.length === 0}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7,
                 padding: '9px 18px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                cursor: isBusy ? 'not-allowed' : 'pointer', opacity: isBusy ? 0.5 : 1,
+                cursor: (isBusy || filteredOrders.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isBusy || filteredOrders.length === 0) ? 0.5 : 1,
                 border: '1px solid var(--color-border-secondary)',
                 background: 'var(--color-background-primary)',
                 color: 'var(--color-text-primary)', transition: 'all .15s',
               }}
             >
-              {exporting
+              {csvLoading
                 ? <svg style={{ animation: 'adm-spin .7s linear infinite' }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                 : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
               }
-              {exporting ? 'Exporting…' : 'Download CSV'}
+              {csvLoading ? 'Generating…' : 'Download CSV'}
             </button>
 
             <button
-              onClick={handlePDF} disabled={isBusy}
+              onClick={handlePDF} disabled={isBusy || filteredOrders.length === 0}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7,
                 padding: '9px 18px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                cursor: isBusy ? 'not-allowed' : 'pointer', opacity: isBusy ? 0.5 : 1,
+                cursor: (isBusy || filteredOrders.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (isBusy || filteredOrders.length === 0) ? 0.5 : 1,
                 border: '1px solid #c8a96e', background: '#1a1a2e', color: '#c8a96e',
                 transition: 'all .15s',
               }}
@@ -707,9 +1073,32 @@ function ExportPanel({ orders, secret, exporting, setExporting }) {
               {pdfLoading ? 'Generating PDF…' : 'Download PDF'}
             </button>
 
-            <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
-              PDF: in-browser · CSV: server
-            </span>
+            {/* FIX (UX): reset to defaults button */}
+            <button
+              onClick={handleReset}
+              style={{
+                padding: '9px 14px', borderRadius: 8, fontSize: 12,
+                cursor: 'pointer', border: '1px solid var(--color-border-tertiary)',
+                background: 'transparent', color: 'var(--color-text-tertiary)', transition: 'all .15s',
+              }}
+            >
+              Reset defaults
+            </button>
+
+            {filteredOrders.length === 0 && (
+              <span style={{ fontSize: 11, color: '#E24B4A' }}>No orders match the current filters</span>
+            )}
+            {/* FIX (features): large export warning */}
+            {largeExportWarning && (
+              <span style={{ fontSize: 11, color: '#BA7517' }}>
+                Large export ({filteredOrders.length} orders) — PDF may be slow. Consider CSV for big datasets.
+              </span>
+            )}
+            {filteredOrders.length > 0 && !largeExportWarning && (
+              <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+                {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''} · PDF & CSV generated in-browser
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -722,11 +1111,10 @@ function ExportPanel({ orders, secret, exporting, setExporting }) {
 export default function AdminSalesDashboardPage() {
   const { user: authUser, ready } = useRoleGuard(['admin', 'staff'], '/')
 
-  const [orders,    setOrders   ] = useState([])
-  const [loading,   setLoading  ] = useState(true)
-  const [error,     setError    ] = useState('')
-  const [period,    setPeriod   ] = useState('daily')
-  const [exporting, setExporting] = useState(null)
+  const [orders,  setOrders ] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error,   setError  ] = useState('')
+  const [period,  setPeriod ] = useState('daily')
 
   useEffect(() => {
     const secret = getAdminSecret()
@@ -738,14 +1126,14 @@ export default function AdminSalesDashboardPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const completed      = useMemo(() => orders.filter(isRevenueCounting), [orders])
-  const revenue        = useMemo(() => completed.reduce((s, o) => s + Number(o.total || 0), 0), [completed])
-  const completedCount = completed.length
-  const fulfillRate    = orders.length ? Math.round(completedCount / orders.length * 100) : 0
-  const aov            = completed.length ? revenue / completed.length : 0
-  const activeCount    = useMemo(() => orders.filter(o => ACTIVE_STATUSES.has(o.status)).length, [orders])
+  const completed         = useMemo(() => orders.filter(isRevenueCounting), [orders])
+  const revenue           = useMemo(() => completed.reduce((s, o) => s + Number(o.total || 0), 0), [completed])
+  const completedCount    = completed.length
+  const fulfillRate       = orders.length ? Math.round(completedCount / orders.length * 100) : 0
+  const aov               = completed.length ? revenue / completed.length : 0
+  const activeCount       = useMemo(() => orders.filter(o => ACTIVE_STATUSES.has(o.status)).length, [orders])
   const pendingProofCount = useMemo(() => orders.filter(o => o.proofStatus === 'pending').length, [orders])
-  const revenueData    = useMemo(() => buildRevenueData(orders, period), [orders, period])
+  const revenueData       = useMemo(() => buildRevenueData(orders, period), [orders, period])
 
   const topItems = useMemo(() => {
     const counts = {}
@@ -774,9 +1162,7 @@ export default function AdminSalesDashboardPage() {
   const itemsInterp  = useMemo(() => interpTopItems(topItems),             [topItems])
   const statusInterp = useMemo(() => interpStatus(statusCounts, orders),   [statusCounts, orders])
 
-  const secret  = typeof window !== 'undefined' ? getAdminSecret() : ''
-  const isAdmin = authUser?.role === 'admin'
-
+  const isAdmin  = authUser?.role === 'admin'
   const tickColor = '#999'
   const gridColor = 'rgba(0,0,0,0.05)'
 
@@ -808,9 +1194,7 @@ export default function AdminSalesDashboardPage() {
         <Link href="/admin/orders" className="adm-back-link">View orders →</Link>
       </div>
 
-      {isAdmin && (
-        <ExportPanel orders={orders} secret={secret} exporting={exporting} setExporting={setExporting} />
-      )}
+      {isAdmin && <ExportPanel orders={orders} />}
 
       <div className="adm-metrics">
         <div className="adm-metric">

@@ -165,7 +165,9 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
   }, [upload])
  
   const onPick = useCallback(e => {
-    const f = e.target.files?.[0]; if (f) upload(f)
+    const f = e.target.files?.[0]
+    e.target.value = ''  // ← add this line
+    if (f) upload(f)
   }, [upload])
  
   const hasImage = value && value !== '/images/'

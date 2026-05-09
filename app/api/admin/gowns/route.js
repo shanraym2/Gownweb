@@ -68,7 +68,8 @@ export async function GET(request) {
       `SELECT g.*,
               gi.image_url,
               gi.alt,
-              gi_tryon.image_url AS tryon_image_url
+              gi_tryon.image_url      AS tryon_image_url,
+              gi_back.image_url       AS tryon_image_back_url
        FROM gowns g
        LEFT JOIN gown_images gi
               ON gi.gown_id = g.id AND gi.is_primary = TRUE
@@ -77,6 +78,13 @@ export async function GET(request) {
              AND gi_tryon.id = (
                SELECT id FROM gown_images
                WHERE gown_id = g.id AND is_tryon_asset = TRUE
+               ORDER BY sort_order LIMIT 1
+             )
+       LEFT JOIN gown_images gi_back
+              ON gi_back.gown_id = g.id AND gi_back.is_tryon_back = TRUE
+             AND gi_back.id = (
+               SELECT id FROM gown_images
+               WHERE gown_id = g.id AND is_tryon_back = TRUE
                ORDER BY sort_order LIMIT 1
              )
        WHERE g.is_active = $1
@@ -125,7 +133,7 @@ export async function POST(request) {
   const body = await request.json()
   const {
     name, price, image, alt,
-    tryonImage, tryonCalibration,
+    tryonImage, tryonImageBack, tryonCalibration,
     color, silhouette, fabric, neckline,
     description, type, inventory,
   } = body
@@ -142,7 +150,8 @@ export async function POST(request) {
       id: Date.now(), name: name.trim(),
       price: '₱' + salePrice.toLocaleString('en-PH'), salePrice,
       image: image.trim(), alt: (alt||name).trim(),
-      tryonImage: (tryonImage || image).trim(),
+      tryonImage:     (tryonImage || image).trim(),
+      tryonImageBack: (tryonImageBack || '').trim() || null,  // ← FIX: persist back image
       tryonCalibration: tryonCalibration || null,
       type: (type||'').trim(), color: (color||'').trim(),
       silhouette: (silhouette||'').trim(), fabric: (fabric||'').trim(),
@@ -190,6 +199,17 @@ export async function POST(request) {
         )
       }
 
+      // ── FIX: persist back image on POST ──────────────────────────────────
+      const resolvedBack = (tryonImageBack || '').trim()
+      if (resolvedBack) {
+        await conn.query(
+          `INSERT INTO gown_images
+             (gown_id, image_url, alt, is_primary, is_tryon_asset, is_tryon_back, sort_order)
+           VALUES ($1,$2,$3,FALSE,FALSE,TRUE,0)`,
+          [gownRow.id, resolvedBack, (alt||name).trim() + ' (try-on back)']
+        )
+      }
+
       if (Array.isArray(inventory) && inventory.length > 0) {
         for (const inv of inventory) {
           if (!inv.size) continue
@@ -209,9 +229,10 @@ export async function POST(request) {
         gown: {
           ...rowToGown({
             ...gownRow,
-            image_url: image.trim(),
-            alt: (alt||name).trim(),
-            tryon_image_url: resolvedTryon || image.trim(),
+            image_url:             image.trim(),
+            alt:                   (alt||name).trim(),
+            tryon_image_url:       resolvedTryon || image.trim(),
+            tryon_image_back_url:  resolvedBack || null,  // ← FIX: include in response
           }),
           inventory: inventory || [],
         },
@@ -317,7 +338,7 @@ export async function PUT(request) {
 
   const {
     name, price, image, alt,
-    tryonImage, tryonCalibration,
+    tryonImage, tryonImageBack, tryonCalibration,
     color, silhouette, fabric, neckline,
     description, type, inventory,
   } = body
@@ -336,7 +357,8 @@ export async function PUT(request) {
       ...gowns[idx],
       name: name.trim(), price: '₱' + salePrice.toLocaleString('en-PH'), salePrice,
       image: image.trim(), alt: (alt||name).trim(),
-      tryonImage: (tryonImage || image).trim(),
+      tryonImage:     (tryonImage || image).trim(),
+      tryonImageBack: (tryonImageBack || '').trim() || null,  // ← FIX: was missing entirely
       tryonCalibration: tryonCalibration || null,
       type: (type||'').trim(), color: (color||'').trim(),
       silhouette: (silhouette||'').trim(), fabric: (fabric||'').trim(),
@@ -393,7 +415,7 @@ export async function PUT(request) {
         )
       }
 
-      const resolvedBack = (body.tryonImageBack || '').trim()
+      const resolvedBack = (tryonImageBack || '').trim()
       await conn.query(
         `DELETE FROM gown_images WHERE gown_id = $1 AND is_tryon_back = TRUE`,
         [id]
@@ -440,9 +462,10 @@ export async function PUT(request) {
         gown: {
           ...rowToGown({
             ...rows[0],
-            image_url: image.trim(),
-            alt: (alt||name).trim(),
-            tryon_image_url: resolvedTryon || image.trim(),
+            image_url:            image.trim(),
+            alt:                  (alt||name).trim(),
+            tryon_image_url:      resolvedTryon || image.trim(),
+            tryon_image_back_url: resolvedBack || null,  // ← FIX: include in response
           }),
           inventory: inventory || [],
         },
