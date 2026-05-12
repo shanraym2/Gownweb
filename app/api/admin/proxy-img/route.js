@@ -1,3 +1,4 @@
+// app/api/admin/proxy-img/route.js
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/adminAuth'
 
@@ -15,24 +16,41 @@ export async function GET(request) {
     return NextResponse.json({ error: 'Missing url param' }, { status: 400 })
   }
 
-  // Only allow your own Spaces CDN — prevents this becoming an open proxy
   const cdnUrl = process.env.DO_SPACES_CDN_URL?.replace(/\/$/, '')
+  const region = process.env.DO_SPACES_REGION
+  const bucket = process.env.DO_SPACES_BUCKET
+
   if (!cdnUrl || !url.startsWith(cdnUrl)) {
     return NextResponse.json({ error: 'Disallowed origin' }, { status: 403 })
   }
 
   try {
-    const upstream = await fetch(url)
-    if (!upstream.ok) {
-      return NextResponse.json({ error: 'Upstream fetch failed' }, { status: 502 })
-    }
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3')
 
-    const buffer = await upstream.arrayBuffer()
-    const contentType = upstream.headers.get('content-type') || 'image/png'
+    const client = new S3Client({
+      endpoint: `https://${region}.digitaloceanspaces.com`,
+      region,
+      credentials: {
+        accessKeyId:     process.env.DO_SPACES_KEY,
+        secretAccessKey: process.env.DO_SPACES_SECRET,
+      },
+      forcePathStyle: false,
+    })
+
+    // Strip CDN prefix to get the object key
+    // e.g. https://jce-bridal.sgp1.cdn.digitaloceanspaces.com/uploads/file.png → uploads/file.png
+    const key = url.replace(`${cdnUrl}/`, '')
+
+    const s3res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+
+    const chunks = []
+    for await (const chunk of s3res.Body) chunks.push(chunk)
+    const buffer      = Buffer.concat(chunks)
+    const contentType = s3res.ContentType || 'image/png'
 
     return new NextResponse(buffer, {
       headers: {
-        'Content-Type': contentType,
+        'Content-Type':  contentType,
         'Cache-Control': 'private, max-age=3600',
       },
     })

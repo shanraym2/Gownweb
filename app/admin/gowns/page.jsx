@@ -536,13 +536,26 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
   // Load dress image when tryonImage changes
   useEffect(() => {
     if (!tryonImage) { setDressImg(null); return }
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload  = () => setDressImg(img)
-    img.onerror = () => setDressImg(null)
-    img.src = tryonImage
-  }, [tryonImage])
+    let cancelled = false
+    let objectUrl = null
 
+    toSafeUrl(tryonImage)
+      .then(safeUrl => {
+        if (cancelled) return
+        if (safeUrl !== tryonImage) objectUrl = safeUrl
+        const img = new Image()
+        img.onload  = () => { if (!cancelled) setDressImg(img) }
+        img.onerror = () => { if (!cancelled) setDressImg(null) }
+        img.src = safeUrl
+      })
+      .catch(() => { if (!cancelled) setDressImg(null) })
+
+    return () => {
+      cancelled = true
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+    }
+  }, [tryonImage])
+  
   // Redraw canvas
   useEffect(() => {
     if (!open) return
