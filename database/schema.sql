@@ -350,6 +350,19 @@ CREATE TABLE public.favorites (
 
 
 -- =============================================================
+-- USER CARTS  (sync across mobile and web)
+-- =============================================================
+
+CREATE TABLE public.user_carts (
+  email      citext      PRIMARY KEY,
+  items      jsonb       NOT NULL DEFAULT '[]'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_user_carts_email ON public.user_carts(email);
+
+
+-- =============================================================
 -- USER MEASUREMENTS  (size recommender)
 -- =============================================================
 
