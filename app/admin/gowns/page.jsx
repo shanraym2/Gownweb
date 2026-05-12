@@ -372,8 +372,11 @@ const DEFAULT_CAL = {
   shoulderPad: 1.25,
   skirtFlare:  1.10,
   hemY:        null,
+  offsetX:     0,      // px, dress horizontal shift
+  offsetY:     0,      // px, dress vertical shift
+  scaleX:      1.0,    // horizontal stretch multiplier
+  scaleY:      1.0,    // vertical stretch multiplier
 }
-
 // Synthetic body in normalised coords (0..1) for canvas W=220 H=400
 const B = {
   head: [0.50, 0.055],
@@ -477,6 +480,48 @@ function drawCalDressTrapezoid(ctx, lay) {
   ctx.restore()
 }
 
+// Extended draw with offset + scale overrides
+function drawCalDressImageEx(ctx, img, lay, W, ox, oy, sx, sy) {
+  const { topY, bottomY, cx, topW, botW } = lay
+  const h = (bottomY - topY) * sy
+  if (h <= 0) return
+  const adjTopW  = topW  * sx
+  const adjBotW  = botW  * sx
+  const adjTopY  = topY  + oy
+  const adjBotY  = adjTopY + h
+  const adjCx    = cx + ox
+  const oc  = document.createElement('canvas')
+  oc.width  = W * 2; oc.height = adjBotY + 20
+  const otx = oc.getContext('2d')
+  otx.beginPath()
+  otx.moveTo(adjCx - adjTopW/2, adjTopY); otx.lineTo(adjCx + adjTopW/2, adjTopY)
+  otx.lineTo(adjCx + adjBotW/2, adjBotY); otx.lineTo(adjCx - adjBotW/2, adjBotY)
+  otx.closePath(); otx.clip()
+  otx.drawImage(img, adjCx - adjBotW/2, adjTopY, adjBotW, h)
+  ctx.save(); ctx.globalAlpha = 0.93; ctx.drawImage(oc, 0, 0); ctx.restore()
+}
+
+function drawCalDressTrapezoidEx(ctx, lay, ox, oy, sx, sy) {
+  const { topY, bottomY, cx, topW, botW } = lay
+  const adjTopW  = topW  * sx
+  const adjBotW  = botW  * sx
+  const adjTopY  = topY  + oy
+  const adjBotY  = topY  + (bottomY - topY) * sy + oy
+  const adjCx    = cx + ox
+  const grad = ctx.createLinearGradient(0, adjTopY, 0, adjBotY)
+  grad.addColorStop(0, 'rgba(200,169,110,0.50)')
+  grad.addColorStop(1, 'rgba(200,169,110,0.12)')
+  ctx.save()
+  ctx.fillStyle   = grad
+  ctx.strokeStyle = 'rgba(200,169,110,0.65)'
+  ctx.lineWidth   = 1
+  ctx.beginPath()
+  ctx.moveTo(adjCx - adjTopW/2, adjTopY); ctx.lineTo(adjCx + adjTopW/2, adjTopY)
+  ctx.lineTo(adjCx + adjBotW/2, adjBotY); ctx.lineTo(adjCx - adjBotW/2, adjBotY)
+  ctx.closePath(); ctx.fill(); ctx.stroke()
+  ctx.restore()
+}
+
 function drawCalGuides(ctx, lay, W) {
   ctx.save()
   ctx.setLineDash([3,5])
@@ -527,18 +572,23 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
   const [dragOrigin,  setDragOrigin] = useState(null)
   const [calSnapshot, setCalSnap   ] = useState(null)
 
+  // View state: zoom + pan of the canvas viewport
+  const [zoom,    setZoom   ] = useState(1)
+  const [panX,    setPanX   ] = useState(0)
+  const [panY,    setPanY   ] = useState(0)
+  const [panning, setPanning] = useState(false)
+  const panOrigin = useRef(null)
+
   const canvasRef = useRef(null)
   const dragging  = useRef(false)
   const CW = 220, CH = 400
 
   const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
 
-  // Load dress image when tryonImage changes
+  // Load dress image
   useEffect(() => {
     if (!tryonImage) { setDressImg(null); return }
-    let cancelled = false
-    let objectUrl = null
-
+    let cancelled = false, objectUrl = null
     toSafeUrl(tryonImage)
       .then(safeUrl => {
         if (cancelled) return
@@ -549,13 +599,9 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
         img.src = safeUrl
       })
       .catch(() => { if (!cancelled) setDressImg(null) })
-
-    return () => {
-      cancelled = true
-      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
-    }
+    return () => { cancelled = true; if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000) }
   }, [tryonImage])
-  
+
   // Redraw canvas
   useEffect(() => {
     if (!open) return
@@ -564,7 +610,6 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, CW, CH)
 
-    // Dark background + subtle grid
     ctx.fillStyle = '#0c0804'
     ctx.fillRect(0, 0, CW, CH)
     ctx.strokeStyle = 'rgba(255,255,255,0.025)'
@@ -572,6 +617,18 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     for (let y = 0; y < CH; y += 20) {
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke()
     }
+    for (let x = 0; x < CW; x += 20) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke()
+    }
+
+    // Apply zoom + pan transform
+    ctx.save()
+    ctx.translate(panX, panY)
+    ctx.scale(zoom, zoom)
+
+    // Apply dress offset from cal
+    const dox = cal.offsetX || 0
+    const doy = cal.offsetY || 0
 
     const lay  = calLayout(cal, CW, CH)
     const hmap = calHandles(lay)
@@ -579,26 +636,41 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     drawCalGuides(ctx, lay, CW)
     drawCalSkeleton(ctx, CW, CH, dressImg ? 0.5 : 0.85)
 
+    // Draw dress with offset + scale overrides applied
     if (dressImg) {
-      drawCalDressImage(ctx, dressImg, lay, CW)
+      drawCalDressImageEx(ctx, dressImg, lay, CW, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
     } else {
-      drawCalDressTrapezoid(ctx, lay)
+      drawCalDressTrapezoidEx(ctx, lay, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
     }
 
     drawCalHandles(ctx, hmap, active, hover)
 
-    // Footer hint
+    ctx.restore()
+
+    // Footer hint (outside transform)
     ctx.fillStyle = 'rgba(12,8,4,0.75)'
     ctx.fillRect(0, CH - 18, CW, 18)
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
-    ctx.fillText('drag handles · skeleton = body reference', CW/2, CH - 6)
-  }, [open, cal, dressImg, active, hover])
+    ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
+  }, [open, cal, dressImg, active, hover, zoom, panX, panY])
 
-  // Pointer helpers
+  // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
     const c = canvasRef.current; if (!c) return {x:0,y:0}
     const r  = c.getBoundingClientRect()
+    const sx = CW / r.width, sy = CH / r.height
+    const cx = e.touches ? e.touches[0].clientX : e.clientX
+    const cy = e.touches ? e.touches[0].clientY : e.clientY
+    const rawX = (cx - r.left) * sx
+    const rawY = (cy - r.top)  * sy
+    // Invert zoom+pan
+    return { x: (rawX - panX) / zoom, y: (rawY - panY) / zoom }
+  }
+
+  function rawCanvasXY(e) {
+    const c = canvasRef.current; if (!c) return {x:0,y:0}
+    const r = c.getBoundingClientRect()
     const sx = CW / r.width, sy = CH / r.height
     const cx = e.touches ? e.touches[0].clientX : e.clientX
     const cy = e.touches ? e.touches[0].clientY : e.clientY
@@ -609,25 +681,68 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     const lay  = calLayout(cal, CW, CH)
     const hmap = calHandles(lay)
     for (const [key, h] of Object.entries(hmap)) {
-      if (Math.hypot(x - h.x, y - h.y) < 11) return key
+      if (Math.hypot(x - h.x, y - h.y) < 11 / zoom) return key
     }
     return null
   }
+
+  // Scroll → zoom
+  const onWheel = useCallback(e => {
+    e.preventDefault()
+    const delta = e.deltaY < 0 ? 0.12 : -0.12
+    setZoom(z => Math.max(0.4, Math.min(3.0, z + delta)))
+  }, [])
+
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c || !open) return
+    c.addEventListener('wheel', onWheel, { passive: false })
+    return () => c.removeEventListener('wheel', onWheel)
+  }, [open, onWheel])
+
+  // Keyboard pan (arrow keys)
+  useEffect(() => {
+    if (!open) return
+    const fn = e => {
+      const step = 10
+      if (e.key === 'ArrowLeft')  setPanX(p => p + step)
+      if (e.key === 'ArrowRight') setPanX(p => p - step)
+      if (e.key === 'ArrowUp')    setPanY(p => p + step)
+      if (e.key === 'ArrowDown')  setPanY(p => p - step)
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [open])
 
   const onDown = useCallback(e => {
     e.preventDefault()
     const { x, y } = canvasXY(e)
     const hit = hitTest(x, y)
-    if (!hit) return
-    dragging.current = true
-    setActive(hit)
-    setDragOrigin({ x, y })
-    setCalSnap({ ...cal })
-  }, [cal])
+    if (hit) {
+      dragging.current = true
+      setActive(hit)
+      setDragOrigin({ x, y })
+      setCalSnap({ ...cal })
+    } else {
+      // Start panning background
+      setPanning(true)
+      panOrigin.current = rawCanvasXY(e)
+    }
+  }, [cal, zoom, panX, panY])
 
   const onMove = useCallback(e => {
     e.preventDefault()
     const { x, y } = canvasXY(e)
+
+    if (panning && panOrigin.current) {
+      const raw = rawCanvasXY(e)
+      const dx = raw.x - panOrigin.current.x
+      const dy = raw.y - panOrigin.current.y
+      setPanX(p => p + dx)
+      setPanY(p => p + dy)
+      panOrigin.current = raw
+      return
+    }
 
     if (!dragging.current) {
       const hit = hitTest(x, y)
@@ -636,7 +751,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
       if (canvas) {
         canvas.style.cursor = hit
           ? (hit === 'neckline' || hit === 'hem' ? 'ns-resize' : 'ew-resize')
-          : 'default'
+          : 'grab'
       }
       return
     }
@@ -683,14 +798,18 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
       }
     }
     onChange(next)
-  }, [active, dragOrigin, calSnapshot, onChange])
+  }, [active, dragOrigin, calSnapshot, onChange, panning, zoom])
 
   const onUp = useCallback(() => {
     dragging.current = false
     setActive(null)
     setDragOrigin(null)
     setCalSnap(null)
+    setPanning(false)
+    panOrigin.current = null
   }, [])
+
+  const resetView = () => { setZoom(1); setPanX(0); setPanY(0) }
 
   const hasCustom = !!calibration
   const hasImg    = !!tryonImage
@@ -714,6 +833,18 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
 
             {/* Canvas col */}
             <div className="ce-canvas-col">
+              {/* View controls */}
+              <div className="ce-view-bar">
+                <button type="button" className="ce-vbtn" onClick={() => setZoom(z => Math.min(3, z + 0.2))} title="Zoom in">＋</button>
+                <span className="ce-zoom-label">{Math.round(zoom * 100)}%</span>
+                <button type="button" className="ce-vbtn" onClick={() => setZoom(z => Math.max(0.4, z - 0.2))} title="Zoom out">－</button>
+                <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={resetView} title="Reset view">⊹</button>
+                <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanX(p => p + 20)} title="Pan left">◂</button>
+                <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanX(p => p - 20)} title="Pan right">▸</button>
+                <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanY(p => p + 20)} title="Pan up">▴</button>
+                <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanY(p => p - 20)} title="Pan down">▾</button>
+              </div>
+
               <canvas
                 ref={canvasRef}
                 width={CW} height={CH}
@@ -740,9 +871,10 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
             <div className="ce-sliders">
               <p className="ce-desc">
                 Drag handles on the canvas for quick alignment, or use sliders for precision.
-                The skeleton shows where the AI detects shoulders and hips during scanning.
+                Scroll to zoom · drag background to pan · arrow keys to nudge view.
               </p>
 
+              <p className="ce-group-label">Shape</p>
               {[
                 { key:'necklineY',   label:'Neckline offset', min:0.02, max:0.55, step:0.01,
                   hint:'How far above the shoulder the dress top starts.' },
@@ -772,6 +904,31 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
                 )
               })}
 
+              <p className="ce-group-label" style={{marginTop:6}}>Position &amp; Scale</p>
+              {[
+                { key:'offsetX', label:'Shift left / right', min:-80, max:80,  step:1,   hint:'Move dress horizontally over the body.',    unit:'px' },
+                { key:'offsetY', label:'Shift up / down',    min:-80, max:80,  step:1,   hint:'Move dress vertically over the body.',      unit:'px' },
+                { key:'scaleX',  label:'Horizontal stretch', min:0.5, max:2.0, step:0.02, hint:'Stretch or compress the dress width.',      unit:'×' },
+                { key:'scaleY',  label:'Vertical stretch',   min:0.5, max:2.0, step:0.02, hint:'Stretch or compress the dress height.',     unit:'×' },
+              ].map(s => {
+                const val = cal[s.key] ?? (s.key.startsWith('scale') ? 1.0 : 0)
+                const display = s.unit === 'px' ? `${val > 0 ? '+' : ''}${val}px` : `${Number(val).toFixed(2)}×`
+                return (
+                  <div key={s.key} className="ce-row">
+                    <div className="ce-row-head">
+                      <span className="ce-row-label">{s.label}</span>
+                      <span className="ce-row-val">{display}</span>
+                    </div>
+                    <input type="range" min={s.min} max={s.max} step={s.step}
+                      value={val}
+                      onChange={e => onChange({ ...cal, [s.key]: parseFloat(e.target.value) })}
+                      className="ce-range"
+                    />
+                    <p className="ce-row-hint">{s.hint}</p>
+                  </div>
+                )
+              })}
+
               <div className="ce-btns">
                 <button type="button" className="ce-ghost" onClick={() => onChange(null)}>
                   Reset defaults
@@ -781,6 +938,9 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
                     Auto hem
                   </button>
                 )}
+                <button type="button" className="ce-ghost" onClick={() => onChange({ ...cal, offsetX: 0, offsetY: 0, scaleX: 1, scaleY: 1 })}>
+                  Reset position
+                </button>
               </div>
             </div>
           </div>
@@ -885,7 +1045,7 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
               <div className="detail-links">
                 <Link href={`/gowns/${gown.id}`} target="_blank" rel="noopener noreferrer" className="btn-ghost btn-sm">Open product page ↗</Link>
                 {gown.tryonImage
-                  ? <Link href={`/virtual-try-on?gown=${gown.id}`} target="_blank" rel="noopener noreferrer" className="btn-info btn-sm">Virtual try-on ↗</Link>
+                  ? <Link href={`/fitting-room?gown=${gown.id}`} target="_blank" rel="noopener noreferrer" className="btn-info btn-sm">Virtual try-on ↗</Link>
                   : <span className="btn-sm btn-sm--disabled" title="No try-on image set">Virtual try-on ↗</span>
                 }
               </div>
@@ -1591,6 +1751,12 @@ export default function AdminGownsPage() {
         .ce-btns{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px;}
         .ce-ghost{display:inline-flex;align-items:center;gap:4px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:5px;padding:5px 10px;font-size:11px;color:var(--c-muted);cursor:pointer;transition:background .12s,color .12s;}
         .ce-ghost:hover{background:var(--c-surface);color:var(--c-text);}
+        .ce-view-bar{display:flex;align-items:center;gap:4px;padding:6px 8px;border-bottom:1px solid rgba(200,169,110,.1);background:#0c0804;flex-wrap:wrap;}
+        .ce-vbtn{background:rgba(200,169,110,.08);border:1px solid rgba(200,169,110,.2);border-radius:4px;color:#c9a96e;font-size:13px;line-height:1;padding:3px 7px;cursor:pointer;transition:background .12s;font-weight:600;}
+        .ce-vbtn:hover{background:rgba(200,169,110,.18);}
+        .ce-vbtn--sm{font-size:11px;padding:3px 6px;}
+        .ce-zoom-label{font-size:10px;color:rgba(200,169,110,.55);min-width:32px;text-align:center;font-variant-numeric:tabular-nums;}
+        .ce-group-label{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(200,169,110,.45);margin:4px 0 2px;padding-bottom:4px;border-bottom:1px solid var(--c-border);}
 
         /* ── Inventory / Stock ── */
         .inv-editor{display:flex;flex-direction:column;gap:10px;}
