@@ -45,9 +45,66 @@ export function loadCart() {
   }
 }
 
+// Load cart from backend and sync with local storage
+export async function syncCartFromBackend() {
+  const userEmail = getCurrentUserEmail()
+  if (!userEmail) return loadCart() // Fallback to local for guests
+  
+  try {
+    const res = await fetch('/api/mobile/cart', {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Email': userEmail,
+      },
+    })
+    
+    if (!res.ok) {
+      console.warn('Failed to sync cart from backend:', res.status)
+      return loadCart()
+    }
+    
+    const data = await res.json()
+    const items = data.items || []
+    
+    // Update local storage with backend data
+    saveCart(items)
+    return items
+  } catch (err) {
+    console.warn('Error syncing cart from backend:', err)
+    return loadCart()
+  }
+}
+
 export function saveCart(items) {
   const key = getCartKey()
   safeSetItem(key, JSON.stringify(items))
+  
+  // Sync to backend so mobile app sees the same cart
+  const userEmail = getCurrentUserEmail()
+  if (userEmail) {
+    syncCartToBackend(userEmail, items).catch(() => {})
+  }
+}
+
+// Sync cart to backend database (same as mobile app)
+async function syncCartToBackend(userEmail, items) {
+  try {
+    const res = await fetch('/api/mobile/cart', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Email': userEmail,
+      },
+      body: JSON.stringify({ items }),
+    })
+    
+    if (!res.ok) {
+      console.warn('Failed to sync cart to backend:', res.status)
+    }
+  } catch (err) {
+    console.warn('Error syncing cart to backend:', err)
+  }
 }
 
 // Each unique (id + size) combination is a separate cart line.

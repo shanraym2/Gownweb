@@ -6,7 +6,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns, getGownById } from '@/hooks/useGowns'
 import {
-  loadCart, setQuantity, removeItem, loadCartNote, saveCartNote,
+  loadCart, syncCartFromBackend, setQuantity, removeItem, loadCartNote, saveCartNote,
 } from '../utils/cartClient'
 
 function parsePrice(priceStr) {
@@ -104,28 +104,31 @@ export default function CartPage() {
   // ── Build cart items from localStorage + gown data ─────────────────────────
   useEffect(() => {
     if (!mounted) return
-    const raw = loadCart()
-    const withGowns = raw.map(item => {
-      const gown = getGownById(gowns, item.id)
-      if (!gown) return null
-      const priceNum = parsePrice(gown.price)
-      const lineKey  = `${item.id}__${item.size ?? ''}`
-      return {
-        lineKey,
-        id:       gown.id,
-        size:     item.size ?? null,
-        name:     gown.name,
-        image:    gown.image,
-        alt:      gown.alt,
-        price:    gown.price,
-        priceNum,
-        qty:      item.qty,
-        subtotal: priceNum * item.qty,
-      }
-    }).filter(Boolean)
-    setCartItems(withGowns)
-    setSelectedKeys(new Set(withGowns.map(i => i.lineKey)))
-    fetchInventory(withGowns)
+    
+    // Sync cart from backend first (for cross-device sync)
+    syncCartFromBackend().then(items => {
+      const withGowns = items.map(item => {
+        const gown = getGownById(gowns, item.id)
+        if (!gown) return null
+        const priceNum = parsePrice(gown.price)
+        const lineKey  = `${item.id}__${item.size ?? ''}`
+        return {
+          lineKey,
+          id:       gown.id,
+          size:     item.size ?? null,
+          name:     gown.name,
+          image:    gown.image,
+          alt:      gown.alt,
+          price:    gown.price,
+          priceNum,
+          qty:      item.qty,
+          subtotal: priceNum * item.qty,
+        }
+      }).filter(Boolean)
+      setCartItems(withGowns)
+      setSelectedKeys(new Set(withGowns.map(i => i.lineKey)))
+      fetchInventory(withGowns)
+    })
   }, [mounted, gowns, fetchInventory])
 
   useEffect(() => {
