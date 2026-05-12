@@ -863,3 +863,33 @@ SET status = 'cancelled'
 WHERE status IN ('placed', 'pending_payment')
   AND payment_status IN ('unpaid', 'pending')
   AND placed_at < now() - INTERVAL '7 days';
+
+ALTER TABLE public.gowns
+ADD COLUMN IF NOT EXISTS segment text NOT NULL DEFAULT 'women'
+CHECK (segment IN ('women', 'men', 'children'));
+
+CREATE INDEX IF NOT EXISTS idx_gowns_segment
+ON public.gowns (segment);
+
+ALTER TABLE public.supplier_size_metrics
+ADD COLUMN IF NOT EXISTS segment text
+CHECK (segment IN ('women', 'men', 'children'));
+
+UPDATE public.supplier_size_metrics
+SET segment = 'women'
+WHERE segment IS NULL;
+
+
+ALTER TABLE public.supplier_size_metrics
+  ALTER COLUMN segment SET NOT NULL,
+  ALTER COLUMN segment SET DEFAULT 'women';
+
+ALTER TABLE public.supplier_size_metrics
+  DROP CONSTRAINT IF EXISTS supplier_size_metrics_supplier_id_size_label_key;
+
+ALTER TABLE public.supplier_size_metrics
+  ADD CONSTRAINT supplier_size_metrics_supplier_segment_size_key
+    UNIQUE (supplier_id, segment, size_label);
+
+CREATE INDEX IF NOT EXISTS idx_supplier_size_metrics_segment
+  ON public.supplier_size_metrics (supplier_id, segment);

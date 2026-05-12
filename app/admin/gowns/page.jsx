@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
+import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
 
 /* ─────────────────────────────────────────────
    Constants & helpers
@@ -11,10 +12,10 @@ import { useRoleGuard } from '../../utils/useRoleGuard'
 const emptyGown = {
   name:'', price:'₱', image:'/images/', alt:'',
   tryonImage:'', tryonImageBack:'', tryonCalibration:null,
-  type:'Gowns', color:'', silhouette:'', fabric:'', neckline:'', description:'',
+  type:'Gowns', segment:'women',
+  color:'', silhouette:'', fabric:'', neckline:'', description:'',
 }
 const TYPES = ['Gowns','Dresses','Suit']
-const defaultCalibration = { necklineY:0.18, shoulderPad:1.25, skirtFlare:1.10, hemY:null }
 const SORT_OPTIONS = [
   { value:'name-asc',  label:'Name A→Z' },
   { value:'name-desc', label:'Name Z→A' },
@@ -23,9 +24,6 @@ const SORT_OPTIONS = [
   { value:'stock-asc', label:'Stock Low→High' },
   { value:'stock-desc',label:'Stock High→Low' },
 ]
-
-const PRESET_SIZES = ['XS','S','M','L','XL','2XL','3XL','4XL','6','8','10','12','14','16']
-const CUSTOM_SIZE_VALUE = '__custom__'
 
 function numericPrice(p) {
   return parseInt(String(p||'').replace(/[^\d]/g,'')) || 0
@@ -38,19 +36,19 @@ function headers() { return {'Content-Type':'application/json','X-Admin-Secret':
 /* ─────────────────────────────────────────────
    SizePicker
 ───────────────────────────────────────────── */
-function SizePicker({ inventory, onAdd, error, onClearErr }) {
-  const taken       = new Set((inventory||[]).map(i => i.size))
-  const available   = PRESET_SIZES.filter(s => !taken.has(s))
-  const [custom, setCustom]     = useState('')
+function SizePicker({ inventory, onAdd, error, onClearErr, presets }) {
+  const taken     = new Set((inventory||[]).map(i => i.size))
+  const available = presets.filter(s => !taken.has(s))
+  const [custom, setCustom]         = useState('')
   const [showCustom, setShowCustom] = useState(false)
 
   function validateCustom(val) {
     const v = val.trim().toUpperCase()
-    if (!v)                           return 'Enter a size label.'
-    if (v.length > 8)                 return 'Max 8 characters.'
-    if (/\s/.test(v))                 return 'No spaces allowed.'
-    if (taken.has(v))                 return `"${v}" already added.`
-    if (PRESET_SIZES.includes(v))     return `Use the "${v}" button above.`
+    if (!v)               return 'Enter a size label.'
+    if (v.length > 8)     return 'Max 8 characters.'
+    if (/\s/.test(v))     return 'No spaces allowed.'
+    if (taken.has(v))     return `"${v}" already added.`
+    if (presets.includes(v)) return `Use the "${v}" button above.`
     return null
   }
 
@@ -68,7 +66,7 @@ function SizePicker({ inventory, onAdd, error, onClearErr }) {
     <div className="sp-root">
       {!allPresetTaken && (
         <div className="sp-grid">
-          {PRESET_SIZES.map(size => {
+          {presets.map(size => {
             const isTaken = taken.has(size)
             return (
               <button
@@ -131,7 +129,7 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
   const [dragging,  setDragging ] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadErr, setUploadErr] = useState('')
- 
+
   const upload = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) {
       setUploadErr('Please select an image file.')
@@ -142,10 +140,8 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
     try {
       const formData = new FormData()
       formData.append('file', file)
- 
       const res  = await fetch('/api/admin/upload-tryon-image', {
         method:  'POST',
-        // No Content-Type header — browser sets multipart boundary automatically
         headers: { 'X-Admin-Secret': getAdminSecret() || '' },
         body:    formData,
       })
@@ -158,21 +154,21 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
       setUploading(false)
     }
   }, [onChange])
- 
+
   const onDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)
     const f = e.dataTransfer.files?.[0]; if (f) upload(f)
   }, [upload])
- 
+
   const onPick = useCallback(e => {
     const f = e.target.files?.[0]
-    e.target.value = ''  // ← add this line
+    e.target.value = ''
     if (f) upload(f)
   }, [upload])
- 
+
   const hasImage = value && value !== '/images/'
   const err = uploadErr || (error ? 'Image failed to load' : '')
- 
+
   return (
     <div className="iup-slot">
       <div className="iup-label-row">
@@ -224,7 +220,6 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
     </div>
   )
 }
- 
 
 /* ─────────────────────────────────────────────
    Background Remover
@@ -365,69 +360,415 @@ function BgRemover({ src, onDone, onClose }) {
 }
 
 /* ─────────────────────────────────────────────
-   Calibration Editor
+   CalibrationEditor  v2
+   Skeleton-anchored interactive canvas editor.
+   Props:
+     calibration  object|null   — current cal values
+     onChange     fn(obj|null)  — called with new cal or null to reset
+     tryonImage   string        — URL of front try-on PNG; used as dress overlay
 ───────────────────────────────────────────── */
-function CalibrationEditor({ calibration, onChange }) {
-  const [open,setOpen]=useState(false)
-  const cal={...defaultCalibration,...(calibration||{})}
-  const previewRef=useRef(null)
-  const sliders=[
-    {key:'necklineY',label:'Neckline offset',min:0.05,max:0.50,step:0.01,hint:'How far above the shoulder the dress top starts.'},
-    {key:'shoulderPad',label:'Shoulder width',min:0.80,max:2.50,step:0.05,hint:'Bodice width relative to detected shoulder span.'},
-    {key:'skirtFlare',label:'Skirt flare',min:0.80,max:2.00,step:0.05,hint:'How much wider the hem is compared to the bodice.'},
-    {key:'hemY',label:'Hem length',min:0.40,max:1.20,step:0.01,hint:'Override hem position. 1.0 = full ankle length.'},
+const DEFAULT_CAL = {
+  necklineY:   0.18,
+  shoulderPad: 1.25,
+  skirtFlare:  1.10,
+  hemY:        null,
+}
+
+// Synthetic body in normalised coords (0..1) for canvas W=220 H=400
+const B = {
+  head: [0.50, 0.055],
+  ls:   [0.30, 0.175], rs:  [0.70, 0.175],
+  lh:   [0.36, 0.445], rh:  [0.64, 0.445],
+  lk:   [0.38, 0.660], rk:  [0.62, 0.660],
+  la:   [0.39, 0.875], ra:  [0.61, 0.875],
+  le:   [0.19, 0.315], re:  [0.81, 0.315],
+  lw:   [0.15, 0.435], rw:  [0.85, 0.435],
+}
+const bpx = (key, W, H) => ({ x: B[key][0] * W, y: B[key][1] * H })
+
+function calLayout(cal, W, H) {
+  const c      = { ...DEFAULT_CAL, ...(cal || {}) }
+  const smX    = (B.ls[0] + B.rs[0]) / 2 * W
+  const smY    = B.ls[1] * H
+  const hmY    = B.lh[1] * H
+  const torsoH = hmY - smY
+  const swPx   = (B.rs[0] - B.ls[0]) * W
+
+  const topY   = smY - torsoH * c.necklineY
+  const topW   = swPx * c.shoulderPad
+  const botBase = Math.max(swPx * 1.2, topW)
+  const botW   = botBase * c.skirtFlare
+
+  let bottomY
+  if (c.hemY != null) {
+    const fullH = smY + torsoH * 4.8 - topY
+    bottomY     = topY + fullH * c.hemY
+  } else {
+    const ankleY = (B.la[1] + B.ra[1]) / 2 * H
+    bottomY      = ankleY + torsoH * 0.10
+  }
+
+  return { topY, bottomY, cx: smX, topW, botW, torsoH, smY, hmY, swPx }
+}
+
+function calHandles(lay) {
+  const { topY, bottomY, cx, topW, botW, smY } = lay
+  return {
+    neckline:  { x: cx,          y: topY,    axis:'y', color:'#c9a96e', label:'Neckline' },
+    shoulderL: { x: cx - topW/2, y: smY,     axis:'x', color:'#c9a96e', label:'Shoulder' },
+    shoulderR: { x: cx + topW/2, y: smY,     axis:'x', color:'#c9a96e', label:'Shoulder' },
+    hem:       { x: cx,          y: bottomY, axis:'y', color:'#7ab8f5', label:'Hem'      },
+    flareL:    { x: cx - botW/2, y: bottomY, axis:'x', color:'#7ab8f5', label:'Flare'    },
+    flareR:    { x: cx + botW/2, y: bottomY, axis:'x', color:'#7ab8f5', label:'Flare'    },
+  }
+}
+
+function drawCalSkeleton(ctx, W, H, alpha) {
+  ctx.save()
+  ctx.globalAlpha   = alpha
+  ctx.strokeStyle   = 'rgba(200,169,110,0.6)'
+  ctx.lineWidth     = 1.5
+  ctx.setLineDash([])
+  const seg = (...keys) => {
+    const [a, b] = keys.map(k => bpx(k, W, H))
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+  }
+  seg('ls','rs'); seg('ls','lh'); seg('rs','rh'); seg('lh','rh')
+  seg('lh','lk'); seg('lk','la'); seg('rh','rk'); seg('rk','ra')
+  seg('ls','le'); seg('le','lw'); seg('rs','re'); seg('re','rw')
+  const h = bpx('head', W, H)
+  ctx.beginPath(); ctx.arc(h.x, h.y, W * 0.053, 0, Math.PI*2); ctx.stroke()
+  ctx.fillStyle = 'rgba(200,169,110,0.75)'
+  for (const k of ['ls','rs','lh','rh','lk','rk','la','ra']) {
+    const p = bpx(k, W, H)
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI*2); ctx.fill()
+  }
+  ctx.restore()
+}
+
+function drawCalDressImage(ctx, img, lay, W) {
+  const { topY, bottomY, cx, topW, botW } = lay
+  const h = bottomY - topY
+  if (h <= 0) return
+  const oc  = document.createElement('canvas')
+  oc.width  = W * 2; oc.height = bottomY + 20
+  const otx = oc.getContext('2d')
+  otx.beginPath()
+  otx.moveTo(cx - topW/2, topY); otx.lineTo(cx + topW/2, topY)
+  otx.lineTo(cx + botW/2, bottomY); otx.lineTo(cx - botW/2, bottomY)
+  otx.closePath(); otx.clip()
+  otx.drawImage(img, cx - botW/2, topY, botW, h)
+  ctx.save(); ctx.globalAlpha = 0.93; ctx.drawImage(oc, 0, 0); ctx.restore()
+}
+
+function drawCalDressTrapezoid(ctx, lay) {
+  const { topY, bottomY, cx, topW, botW } = lay
+  const grad = ctx.createLinearGradient(0, topY, 0, bottomY)
+  grad.addColorStop(0, 'rgba(200,169,110,0.50)')
+  grad.addColorStop(1, 'rgba(200,169,110,0.12)')
+  ctx.save()
+  ctx.fillStyle   = grad
+  ctx.strokeStyle = 'rgba(200,169,110,0.65)'
+  ctx.lineWidth   = 1
+  ctx.beginPath()
+  ctx.moveTo(cx - topW/2, topY); ctx.lineTo(cx + topW/2, topY)
+  ctx.lineTo(cx + botW/2, bottomY); ctx.lineTo(cx - botW/2, bottomY)
+  ctx.closePath(); ctx.fill(); ctx.stroke()
+  ctx.restore()
+}
+
+function drawCalGuides(ctx, lay, W) {
+  ctx.save()
+  ctx.setLineDash([3,5])
+  ctx.lineWidth = 0.75
+  const lines = [
+    { y: lay.smY,     color: 'rgba(200,169,110,0.28)' },
+    { y: lay.hmY,     color: 'rgba(200,169,110,0.18)' },
+    { y: lay.topY,    color: 'rgba(200,169,110,0.15)' },
+    { y: lay.bottomY, color: 'rgba(122,184,245,0.22)' },
   ]
-  useEffect(()=>{
-    const c=previewRef.current; if(!c||!open)return
-    const ctx=c.getContext('2d'),W=c.width,H=c.height; ctx.clearRect(0,0,W,H)
-    const shoulderY=H*0.18,hipY=H*0.44,cx=W/2,shoulderW=W*0.22
-    const nOff=cal.necklineY,sPad=cal.shoulderPad,sFlare=cal.skirtFlare,hemFrac=cal.hemY??1.0
-    const topY=shoulderY-(hipY-shoulderY)*nOff,hemY2=shoulderY+(hipY-shoulderY)*4.8*Math.min(hemFrac,1.2)
-    const topHW=shoulderW*sPad,botHW=Math.max(shoulderW*1.2,topHW)*sFlare
-    ctx.save();ctx.strokeStyle='rgba(180,160,120,.18)';ctx.lineWidth=1;ctx.setLineDash([3,3])
-    ctx.beginPath();ctx.arc(cx,H*0.07,H*0.055,0,Math.PI*2);ctx.stroke()
-    ctx.restore();ctx.save()
-    const grad=ctx.createLinearGradient(0,topY,0,hemY2); grad.addColorStop(0,'rgba(200,169,110,.55)'); grad.addColorStop(0.4,'rgba(200,169,110,.38)'); grad.addColorStop(1,'rgba(200,169,110,.18)')
-    ctx.fillStyle=grad; ctx.strokeStyle='rgba(200,169,110,.78)'; ctx.lineWidth=1.5; ctx.setLineDash([])
-    const waistY=shoulderY+(hipY-shoulderY)*0.55,waistHW=topHW*0.80
-    ctx.beginPath(); ctx.moveTo(cx-topHW,topY); ctx.lineTo(cx+topHW,topY)
-    ctx.bezierCurveTo(cx+topHW,shoulderY+10,cx+waistHW,waistY,cx+botHW,hemY2)
-    ctx.lineTo(cx-botHW,hemY2); ctx.bezierCurveTo(cx-waistHW,waistY,cx-topHW,shoulderY+10,cx-topHW,topY)
-    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore()
-  },[cal,open])
-  return(
-    <div className="cal-editor">
-      <button type="button" className="cal-toggle" onClick={()=>setOpen(v=>!v)}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+  for (const { y, color } of lines) {
+    ctx.strokeStyle = color
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke()
+  }
+  ctx.setLineDash([])
+  ctx.restore()
+}
+
+function drawCalHandles(ctx, hmap, active, hover) {
+  for (const [key, h] of Object.entries(hmap)) {
+    const isActive = key === active
+    const isHover  = key === hover
+    const r        = isActive ? 7 : isHover ? 6 : 5
+    ctx.save()
+    if (isActive || isHover) {
+      ctx.beginPath(); ctx.arc(h.x, h.y, r + 5, 0, Math.PI*2)
+      ctx.fillStyle = h.color + '25'; ctx.fill()
+    }
+    ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI*2)
+    ctx.fillStyle   = isActive ? h.color : '#100a04'
+    ctx.strokeStyle = h.color
+    ctx.lineWidth   = isActive ? 2.5 : 1.8
+    ctx.fill(); ctx.stroke()
+    if (isActive) {
+      ctx.font = '600 9px system-ui'; ctx.textAlign = 'center'
+      ctx.fillStyle = h.color
+      ctx.fillText(h.label, h.x, h.y - r - 5)
+    }
+    ctx.restore()
+  }
+}
+
+function CalibrationEditor({ calibration, onChange, tryonImage }) {
+  const [open,        setOpen      ] = useState(false)
+  const [dressImg,    setDressImg  ] = useState(null)
+  const [active,      setActive    ] = useState(null)
+  const [hover,       setHover     ] = useState(null)
+  const [dragOrigin,  setDragOrigin] = useState(null)
+  const [calSnapshot, setCalSnap   ] = useState(null)
+
+  const canvasRef = useRef(null)
+  const dragging  = useRef(false)
+  const CW = 220, CH = 400
+
+  const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
+
+  // Load dress image when tryonImage changes
+  useEffect(() => {
+    if (!tryonImage) { setDressImg(null); return }
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload  = () => setDressImg(img)
+    img.onerror = () => setDressImg(null)
+    img.src = tryonImage
+  }, [tryonImage])
+
+  // Redraw canvas
+  useEffect(() => {
+    if (!open) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, CW, CH)
+
+    // Dark background + subtle grid
+    ctx.fillStyle = '#0c0804'
+    ctx.fillRect(0, 0, CW, CH)
+    ctx.strokeStyle = 'rgba(255,255,255,0.025)'
+    ctx.lineWidth = 1
+    for (let y = 0; y < CH; y += 20) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke()
+    }
+
+    const lay  = calLayout(cal, CW, CH)
+    const hmap = calHandles(lay)
+
+    drawCalGuides(ctx, lay, CW)
+    drawCalSkeleton(ctx, CW, CH, dressImg ? 0.5 : 0.85)
+
+    if (dressImg) {
+      drawCalDressImage(ctx, dressImg, lay, CW)
+    } else {
+      drawCalDressTrapezoid(ctx, lay)
+    }
+
+    drawCalHandles(ctx, hmap, active, hover)
+
+    // Footer hint
+    ctx.fillStyle = 'rgba(12,8,4,0.75)'
+    ctx.fillRect(0, CH - 18, CW, 18)
+    ctx.font = '9px system-ui'; ctx.textAlign = 'center'
+    ctx.fillStyle = 'rgba(200,169,110,0.4)'
+    ctx.fillText('drag handles · skeleton = body reference', CW/2, CH - 6)
+  }, [open, cal, dressImg, active, hover])
+
+  // Pointer helpers
+  function canvasXY(e) {
+    const c = canvasRef.current; if (!c) return {x:0,y:0}
+    const r  = c.getBoundingClientRect()
+    const sx = CW / r.width, sy = CH / r.height
+    const cx = e.touches ? e.touches[0].clientX : e.clientX
+    const cy = e.touches ? e.touches[0].clientY : e.clientY
+    return { x: (cx - r.left) * sx, y: (cy - r.top) * sy }
+  }
+
+  function hitTest(x, y) {
+    const lay  = calLayout(cal, CW, CH)
+    const hmap = calHandles(lay)
+    for (const [key, h] of Object.entries(hmap)) {
+      if (Math.hypot(x - h.x, y - h.y) < 11) return key
+    }
+    return null
+  }
+
+  const onDown = useCallback(e => {
+    e.preventDefault()
+    const { x, y } = canvasXY(e)
+    const hit = hitTest(x, y)
+    if (!hit) return
+    dragging.current = true
+    setActive(hit)
+    setDragOrigin({ x, y })
+    setCalSnap({ ...cal })
+  }, [cal])
+
+  const onMove = useCallback(e => {
+    e.preventDefault()
+    const { x, y } = canvasXY(e)
+
+    if (!dragging.current) {
+      const hit = hitTest(x, y)
+      setHover(hit)
+      const canvas = canvasRef.current
+      if (canvas) {
+        canvas.style.cursor = hit
+          ? (hit === 'neckline' || hit === 'hem' ? 'ns-resize' : 'ew-resize')
+          : 'default'
+      }
+      return
+    }
+
+    const dx   = x - dragOrigin.x
+    const dy   = y - dragOrigin.y
+    const snap = calSnapshot
+    const lay0 = calLayout(snap, CW, CH)
+    let next   = { ...snap }
+
+    switch (active) {
+      case 'neckline': {
+        const newTop = lay0.topY + dy
+        next.necklineY = Math.max(0.02, Math.min(0.55, (lay0.smY - newTop) / lay0.torsoH))
+        break
+      }
+      case 'shoulderL': {
+        const newHalfW = lay0.topW / 2 - dx
+        next.shoulderPad = Math.max(0.60, Math.min(2.80, (newHalfW * 2) / lay0.swPx))
+        break
+      }
+      case 'shoulderR': {
+        const newHalfW = lay0.topW / 2 + dx
+        next.shoulderPad = Math.max(0.60, Math.min(2.80, (newHalfW * 2) / lay0.swPx))
+        break
+      }
+      case 'hem': {
+        const newBot = lay0.bottomY + dy
+        const fullH  = lay0.smY + lay0.torsoH * 4.8 - lay0.topY
+        next.hemY = Math.max(0.35, Math.min(1.30, (newBot - lay0.topY) / fullH))
+        break
+      }
+      case 'flareL': {
+        const baseBotW = Math.max(lay0.swPx * 1.2, lay0.topW)
+        const newHalfW = lay0.botW / 2 - dx
+        next.skirtFlare = Math.max(0.70, Math.min(2.20, (newHalfW * 2) / baseBotW))
+        break
+      }
+      case 'flareR': {
+        const baseBotW = Math.max(lay0.swPx * 1.2, lay0.topW)
+        const newHalfW = lay0.botW / 2 + dx
+        next.skirtFlare = Math.max(0.70, Math.min(2.20, (newHalfW * 2) / baseBotW))
+        break
+      }
+    }
+    onChange(next)
+  }, [active, dragOrigin, calSnapshot, onChange])
+
+  const onUp = useCallback(() => {
+    dragging.current = false
+    setActive(null)
+    setDragOrigin(null)
+    setCalSnap(null)
+  }, [])
+
+  const hasCustom = !!calibration
+  const hasImg    = !!tryonImage
+
+  return (
+    <div className="ce-root">
+      <button type="button" className="ce-toggle" onClick={() => setOpen(v => !v)}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+        </svg>
         Try-On Calibration
-        {calibration&&<span className="badge badge--green">Custom</span>}
-        <span style={{marginLeft:'auto',fontSize:10,opacity:.5}}>{open?'▲':'▼'}</span>
+        {hasCustom && <span className="ce-pill">Custom</span>}
+        {hasImg    && <span className="ce-pill ce-pill--blue">Live dress</span>}
+        <span className="ce-chev">{open ? '▲' : '▼'}</span>
       </button>
-      {open&&(
-        <div className="cal-panel">
-          <div className="cal-inner">
-            <div className="cal-sliders">
-              <p className="cal-desc">Fine-tune dress positioning for virtual try-on. Preview updates live.</p>
-              {sliders.map(s=>(
-                <div key={s.key} className="cal-row">
-                  <div className="cal-row-header">
-                    <span className="field-label">{s.label}</span>
-                    <span className="cal-val">{s.key==='hemY'&&cal.hemY==null?'auto':cal[s.key]?.toFixed(2)??'auto'}</span>
-                  </div>
-                  <input type="range" min={s.min} max={s.max} step={s.step}
-                    value={s.key==='hemY'?(cal.hemY??1.0):cal[s.key]}
-                    onChange={e=>onChange({...cal,[s.key]:parseFloat(e.target.value)})} className="range-input"/>
-                  <p className="cal-hint">{s.hint}</p>
-                </div>
-              ))}
-              <div style={{display:'flex',gap:6,marginTop:4}}>
-                <button type="button" className="btn-ghost btn-xs" onClick={()=>onChange(null)}>Reset defaults</button>
-                {cal.hemY!=null&&<button type="button" className="btn-ghost btn-xs" onClick={()=>onChange({...cal,hemY:null})}>Auto hem</button>}
+
+      {open && (
+        <div className="ce-panel">
+          <div className="ce-layout">
+
+            {/* Canvas col */}
+            <div className="ce-canvas-col">
+              <canvas
+                ref={canvasRef}
+                width={CW} height={CH}
+                className="ce-canvas"
+                onMouseDown={onDown}
+                onMouseMove={onMove}
+                onMouseUp={onUp}
+                onMouseLeave={onUp}
+                onTouchStart={onDown}
+                onTouchMove={onMove}
+                onTouchEnd={onUp}
+              />
+              {!hasImg && (
+                <p className="ce-no-img">Upload a try-on image above to preview the real dress here</p>
+              )}
+              <div className="ce-legend">
+                <span className="ce-dot" style={{background:'#c9a96e'}}/>Bodice
+                <span className="ce-dot" style={{background:'#7ab8f5',marginLeft:8}}/>Hem / Flare
+                <span className="ce-dot" style={{background:'rgba(200,169,110,0.4)',marginLeft:8}}/>Body
               </div>
             </div>
-            <div className="cal-preview-wrap">
-              <p className="cal-preview-label">Live preview</p>
-              <canvas ref={previewRef} width={140} height={240} className="cal-preview-canvas"/>
+
+            {/* Sliders col */}
+            <div className="ce-sliders">
+              <p className="ce-desc">
+                Drag handles on the canvas for quick alignment, or use sliders for precision.
+                The skeleton shows where the AI detects shoulders and hips during scanning.
+              </p>
+
+              {[
+                { key:'necklineY',   label:'Neckline offset', min:0.02, max:0.55, step:0.01,
+                  hint:'How far above the shoulder the dress top starts.' },
+                { key:'shoulderPad', label:'Shoulder width',  min:0.60, max:2.80, step:0.05,
+                  hint:'Bodice width relative to detected shoulder span.' },
+                { key:'skirtFlare',  label:'Skirt flare',     min:0.70, max:2.20, step:0.05,
+                  hint:'How wide the hem is compared to the bodice.' },
+                { key:'hemY',        label:'Hem length',       min:0.35, max:1.30, step:0.01,
+                  hint:'Override hem position. Drag the blue ↕ handle or use slider.', isHem:true },
+              ].map(s => {
+                const raw = cal[s.key]
+                const val = s.isHem ? (raw ?? 1.0) : raw
+                const display = raw == null && s.isHem ? 'auto' : Number(val).toFixed(2)
+                return (
+                  <div key={s.key} className="ce-row">
+                    <div className="ce-row-head">
+                      <span className="ce-row-label">{s.label}</span>
+                      <span className="ce-row-val">{display}</span>
+                    </div>
+                    <input type="range" min={s.min} max={s.max} step={s.step}
+                      value={val}
+                      onChange={e => onChange({ ...cal, [s.key]: parseFloat(e.target.value) })}
+                      className="ce-range"
+                    />
+                    <p className="ce-row-hint">{s.hint}</p>
+                  </div>
+                )
+              })}
+
+              <div className="ce-btns">
+                <button type="button" className="ce-ghost" onClick={() => onChange(null)}>
+                  Reset defaults
+                </button>
+                {cal.hemY != null && (
+                  <button type="button" className="ce-ghost" onClick={() => onChange({ ...cal, hemY: null })}>
+                    Auto hem
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -504,6 +845,7 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
               <div className="detail-price">{gown.price}</div>
               <div className="detail-badges">
                 {gown.type&&<span className="badge badge--neutral">{gown.type}</span>}
+                {gown.segment&&gown.segment!=='women'&&<span className="badge badge--blue">{gown.segment}</span>}
                 {gown.silhouette&&<span className="badge badge--neutral">{gown.silhouette}</span>}
                 {gown.color&&<span className="badge badge--neutral">{gown.color}</span>}
               </div>
@@ -546,11 +888,13 @@ function ProductDetailModal({ gown, onClose, onEdit }) {
    Stock Dropdown
 ───────────────────────────────────────────── */
 function StockDropdown({ gown, onSave }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen]           = useState(false)
   const [inventory, setInventory] = useState([])
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [err, setErr]             = useState('')
   const wrapRef = useRef(null)
+
+  const segmentPresets = PRESET_SIZES_BY_SEGMENT[gown.segment ?? 'women'] ?? PRESET_SIZES_BY_SEGMENT.women
 
   useEffect(() => {
     if (open) setInventory(JSON.parse(JSON.stringify(gown.inventory || [])))
@@ -590,11 +934,7 @@ function StockDropdown({ gown, onSave }) {
 
   return (
     <div className="stock-dropdown-wrap" ref={wrapRef}>
-      <button
-        className="btn-sm btn-stock"
-        onClick={() => setOpen(v => !v)}
-        title="Manage stock"
-      >
+      <button className="btn-sm btn-stock" onClick={() => setOpen(v => !v)} title="Manage stock">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
         Stock
         <span style={{fontSize:9,opacity:.55,marginLeft:1}}>{open?'▲':'▼'}</span>
@@ -617,8 +957,7 @@ function StockDropdown({ gown, onSave }) {
                 return (
                   <div key={inv.size} className="stock-row">
                     <span className="stock-size">{inv.size}</span>
-                    <input
-                      type="number" min="0" value={inv.stock} className="stock-input"
+                    <input type="number" min="0" value={inv.stock} className="stock-input"
                       onChange={e => setInventory(p => p.map(i =>
                         i.size === inv.size ? { ...i, stock: Math.max(0, parseInt(e.target.value) || 0) } : i
                       ))}
@@ -636,12 +975,7 @@ function StockDropdown({ gown, onSave }) {
 
           <div style={{marginTop: inventory.length ? 10 : 0}}>
             <p className="sp-section-label">Add size</p>
-            <SizePicker
-              inventory={inventory}
-              onAdd={handleAdd}
-              error={err}
-              onClearErr={() => setErr('')}
-            />
+            <SizePicker inventory={inventory} onAdd={handleAdd} error={err} onClearErr={() => setErr('')} presets={segmentPresets}/>
           </div>
 
           {inventory.length === 0 && !err && (
@@ -664,35 +998,38 @@ function StockDropdown({ gown, onSave }) {
    Form Sidebar / Drawer
 ───────────────────────────────────────────── */
 function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
-  const [form,setForm]=useState(emptyGown)
-  const [inventory,setInventory]=useState([])
-  const [saving,setSaving]=useState(false)
-  const [formError,setFormError]=useState('')
-  const [imgError,setImgError]=useState(false)
-  const [tryonImgError,setTryonImgError]=useState(false)
-  const [tryonBackImgError,setTryonBackImgError]=useState(false)
-  const [bgRemoverSrc,setBgRemoverSrc]=useState(null)
-  const [bgRemoverTarget,setBgRemoverTarget]=useState('front')
-  const [confirm,setConfirm]=useState(null)
-  const isEdit=!!editingGown
+  const [form,setForm]                           = useState(emptyGown)
+  const [inventory,setInventory]                 = useState([])
+  const [saving,setSaving]                       = useState(false)
+  const [formError,setFormError]                 = useState('')
+  const [imgError,setImgError]                   = useState(false)
+  const [tryonImgError,setTryonImgError]         = useState(false)
+  const [tryonBackImgError,setTryonBackImgError] = useState(false)
+  const [bgRemoverSrc,setBgRemoverSrc]           = useState(null)
+  const [bgRemoverTarget,setBgRemoverTarget]     = useState('front')
+  const [confirm,setConfirm]                     = useState(null)
+  const isEdit = !!editingGown
+
+  const segmentPresets = PRESET_SIZES_BY_SEGMENT[form.segment] ?? PRESET_SIZES_BY_SEGMENT.women
 
   useEffect(()=>{
     if(editingGown){
       const raw=String(editingGown.price||'').replace(/[^\d]/g,'')
       setForm({
-        name:editingGown.name||'',
-        price:'₱'+(raw?Number(raw).toLocaleString('en-PH'):''),
-        image:editingGown.image||'/images/',
-        alt:editingGown.alt||'',
-        tryonImage:editingGown.tryonImage||'',
-        tryonImageBack:editingGown.tryonImageBack||'',
-        tryonCalibration:editingGown.tryonCalibration||null,
-        type:editingGown.type||'Gowns',
-        color:editingGown.color||'',
-        silhouette:editingGown.silhouette||'',
-        fabric:editingGown.fabric||'',
-        neckline:editingGown.neckline||'',
-        description:editingGown.description||'',
+        name:             editingGown.name||'',
+        price:            '₱'+(raw?Number(raw).toLocaleString('en-PH'):''),
+        image:            editingGown.image||'/images/',
+        alt:              editingGown.alt||'',
+        tryonImage:       editingGown.tryonImage||'',
+        tryonImageBack:   editingGown.tryonImageBack||'',
+        tryonCalibration: editingGown.tryonCalibration||null,
+        type:             editingGown.type||'Gowns',
+        segment:          editingGown.segment||'women',
+        color:            editingGown.color||'',
+        silhouette:       editingGown.silhouette||'',
+        fabric:           editingGown.fabric||'',
+        neckline:         editingGown.neckline||'',
+        description:      editingGown.description||'',
       })
       setInventory(editingGown.inventory||[])
     } else {
@@ -717,11 +1054,13 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
     if(!form.name.trim()){setFormError('Name is required.');return}
     if(!form.price.trim()||form.price==='₱'||numericPrice(form.price)===0){setFormError('Price is required.');return}
     if(!form.image.trim()){setFormError('Image path is required.');return}
+    const segmentLabel = SEGMENTS.find(s=>s.id===form.segment)?.label || form.segment
     const detail=isEdit?(
       <div>
         <div className="confirm-row"><span>Name</span><span>{form.name}</span></div>
         <div className="confirm-row"><span>Price</span><span>{form.price}</span></div>
         <div className="confirm-row"><span>Type</span><span>{form.type}</span></div>
+        <div className="confirm-row"><span>Segment</span><span>{segmentLabel}</span></div>
         {form.color&&<div className="confirm-row"><span>Color</span><span>{form.color}</span></div>}
         {form.silhouette&&<div className="confirm-row"><span>Silhouette</span><span>{form.silhouette}</span></div>}
         {inventory.length>0&&<div className="confirm-row"><span>Sizes</span><span>{inventory.map(i=>i.size).join(', ')}</span></div>}
@@ -799,6 +1138,12 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
                 </select>
               </div>
               <div className="form-field">
+                <label className="field-label">Segment</label>
+                <select name="segment" value={form.segment} onChange={handleChange} className="field-input">
+                  {SEGMENTS.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+              </div>
+              <div className="form-field">
                 <label className="field-label">Color</label>
                 <input name="color" value={form.color} onChange={handleChange} placeholder="e.g. Ivory" className="field-input"/>
               </div>
@@ -870,12 +1215,17 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
                 </button>
               </div>
             </div>
-            <CalibrationEditor calibration={form.tryonCalibration} onChange={cal=>setForm(p=>({...p,tryonCalibration:cal}))}/>
+            {/* CalibrationEditor v2 — receives tryonImage for live dress preview */}
+            <CalibrationEditor
+              calibration={form.tryonCalibration}
+              onChange={cal=>setForm(p=>({...p,tryonCalibration:cal}))}
+              tryonImage={form.tryonImage}
+            />
           </div>
 
           <div className="form-section">
             <p className="form-section-label">Inventory</p>
-            <InlineInventoryEditor inventory={inventory} onChange={setInventory}/>
+            <InlineInventoryEditor inventory={inventory} onChange={setInventory} segmentPresets={segmentPresets}/>
           </div>
 
           {formError&&<p className="field-error" style={{margin:'0 0 12px'}}>{formError}</p>}
@@ -893,7 +1243,7 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
 /* ─────────────────────────────────────────────
    Inline Inventory Editor
 ───────────────────────────────────────────── */
-function InlineInventoryEditor({ inventory, onChange }) {
+function InlineInventoryEditor({ inventory, onChange, segmentPresets }) {
   const [err, setErr] = useState('')
 
   const handleAdd = (size) => {
@@ -930,21 +1280,12 @@ function InlineInventoryEditor({ inventory, onChange }) {
           })}
         </div>
       )}
-
       <p className="sp-section-label" style={{marginBottom:6}}>
         {inventory.length === 0 ? 'Select sizes to add' : 'Add another size'}
       </p>
-      <SizePicker
-        inventory={inventory}
-        onAdd={handleAdd}
-        error={err}
-        onClearErr={() => setErr('')}
-      />
-
+      <SizePicker inventory={inventory} onAdd={handleAdd} error={err} onClearErr={() => setErr('')} presets={segmentPresets}/>
       {inventory.length === 0 && (
-        <p className="field-hint" style={{marginTop:8}}>
-          Add at least one size and set its stock quantity above.
-        </p>
+        <p className="field-hint" style={{marginTop:8}}>Add at least one size and set its stock quantity above.</p>
       )}
     </div>
   )
@@ -958,6 +1299,7 @@ function GownCard({ g, onEdit, onView, onSaveStock, onArchive, onPermanentDelete
   const avail=inv.reduce((s,i)=>s+Math.max(0,(i.stock||0)-(i.reserved||0)),0)
   const outSizes=inv.filter(i=>(i.stock-(i.reserved||0))<=0)
   const lowSizes=inv.filter(i=>{const a=i.stock-(i.reserved||0);return a>0&&a<=2})
+  const segmentLabel = SEGMENTS.find(s=>s.id===g.segment)?.label
   return(
     <div className={`gown-card${archived?' gown-card--archived':''}`}>
       <div className="gown-card-img">
@@ -970,6 +1312,7 @@ function GownCard({ g, onEdit, onView, onSaveStock, onArchive, onPermanentDelete
           {g.name}
           {archived&&<span className="badge badge--warning">Archived</span>}
           {g.tryonCalibration&&<span className="badge badge--neutral">⚙ Cal</span>}
+          {segmentLabel&&segmentLabel!=='Women'&&<span className="badge badge--blue">{segmentLabel}</span>}
         </div>
         <div className="gown-card-meta">{g.price}{g.silhouette?` · ${g.silhouette}`:''}{g.color?` · ${g.color}`:''}{g.type?` · ${g.type}`:''}</div>
         <div className="gown-card-stock">
@@ -1046,7 +1389,7 @@ export default function AdminGownsPage() {
 
   const filteredActive = useMemo(()=>{
     let list=[...gowns]
-    if(search.trim()){const q=search.toLowerCase(); list=list.filter(g=>[g.name,g.color,g.silhouette,g.fabric,g.neckline,g.type].some(v=>(v||'').toLowerCase().includes(q)))}
+    if(search.trim()){const q=search.toLowerCase(); list=list.filter(g=>[g.name,g.color,g.silhouette,g.fabric,g.neckline,g.type,g.segment].some(v=>(v||'').toLowerCase().includes(q)))}
     list.sort((a,b)=>{
       if(sort==='name-asc')return a.name.localeCompare(b.name)
       if(sort==='name-desc')return b.name.localeCompare(a.name)
@@ -1062,7 +1405,7 @@ export default function AdminGownsPage() {
   const filteredArchived = useMemo(()=>{
     if(!search.trim())return archived
     const q=search.toLowerCase()
-    return archived.filter(g=>[g.name,g.color,g.silhouette].some(v=>(v||'').toLowerCase().includes(q)))
+    return archived.filter(g=>[g.name,g.color,g.silhouette,g.segment].some(v=>(v||'').toLowerCase().includes(q)))
   },[archived,search])
 
   const openAdd=()=>{ setEditingGown(null); setSidebarOpen(true) }
@@ -1127,27 +1470,12 @@ export default function AdminGownsPage() {
 
   return(
     <>
-      {/*
-        ── NO :root or @media tokens here ──────────────────────────────────────
-        All CSS custom properties (--c-bg, --c-surface, etc.) are defined in
-        layout.js with three-layer priority:
-          1. :root                       dark default
-          2. @media prefers-color-scheme OS light (with dark-override guard)
-          3. [data-adm-theme]            manual toggle, always wins
-        This style block contains only component-scoped rules.
-      */}
       <style>{`
         /* ── SizePicker ── */
         .sp-root{display:flex;flex-direction:column;gap:8px;}
         .sp-section-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--c-subtle);}
         .sp-grid{display:flex;flex-wrap:wrap;gap:5px;}
-        .sp-btn{
-          padding:5px 11px;border-radius:6px;font-size:12px;font-weight:500;
-          border:1px solid var(--c-border);background:var(--c-surface2);
-          color:var(--c-text);cursor:pointer;transition:all .13s;
-          display:inline-flex;align-items:center;gap:4px;
-          white-space:nowrap;user-select:none;
-        }
+        .sp-btn{padding:5px 11px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid var(--c-border);background:var(--c-surface2);color:var(--c-text);cursor:pointer;transition:all .13s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;user-select:none;}
         .sp-btn:not(:disabled):hover{border-color:var(--c-gold);background:var(--c-gold-dim);color:var(--c-gold);}
         .sp-btn--taken{opacity:.38;cursor:not-allowed;background:var(--c-surface);}
         .sp-btn--custom{border-style:dashed;color:var(--c-muted);}
@@ -1155,10 +1483,7 @@ export default function AdminGownsPage() {
         .sp-btn--custom-active{border-color:var(--c-blue);background:var(--c-blue-dim);color:var(--c-blue);}
         .sp-check{font-size:9px;color:var(--c-green);}
         .sp-custom-row{display:flex;gap:7px;align-items:center;}
-        .sp-custom-input{
-          flex:1;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--radius);
-          font-size:13px;background:var(--c-surface2);color:var(--c-text);min-width:0;
-        }
+        .sp-custom-input{flex:1;padding:7px 10px;border:1px solid var(--c-border);border-radius:var(--radius);font-size:13px;background:var(--c-surface2);color:var(--c-text);min-width:0;}
         .sp-custom-input:focus{outline:none;border-color:var(--c-gold);}
         .sp-custom-input::placeholder{color:var(--c-subtle);}
 
@@ -1228,22 +1553,31 @@ export default function AdminGownsPage() {
         .iup-hint{font-size:10px;color:var(--c-subtle);line-height:1.5;}
         @keyframes spin{to{transform:rotate(360deg)}}
 
-        /* ── Calibration ── */
-        .cal-editor{margin-top:10px;}
-        .cal-toggle{display:flex;align-items:center;gap:7px;background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--radius);padding:8px 12px;font-size:12px;font-weight:500;color:var(--c-text);cursor:pointer;width:100%;text-align:left;transition:background .12s;}
-        .cal-toggle:hover{background:var(--c-surface2);}
-        .cal-panel{margin-top:8px;border:1px solid var(--c-border);border-radius:var(--radius-lg);overflow:hidden;}
-        .cal-inner{display:grid;grid-template-columns:1fr 160px;}
-        .cal-sliders{padding:14px;display:flex;flex-direction:column;gap:10px;border-right:1px solid var(--c-border);}
-        .cal-desc{font-size:11px;color:var(--c-muted);line-height:1.6;}
-        .cal-row{display:flex;flex-direction:column;gap:3px;}
-        .cal-row-header{display:flex;justify-content:space-between;align-items:baseline;}
-        .cal-val{font-size:11px;font-weight:600;color:var(--c-gold);font-variant-numeric:tabular-nums;}
-        .cal-hint{font-size:10px;color:var(--c-subtle);}
-        .cal-preview-wrap{display:flex;flex-direction:column;align-items:center;padding:12px;background:var(--c-surface2);}
-        .cal-preview-label{font-size:10px;font-weight:700;color:var(--c-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
-        .cal-preview-canvas{border-radius:6px;background:var(--c-surface);border:1px solid var(--c-border);}
-        .range-input{width:100%;accent-color:var(--c-gold);}
+        /* ── CalibrationEditor v2 ── */
+        .ce-root{margin-top:10px;}
+        .ce-toggle{display:flex;align-items:center;gap:7px;width:100%;text-align:left;background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--radius);padding:8px 12px;font-size:12px;font-weight:500;color:var(--c-text);cursor:pointer;transition:background .12s;}
+        .ce-toggle:hover{background:var(--c-surface2);}
+        .ce-pill{padding:1px 7px;border-radius:20px;font-size:10px;font-weight:600;background:rgba(200,169,110,.15);color:#c9a96e;border:1px solid rgba(200,169,110,.3);}
+        .ce-pill--blue{background:rgba(74,127,212,.15);color:#7ab8f5;border-color:rgba(74,127,212,.3);}
+        .ce-chev{margin-left:auto;font-size:9px;opacity:.45;}
+        .ce-panel{margin-top:8px;border:1px solid var(--c-border);border-radius:var(--radius-lg);overflow:hidden;}
+        .ce-layout{display:grid;grid-template-columns:220px 1fr;}
+        .ce-canvas-col{display:flex;flex-direction:column;background:#0c0804;border-right:1px solid rgba(200,169,110,.12);}
+        .ce-canvas{display:block;width:220px;height:400px;touch-action:none;user-select:none;flex-shrink:0;}
+        .ce-no-img{font-size:10px;color:rgba(200,169,110,.35);text-align:center;padding:6px 10px 2px;line-height:1.5;}
+        .ce-legend{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:6px 10px 8px;font-size:10px;color:rgba(250,249,247,.3);border-top:1px solid rgba(200,169,110,.1);}
+        .ce-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+        .ce-sliders{padding:16px 18px;display:flex;flex-direction:column;gap:13px;overflow-y:auto;max-height:400px;background:var(--c-surface);}
+        .ce-desc{font-size:11px;color:var(--c-muted);line-height:1.65;margin:0;}
+        .ce-row{display:flex;flex-direction:column;gap:3px;}
+        .ce-row-head{display:flex;justify-content:space-between;align-items:baseline;}
+        .ce-row-label{font-size:11px;font-weight:600;color:var(--c-muted);}
+        .ce-row-val{font-size:11px;font-weight:700;color:#c9a96e;font-variant-numeric:tabular-nums;}
+        .ce-range{width:100%;accent-color:#c9a96e;}
+        .ce-row-hint{font-size:10px;color:var(--c-subtle);line-height:1.5;margin:0;}
+        .ce-btns{display:flex;gap:6px;flex-wrap:wrap;padding-top:2px;}
+        .ce-ghost{display:inline-flex;align-items:center;gap:4px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:5px;padding:5px 10px;font-size:11px;color:var(--c-muted);cursor:pointer;transition:background .12s,color .12s;}
+        .ce-ghost:hover{background:var(--c-surface);color:var(--c-text);}
 
         /* ── Inventory / Stock ── */
         .inv-editor{display:flex;flex-direction:column;gap:10px;}
@@ -1348,6 +1682,7 @@ export default function AdminGownsPage() {
         .bgr-tolerance-row{display:flex;align-items:center;gap:10px;font-size:12px;}
         .tol-val{font-weight:700;color:var(--c-gold);min-width:24px;text-align:right;}
         .spin{display:inline-block;width:20px;height:20px;border:2px solid var(--c-border);border-top-color:var(--c-gold);border-radius:50%;animation:spin .7s linear infinite;}
+        .range-input{width:100%;accent-color:var(--c-gold);}
 
         /* ── Page ── */
         .page{padding:28px 32px;max-width:900px;margin:0 auto;}
@@ -1379,19 +1714,42 @@ export default function AdminGownsPage() {
         .back-link:hover{color:var(--c-text);}
         .err-msg{font-size:13px;color:var(--c-red);padding:12px;background:var(--c-red-dim);border:1px solid var(--c-red-border);border-radius:var(--radius);margin-bottom:16px;}
 
+        /* ── Responsive ── */
         @media(max-width:680px){
           .page{padding:16px;}
           .form-grid-2{grid-template-columns:1fr;}
           .form-images-grid{grid-template-columns:1fr;}
-          .cal-inner{grid-template-columns:1fr;}
-          .gown-card{grid-template-columns:56px 1fr;}
-          .gown-card-actions{flex-direction:row;grid-column:1/-1;flex-wrap:wrap;}
+          .iup-dropzone.has-image{min-height:120px;}
+          .iup-preview-wrap{height:120px;}
+          .iup-preview{height:120px;}
+          .ce-layout{grid-template-columns:1fr;}
+          .ce-canvas-col{border-right:none;border-bottom:1px solid rgba(200,169,110,.1);}
+          .ce-canvas{width:100%;height:auto;aspect-ratio:220/400;}
+          .ce-sliders{max-height:none;}
+          .gown-card{grid-template-columns:56px 1fr;row-gap:10px;}
+          .gown-card-actions{flex-direction:row;grid-column:1/-1;flex-wrap:wrap;justify-content:flex-start;}
           .detail-layout{grid-template-columns:1fr;}
-          .sidebar{max-width:100vw;}
+          .detail-main-img{max-height:260px;}
+          .sidebar{max-width:100vw;width:100vw;}
           .stock-header,.stock-row{grid-template-columns:60px 70px 60px 50px 28px;}
           .stock-dropdown-panel{width:calc(100vw - 32px);right:auto;left:0;}
           .sp-grid{gap:4px;}
           .sp-btn{padding:5px 8px;font-size:11px;}
+          .stats-bar{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+          .stat-card{min-width:0;}
+          .toolbar{flex-direction:column;align-items:stretch;}
+          .search-wrap{min-width:0;}
+          .sort-select{width:100%;}
+          .modal-body{padding:14px;}
+          .modal-footer{padding:12px 14px;}
+          .modal-header{padding:14px;}
+          .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+          .tab{white-space:nowrap;padding:8px 12px;}
+        }
+        @media(max-width:400px){
+          .gown-card-actions{flex-direction:column;align-items:stretch;}
+          .gown-card-actions .btn-sm{justify-content:center;}
+          .stats-bar{grid-template-columns:1fr;}
         }
       `}</style>
 
@@ -1438,7 +1796,7 @@ export default function AdminGownsPage() {
         <div className="toolbar">
           <div className="search-wrap">
             <svg className="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input className="search-input" placeholder="Search by name, color, silhouette…" value={search} onChange={e=>setSearch(e.target.value)}/>
+            <input className="search-input" placeholder="Search by name, color, segment…" value={search} onChange={e=>setSearch(e.target.value)}/>
           </div>
           <select className="sort-select" value={sort} onChange={e=>setSort(e.target.value)}>
             {SORT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}

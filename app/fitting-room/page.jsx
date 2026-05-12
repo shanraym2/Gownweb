@@ -7,22 +7,22 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { getCurrentUser } from '../utils/authClient'
 
-// ── Shared constants & scoring engine ────────────────────────────────────────
 import {
   BODY_SHAPES, SKIN_TONES, UNDERTONES, OCCASIONS,
   COLOR_OPTIONS, FABRIC_OPTIONS, BUDGET_RANGES,
   scoreGown, normaliseScore, MAX_RAW_SCORE,
 } from '../constants/styleOptions'
 
-// ── Skin tone detection utilities ─────────────────────────────────────────────
+import {
+  SEGMENTS,
+  CAMERA_MULTS,
+  recommendSize,
+} from '../constants/sizeConstants'
+
 import {
   detectSkinProfile,
-  detectSkinToneFromPixels,
-  detectUndertone,
-  sampleFaceRegion,
 } from '../utils/skinTone'
 
-// ── Shared TryOnCamera component ─────────────────────────────────────────────
 import TryOnCamera from '../components/TryOnCamera'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,10 +35,9 @@ const POSE_SCRIPTS = [
   'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.10.0/dist/tf-backend-webgl.min.js',
   'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
 ]
-const SEG_SCRIPT = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.1/dist/body-segmentation.min.js'
 
 const KP   = { NOSE:0, LS:5, RS:6, LE:7, RE:8, LH:11, RH:12, LK:13, RK:14, LA:15, RA:16 }
-const CONF = 0.25
+const CONF = 0.45
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -62,7 +61,7 @@ function smoothKps(prev, curr, t = 0.35) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BODY SHAPE DETECTION FROM KEYPOINTS
+// BODY SHAPE DETECTION
 // ─────────────────────────────────────────────────────────────────────────────
 
 function detectBodyShapeFromPose(kps, vw) {
@@ -72,25 +71,25 @@ function detectBodyShapeFromPose(kps, vw) {
   if (!ls || !rs || !lh || !rh) return null
   if (ls.score < CONF || rs.score < CONF || lh.score < CONF || rh.score < CONF) return null
 
-  const shoulderW = dist(ls, rs)
-  const hipW      = dist(lh, rh)
-  const sm = mid(ls, rs), hm = mid(lh, rh)
+  const shoulderW  = dist(ls, rs)
+  const hipW       = dist(lh, rh)
+  const sm         = mid(ls, rs), hm = mid(lh, rh)
   const waistProxy = shoulderW * 0.72
-  const sToH = shoulderW / hipW
-  const wToH = waistProxy / hipW
-  const torsoH = hm.y - sm.y
-  const frameH = kps[KP.LA]?.score > CONF && kps[KP.RA]?.score > CONF
+  const sToH       = shoulderW / hipW
+  const wToH       = waistProxy / hipW
+  const torsoH     = hm.y - sm.y
+  const frameH     = kps[KP.LA]?.score > CONF && kps[KP.RA]?.score > CONF
     ? Math.max(kps[KP.LA].y, kps[KP.RA].y) - sm.y
     : torsoH * 4.5
   const heightFraction = torsoH / Math.max(frameH, 1)
   const likelyPetite   = heightFraction < 0.19
 
-  if (likelyPetite) return 'petite'
-  if (sToH > 1.18)               return 'invertedTriangle'
-  if (sToH < 0.83)               return 'pear'
-  if (wToH > 0.90 && sToH > 0.93) return 'rectangle'
-  if (wToH < 0.78)               return 'hourglass'
-  if (wToH > 0.88 && sToH < 0.93) return 'apple'
+  if (likelyPetite)                              return 'petite'
+  if (sToH > 1.18)                               return 'invertedTriangle'
+  if (sToH < 0.83)                               return 'pear'
+  if (wToH > 0.90 && sToH > 0.93)               return 'rectangle'
+  if (wToH < 0.78)                               return 'hourglass'
+  if (wToH > 0.88 && sToH < 0.93)               return 'apple'
   return null
 }
 
@@ -99,31 +98,41 @@ function detectBodyShapeFromPose(kps, vw) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function analyzePose(kps, vw, vh) {
-  if (!kps) return { ok:false, issues:['no_pose'], facingBack:false }
-  const ls=kps[KP.LS],rs=kps[KP.RS],lh=kps[KP.LH],rh=kps[KP.RH]
-  const lk=kps[KP.LK],rk=kps[KP.RK],la=kps[KP.LA],ra=kps[KP.RA]
+  if (!kps) return { ok: false, issues: ['no_pose'], facingBack: false }
+  const ls=kps[KP.LS], rs=kps[KP.RS], lh=kps[KP.LH], rh=kps[KP.RH]
+  const lk=kps[KP.LK], rk=kps[KP.RK], la=kps[KP.LA], ra=kps[KP.RA]
   const nose=kps[KP.NOSE]
   const issues=[]
-  const shouldersOk=ls?.score>CONF&&rs?.score>CONF
-  const hipsOk=lh?.score>CONF&&rh?.score>CONF
-  const kneesOk=lk?.score>CONF&&rk?.score>CONF
-  const anklesOk=la?.score>CONF&&ra?.score>CONF
-  const margin=vw*0.08
-  const tooCloseFrame=shouldersOk&&(ls.x<margin||rs.x>vw-margin||(hipsOk&&mid(lh,rh).y>vh*0.72))
-  const faceVisible=nose&&nose.score>0.30
-  const bodyStable=shouldersOk&&hipsOk
-  const shoulderSpan=shouldersOk?dist(ls,rs):0
-  const bodyWideEnough=shoulderSpan>vw*0.10
-  const facingBack=!faceVisible&&bodyStable&&bodyWideEnough&&!tooCloseFrame
-  if (!shouldersOk){issues.push('no_shoulders');return{ok:false,issues,shouldersOk,hipsOk,facingBack}}
-  if (!hipsOk){issues.push('no_hips');return{ok:false,issues,shouldersOk,hipsOk,facingBack}}
-  if (!kneesOk) issues.push('no_legs')
+  const shouldersOk = ls?.score>CONF && rs?.score>CONF
+  const hipsOk      = lh?.score>CONF && rh?.score>CONF
+  const kneesOk     = lk?.score>CONF && rk?.score>CONF
+  const anklesOk    = la?.score>CONF && ra?.score>CONF
+  const margin      = vw*0.08
+  const tooCloseFrame = shouldersOk && (ls.x<margin || rs.x>vw-margin || (hipsOk && mid(lh,rh).y>vh*0.72))
+  const faceVisible   = nose && nose.score>0.30
+  const bodyStable    = shouldersOk && hipsOk
+  const shoulderSpan  = shouldersOk ? dist(ls,rs) : 0
+  const bodyWideEnough = shoulderSpan > vw*0.10
+  const facingBack    = !faceVisible && bodyStable && bodyWideEnough && !tooCloseFrame
+  const shoulderTilt = shouldersOk ? Math.abs(ls.y - rs.y) : 0
+  const hipTilt      = hipsOk      ? Math.abs(lh.y - rh.y) : 0
+  const torsoOffset  = (shouldersOk && hipsOk)
+    ? Math.abs(mid(ls, rs).x - mid(lh, rh).x)
+    : 0
+
+  if (shoulderTilt > vh * 0.035 || hipTilt > vh * 0.04) issues.push('tilted')
+  if (torsoOffset  > vw * 0.06)                          issues.push('rotated')
+
+  if (!shouldersOk) { issues.push('no_shoulders'); return { ok:false, issues, shouldersOk, hipsOk, facingBack } }
+  if (!hipsOk)      { issues.push('no_hips');      return { ok:false, issues, shouldersOk, hipsOk, facingBack } }
+  if (!kneesOk)  issues.push('no_legs')
   if (tooCloseFrame) issues.push('too_close')
-  if (nose?.score>0.15&&nose.y<vh*0.06) issues.push('head_cut')
-  if (!kneesOk&&hipsOk&&mid(lh,rh).y>vh*0.55&&!tooCloseFrame) issues.unshift('too_close')
-  if (kneesOk&&!anklesOk&&mid(lk,rk).y<vh*0.82) issues.push('too_close')
-  const ok=shouldersOk&&hipsOk&&issues.length===0
-  return{ok,issues,shouldersOk,hipsOk,kneesOk,anklesOk,facingBack}
+  if (nose?.score>0.15 && nose.y<vh*0.06) issues.push('head_cut')
+  if (!kneesOk && hipsOk && mid(lh,rh).y>vh*0.55 && !tooCloseFrame) issues.unshift('too_close')
+  if (kneesOk && !anklesOk && mid(lk,rk).y<vh*0.82) issues.push('too_close')
+
+  const ok = shouldersOk && hipsOk && issues.length===0
+  return { ok, issues, shouldersOk, hipsOk, kneesOk, anklesOk, facingBack }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,38 +140,32 @@ function analyzePose(kps, vw, vh) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getGownLayout(kps, cal={}, vw=640, vh=480) {
-  const ls=kps[KP.LS],rs=kps[KP.RS],lh=kps[KP.LH],rh=kps[KP.RH]
-  const lk=kps[KP.LK],rk=kps[KP.RK],la=kps[KP.LA],ra=kps[KP.RA]
+  const ls=kps[KP.LS], rs=kps[KP.RS], lh=kps[KP.LH], rh=kps[KP.RH]
+  const lk=kps[KP.LK], rk=kps[KP.RK], la=kps[KP.LA], ra=kps[KP.RA]
   if ([ls,rs,lh,rh].some(k=>!k||k.score<CONF)) return null
-  const sm=mid(ls,rs),hm=mid(lh,rh),torsoH=hm.y-sm.y
-  const rawSw=dist(ls,rs),sw=Math.min(Math.max(rawSw,vw*0.28),vw*0.80)
-  const rawHw=dist(lh,rh),hw=Math.max(rawHw,sw*0.90)
-  const neckOff=cal.necklineY??0.18,topY=sm.y-torsoH*neckOff
+  const sm=mid(ls,rs), hm=mid(lh,rh), torsoH=hm.y-sm.y
+  const rawSw=dist(ls,rs), sw=Math.min(Math.max(rawSw,vw*0.28),vw*0.80)
+  const rawHw=dist(lh,rh), hw=Math.max(rawHw,sw*0.90)
+  const neckOff=cal.necklineY??0.18, topY=sm.y-torsoH*neckOff
   let bottomY
-  if (la?.score>CONF&&ra?.score>CONF) { bottomY=Math.max(la.y,ra.y)+torsoH*0.15 }
-  else if (lk?.score>CONF&&rk?.score>CONF) { const km=mid(lk,rk),legH=km.y-hm.y; bottomY=km.y+legH*1.1 }
+  if (la?.score>CONF && ra?.score>CONF) { bottomY=Math.max(la.y,ra.y)+torsoH*0.15 }
+  else if (lk?.score>CONF && rk?.score>CONF) { const km=mid(lk,rk), legH=km.y-hm.y; bottomY=km.y+legH*1.1 }
   else { bottomY=sm.y+torsoH*4.8 }
-  if (cal.hemY!=null){const fullH=sm.y+torsoH*4.8-topY;bottomY=topY+fullH*cal.hemY}
-  const shoulderPad=cal.shoulderPad??1.45,skirtFlare=cal.skirtFlare??1.20
-  const topW=sw*shoulderPad,botW=Math.max(hw*1.55,topW)*skirtFlare
+  if (cal.hemY!=null) { const fullH=sm.y+torsoH*4.8-topY; bottomY=topY+fullH*cal.hemY }
+  const shoulderPad=cal.shoulderPad??1.45, skirtFlare=cal.skirtFlare??1.20
+  const topW=sw*shoulderPad, botW=Math.max(hw*1.55,topW)*skirtFlare
   const cx=(sm.x+hm.x)/2
-  return{topY,bottomY,cx,topW,botW,torsoH}
+  return { topY, bottomY, cx, topW, botW, torsoH }
 }
 
 function drawGown(ctx, img, layout, opacity) {
   const { topY, bottomY, cx, topW, botW } = layout
   const h = bottomY - topY
   if (h <= 0) return
- 
-  // ── Offscreen canvas for the gown ────────────────────────────────────────
-  // Draw the gown onto its own canvas first so we can composite it cleanly.
-  // The offscreen canvas is transparent by default — no white background.
   const oc   = document.createElement('canvas')
   oc.width   = ctx.canvas.width  / (window.devicePixelRatio || 1)
   oc.height  = ctx.canvas.height / (window.devicePixelRatio || 1)
   const octx = oc.getContext('2d')
- 
-  // Clip to the trapezoid shape
   octx.beginPath()
   octx.moveTo(cx - topW / 2, topY)
   octx.lineTo(cx + topW / 2, topY)
@@ -170,35 +173,12 @@ function drawGown(ctx, img, layout, opacity) {
   octx.lineTo(cx - botW / 2, bottomY)
   octx.closePath()
   octx.clip()
- 
-  // Draw the gown image — PNG alpha is preserved because the offscreen canvas
-  // starts fully transparent (no video frame underneath to pollute the blend).
   octx.drawImage(img, cx - botW / 2, topY, botW, h)
- 
-  // ── Composite onto the main canvas ───────────────────────────────────────
-  // 'source-over' with globalAlpha — semi-transparent PNG edges blend with
-  // the video frame that's already on the main canvas, not with white.
   ctx.save()
-  ctx.globalAlpha       = opacity
+  ctx.globalAlpha = opacity
   ctx.globalCompositeOperation = 'source-over'
   ctx.drawImage(oc, 0, 0)
   ctx.restore()
-}
-
-async function applySegmentation(segmenter, video, ctx, w, h) {
-  if (!segmenter) return
-  try {
-    const result=await segmenter.segmentPeople(video,{multiSegmentation:false,segmentBodyParts:false})
-    if(!result?.length) return
-    const oc=Object.assign(document.createElement('canvas'),{width:w,height:h})
-    const octx=oc.getContext('2d')
-    octx.save();octx.translate(w,0);octx.scale(-1,1);octx.drawImage(video,0,0,w,h);octx.restore()
-    const maskData=await window.bodySegmentation.toBinaryMask(result,{r:255,g:255,b:255,a:255},{r:0,g:0,b:0,a:0},false)
-    const mc=Object.assign(document.createElement('canvas'),{width:w,height:h})
-    mc.getContext('2d').putImageData(maskData,0,0)
-    octx.globalCompositeOperation='destination-in'; octx.drawImage(mc,0,0)
-    octx.globalCompositeOperation='source-over'; ctx.drawImage(oc,0,0)
-  } catch(e){console.warn('Seg error:',e)}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,42 +188,47 @@ async function applySegmentation(segmenter, video, ctx, w, h) {
 const FittingRoomCtx = createContext(null)
 function useFittingRoom() { return useContext(FittingRoomCtx) }
 
-function FittingRoomProvider({ children, gowns, sizes, supplierName }) {
+function FittingRoomProvider({ children, gowns, initialSizes, initialSupplierName }) {
   const [profile, setProfile] = useState({
     bust: null, waist: null, hips: null, height: null, weight: null,
     source: null, bodyShape: null, skinTone: null, undertone: null,
     occasion: null, colors: [], fabrics: [], budget: null,
+    segment: 'women',
   })
+  const [sizes,        setSizes       ] = useState(initialSizes || [])
+  const [supplierName, setSupplierName] = useState(initialSupplierName || '')
   const [sizeResult,   setSizeResult  ] = useState(null)
   const [styleResults, setStyleResults] = useState(null)
   const detectorRef  = useRef(null)
   const segmenterRef = useRef(null)
-  const [modelState, setModelState] = useState('idle')
+  const [modelState, setModelState]    = useState('idle')
 
   const updateProfile = useCallback((patch) => {
     setProfile(p => ({ ...p, ...patch }))
   }, [])
 
+  // Refetch size chart when segment changes
   useEffect(() => {
-    if (profile.bust || profile.waist || profile.hips) {
-      if (!sizes?.length) return
-      const { bust, waist, hips } = profile
-      let best = null, bestScore = Infinity
-      for (const sz of sizes) {
-        let score = 0, hits = 0
-        if (bust  && sz.bust_min  != null) { score += Math.abs(bust  - (sz.bust_min  + sz.bust_max)  / 2); hits++ }
-        if (waist && sz.waist_min != null) { score += Math.abs(waist - (sz.waist_min + sz.waist_max) / 2); hits++ }
-        if (hips  && sz.hip_min   != null) { score += Math.abs(hips  - (sz.hip_min   + sz.hip_max)   / 2); hits++ }
-        if (hits === 0) continue
-        score /= hits
-        if (score < bestScore) { bestScore = score; best = sz }
-      }
-      const idx      = sizes.findIndex(s => s.label === best?.label)
-      const adjacent = sizes.slice(Math.max(0, idx - 1), Math.min(sizes.length, idx + 2))
-      setSizeResult(best ? { size: best, score: bestScore, adjacent } : null)
-    }
-  }, [profile.bust, profile.waist, profile.hips, sizes])
+    const seg = profile.segment ?? 'women'
+    fetch(`/api/size-chart?segment=${seg}`)
+      .then(r => r.json())
+      .then(d => { if (d.ok) { setSizes(d.sizes); setSupplierName(d.supplierName || '') } })
+      .catch(() => {})
+  }, [profile.segment])
 
+  // Recompute recommended size
+  useEffect(() => {
+    if (!profile.bust && !profile.waist && !profile.hips) return
+    if (!sizes?.length) return
+    const result = recommendSize(profile.segment ?? 'women', {
+      bust:  profile.bust,
+      waist: profile.waist,
+      hips:  profile.hips,
+    })
+    setSizeResult(result)
+  }, [profile.bust, profile.waist, profile.hips, profile.segment, sizes])
+
+  // Recompute style results
   useEffect(() => {
     if (!gowns?.length || !profile.bodyShape) return
     const scored = gowns
@@ -255,7 +240,7 @@ function FittingRoomProvider({ children, gowns, sizes, supplierName }) {
   }, [profile.bodyShape, profile.skinTone, profile.undertone, profile.occasion,
       profile.colors, profile.fabrics, profile.budget, profile.height, gowns])
 
-  // Load model once — shared between Scan + TryOn panels
+  // Load pose model once
   useEffect(() => {
     if (detectorRef.current || modelState === 'loading' || modelState === 'ready') return
     setModelState('loading')
@@ -264,7 +249,9 @@ function FittingRoomProvider({ children, gowns, sizes, supplierName }) {
       .then(() => window.tf.setBackend('webgl').catch(() => window.tf.setBackend('cpu')))
       .then(() => {
         const pd = window.poseDetection
-        return pd.createDetector(pd.SupportedModels.MoveNet, { modelType: pd.movenet.modelType.SINGLEPOSE_THUNDER })
+        return pd.createDetector(pd.SupportedModels.MoveNet, {
+          modelType: pd.movenet.modelType.SINGLEPOSE_THUNDER,
+        })
       })
       .then(det => { detectorRef.current = det; setModelState('ready') })
       .catch(() => setModelState('error'))
@@ -281,6 +268,35 @@ function FittingRoomProvider({ children, gowns, sizes, supplierName }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SEGMENT GATE — shown when no segment chosen (or always shown at top of gated panels)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SegmentGate({ children }) {
+  const { profile, updateProfile } = useFittingRoom()
+
+  return (
+    <div className="sg-wrap">
+      <div className="sg-picker">
+        <p className="sg-label">Who is being measured?</p>
+        <div className="sg-row">
+          {SEGMENTS.map(s => (
+            <button
+              key={s.id}
+              className={`sg-btn${profile.segment === s.id ? ' sg-btn--sel' : ''}`}
+              onClick={() => updateProfile({ segment: s.id })}
+              aria-pressed={profile.segment === s.id}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PROFILE SIDEBAR
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -290,20 +306,36 @@ function ProfileSidebar({ user, onSave, saving, saveMsg }) {
   const scoreColor = scoreConf >= 75 ? '#1D9E75' : scoreConf >= 55 ? '#EF9F27' : '#E24B4A'
   const tone       = SKIN_TONES.find(t => t.id === profile.skinTone)
   const hasProfile = profile.bust || profile.waist || profile.hips
+  const segLabel   = SEGMENTS.find(s => s.id === profile.segment)?.label || 'Women'
 
   return (
     <aside className="fr-sidebar">
       <div className="fr-sidebar-header">
-        <span className="fr-sidebar-eyebrow">Your Profile</span>
+        <span className="fr-sidebar-eyebrow">Fitting Room</span>
         {user && <span className="fr-sidebar-user">{user.name || user.email}</span>}
+      </div>
+
+      <div className="fr-sidebar-section">
+        <p className="fr-sidebar-label">Segment</p>
+        <div className="fr-sidebar-seg-row">
+          {SEGMENTS.map(s => (
+            <button
+              key={s.id}
+              className={`fr-seg-mini${profile.segment === s.id ? ' sel' : ''}`}
+              onClick={() => updateProfile({ segment: s.id })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="fr-sidebar-section">
         <p className="fr-sidebar-label">Measurements</p>
         {hasProfile ? (
           <div className="fr-meas-grid">
-            {[['Bust',profile.bust,'cm'],['Waist',profile.waist,'cm'],['Hips',profile.hips,'cm'],
-              ['Height',profile.height,'cm'],['Weight',profile.weight,'kg']].filter(([,v])=>v).map(([l,v,u])=>(
+            {[['Bust', profile.bust, 'cm'], ['Waist', profile.waist, 'cm'], ['Hips', profile.hips, 'cm'],
+              ['Height', profile.height, 'cm'], ['Weight', profile.weight, 'kg']].filter(([, v]) => v).map(([l, v, u]) => (
               <div key={l} className="fr-meas-chip">
                 <span className="fr-meas-key">{l}</span>
                 <span className="fr-meas-val">{v} {u}</span>
@@ -311,23 +343,27 @@ function ProfileSidebar({ user, onSave, saving, saveMsg }) {
             ))}
           </div>
         ) : (
-          <p className="fr-sidebar-empty">Use the Scan tab to capture measurements</p>
+          <p className="fr-sidebar-empty">Use Scan to capture measurements</p>
         )}
       </div>
 
       {sizeResult?.size && (
         <div className="fr-sidebar-section fr-sidebar-size">
-          <p className="fr-sidebar-label">{supplierName || 'Standard'} Size</p>
+          <p className="fr-sidebar-label">{supplierName || segLabel} Size</p>
           <div className="fr-size-display">
             <span className="fr-size-label">{sizeResult.size.label}</span>
             <div className="fr-size-conf">
-              <div className="fr-conf-bar"><div className="fr-conf-fill" style={{width:`${scoreConf}%`,background:scoreColor}}/></div>
-              <span style={{color:scoreColor,fontSize:'11px',fontWeight:500}}>{scoreConf}%</span>
+              <div className="fr-conf-bar">
+                <div className="fr-conf-fill" style={{ width: `${scoreConf}%`, background: scoreColor }}/>
+              </div>
+              <span style={{ color: scoreColor, fontSize: '11px', fontWeight: 500 }}>{scoreConf}%</span>
             </div>
           </div>
           <div className="fr-size-range">
             {sizeResult.adjacent.map(sz => (
-              <span key={sz.label} className={`fr-size-pill${sz.label===sizeResult.size.label?' fr-size-pill--match':''}`}>{sz.label}</span>
+              <span key={sz.label} className={`fr-size-pill${sz.label === sizeResult.size.label ? ' fr-size-pill--match' : ''}`}>
+                {sz.label}
+              </span>
             ))}
           </div>
         </div>
@@ -335,21 +371,17 @@ function ProfileSidebar({ user, onSave, saving, saveMsg }) {
 
       {(profile.bodyShape || profile.skinTone || profile.occasion) && (
         <div className="fr-sidebar-section">
-          <p className="fr-sidebar-label">Style Profile</p>
+          <p className="fr-sidebar-label">Style profile</p>
           <div className="fr-profile-chips">
-            {profile.bodyShape && (
-              <span className="fr-chip">
-                {BODY_SHAPES.find(b=>b.id===profile.bodyShape)?.icon || '👤'} {profile.bodyShape}
-              </span>
-            )}
+            {profile.bodyShape && <span className="fr-chip">{profile.bodyShape}</span>}
             {profile.skinTone && (
               <span className="fr-chip fr-chip--tone">
-                <span className="fr-chip-swatch" style={{background: tone?.hex}}/>
+                <span className="fr-chip-swatch" style={{ background: tone?.hex }}/>
                 {profile.skinTone}
               </span>
             )}
-            {profile.undertone && <span className="fr-chip">{profile.undertone} tone</span>}
-            {profile.occasion  && <span className="fr-chip">{OCCASIONS.find(o=>o.id===profile.occasion)?.icon} {profile.occasion}</span>}
+            {profile.undertone  && <span className="fr-chip">{profile.undertone} tone</span>}
+            {profile.occasion   && <span className="fr-chip">{profile.occasion}</span>}
           </div>
         </div>
       )}
@@ -359,18 +391,29 @@ function ProfileSidebar({ user, onSave, saving, saveMsg }) {
           <button className="fr-save-btn" onClick={onSave} disabled={saving}>
             {saving ? 'Saving…' : 'Save profile'}
           </button>
-          {saveMsg && <p className={`fr-save-msg${saveMsg.startsWith('✓')?' ok':' err'}`}>{saveMsg}</p>}
+          {saveMsg && (
+            <p className={`fr-save-msg${saveMsg.startsWith('✓') ? ' ok' : ' err'}`}>{saveMsg}</p>
+          )}
         </div>
       )}
 
       <div className="fr-sidebar-section fr-sidebar-manual">
         <p className="fr-sidebar-label">Override measurements</p>
         <div className="fr-manual-grid">
-          {[['Bust','bust','cm'],['Waist','waist','cm'],['Hips','hips','cm']].map(([l,k,u])=>(
+          {[
+            ['Bust',   'bust',   'cm'],
+            ['Waist',  'waist',  'cm'],
+            ['Hips',   'hips',   'cm'],
+            ['Height', 'height', 'cm'], 
+          ].map(([l, k, u]) => (
             <label key={k} className="fr-manual-field">
               <span>{l}</span>
-              <input type="number" value={profile[k]||''} placeholder="—"
-                onChange={e => updateProfile({[k]: parseFloat(e.target.value)||null})}/>
+              <input
+                type="number"
+                value={profile[k] || ''}
+                placeholder="—"
+                onChange={e => updateProfile({ [k]: parseFloat(e.target.value) || null })}
+              />
               <span className="fr-manual-unit">{u}</span>
             </label>
           ))}
@@ -381,22 +424,25 @@ function ProfileSidebar({ user, onSave, saving, saveMsg }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCAN PANEL
+// GUIDANCE MAP
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GUIDANCE_MAP = {
-  no_pose:      { icon:'🚶', text:'Stand in front of the camera — full body visible.' },
-  no_shoulders: { icon:'⬆️', text:'Step back until your shoulders appear.' },
-  no_hips:      { icon:'⬇️', text:'Step back — your waist needs to be in view.' },
-  no_legs:      { icon:'↕️', text:'Step back so your legs are visible.' },
-  too_close:    { icon:'↔️', text:'Too close. Move back 1–2 metres.' },
-  head_cut:     { icon:'⬇️', text:'Move down — your head is cut off.' },
+  no_pose:      'Stand in front of the camera — full body visible.',
+  no_shoulders: 'Step back until your shoulders appear.',
+  no_hips:      'Step back — your waist needs to be in view.',
+  no_legs:      'Step back so your legs are visible.',
+  too_close:    'Too close. Move back 1–2 metres.',
+  head_cut:     'Move down — your head is cut off.',
+  tilted:  'Stand straight — shoulders and hips should be level.',
+  rotated: 'Face the camera directly.',
 }
 
 const MEASUREMENT_BOUNDS = {
-  bust:   [50, 200], waist:  [40, 180], hips:   [50, 200],
+  bust:   [50, 200], waist: [40, 180], hips: [50, 200],
   height: [100, 250], weight: [30, 300],
 }
+
 function validateField(key, value) {
   if (!value) return null
   const n = Number(value)
@@ -406,28 +452,36 @@ function validateField(key, value) {
   return null
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SCAN PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+
 function ScanPanel() {
-  const { updateProfile, detectorRef, modelState } = useFittingRoom()
+  const { updateProfile, detectorRef, modelState, profile } = useFittingRoom()
+
   const videoRef        = useRef(null)
   const canvasRef       = useRef(null)
   const streamRef       = useRef(null)
   const animRef         = useRef(null)
   const swHistRef       = useRef([])
+  const hipHistRef = useRef([]) 
   const torsoHRef       = useRef(null)
   const prevKpsRef      = useRef(null)
   const skinDebounceRef = useRef(null)
   const shapeVotesRef   = useRef({})
   const goodFrames      = useRef(0)
+  const liveKpsRef      = useRef(null)
 
-  const [activeTab,    setActiveTab   ] = useState('camera')
-  const [camState,     setCamState    ] = useState('off')
-  const [camError,     setCamError    ] = useState('')
-  const [locked,       setLocked      ] = useState(false)
-  const [confidence,   setConfidence  ] = useState(0)
-  const [poseIssues,   setPoseIssues  ] = useState([])
-  const [poseFound,    setPoseFound   ] = useState(false)
-  const [detectedTone, setDetectedTone] = useState(null)
-  const [detectedShape,setDetectedShape] = useState(null)
+  const [activeTab,     setActiveTab    ] = useState('camera')
+  const [camState,      setCamState     ] = useState('off')
+  const [camError,      setCamError     ] = useState('')
+  const [locked,        setLocked       ] = useState(false)
+  const [confidence,    setConfidence   ] = useState(0)
+  const [poseIssues,    setPoseIssues   ] = useState([])
+  const [poseFound,     setPoseFound    ] = useState(false)
+  const [detectedTone,  setDetectedTone ] = useState(null)
+  const [detectedShape, setDetectedShape] = useState(null)
+  const [liveEst,       setLiveEst      ] = useState(null)
 
   const [adjBust,  setAdjBust ] = useState('')
   const [adjWaist, setAdjWaist] = useState('')
@@ -438,33 +492,40 @@ function ScanPanel() {
   const [mHips,   setMHips  ] = useState('')
   const [mHeight, setMHeight] = useState('')
   const [mWeight, setMWeight] = useState('')
-  const [mErrors, setMErrors] = useState({})
+  const [mErrors, setMErrors ] = useState({})
 
   const stopCamera = useCallback(() => {
     if (animRef.current) cancelAnimationFrame(animRef.current)
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     if (videoRef.current) videoRef.current.srcObject = null
-    swHistRef.current = []; prevKpsRef.current = null; torsoHRef.current = null
-    shapeVotesRef.current = {}; goodFrames.current = 0
+    swHistRef.current = []; hipHistRef.current = []; prevKpsRef.current = null;
+    shapeVotesRef.current = {}; goodFrames.current = 0; liveKpsRef.current = null
     setCamState('off'); setPoseFound(false); setConfidence(0); setPoseIssues([])
+    setLiveEst(null)
   }, [])
 
   const startCamera = useCallback(async () => {
     setCamError(''); setCamState('starting')
-    if (!navigator.mediaDevices?.getUserMedia) { setCamError('Camera not supported.'); setCamState('error'); return }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamError('Camera not supported.'); setCamState('error'); return
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width:{ideal:1280}, height:{ideal:720}, facingMode:'user', frameRate:{ideal:30} }, audio: false,
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } },
+        audio: false,
       })
       streamRef.current = stream; videoRef.current.srcObject = stream
-      await new Promise((res, rej) => { videoRef.current.onloadedmetadata=res; setTimeout(()=>rej(new Error('timeout')),10000) })
+      await new Promise((res, rej) => {
+        videoRef.current.onloadedmetadata = res
+        setTimeout(() => rej(new Error('timeout')), 10000)
+      })
       await videoRef.current.play(); setCamState('on')
     } catch (err) {
       let msg = 'Could not start camera.'
-      if (err.name==='NotAllowedError') msg = 'Camera permission denied.'
-      else if (err.name==='NotFoundError') msg = 'No camera found.'
-      else if (err.name==='NotReadableError') msg = 'Camera in use by another app.'
+      if (err.name === 'NotAllowedError')  msg = 'Camera permission denied.'
+      else if (err.name === 'NotFoundError')    msg = 'No camera found.'
+      else if (err.name === 'NotReadableError') msg = 'Camera in use by another app.'
       setCamError(msg); setCamState('error')
     }
   }, [])
@@ -475,78 +536,185 @@ function ScanPanel() {
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [camState, stopCamera])
 
+  const getMults = useCallback(() => CAMERA_MULTS, [])
+
   const detect = useCallback(async () => {
-    const video=videoRef.current, canvas=canvasRef.current
-    if (!video||!canvas||video.readyState<2){animRef.current=requestAnimationFrame(detect);return}
-    if (!detectorRef.current){animRef.current=requestAnimationFrame(detect);return}
-    const vw=video.videoWidth||640, vh=video.videoHeight||480
-    canvas.width=vw; canvas.height=vh
-    const ctx=canvas.getContext('2d')
-    ctx.save();ctx.translate(vw,0);ctx.scale(-1,1);ctx.drawImage(video,0,0,vw,vh);ctx.restore()
+    const video = videoRef.current, canvas = canvasRef.current
+    if (!video || !canvas || video.readyState < 2) {
+      animRef.current = requestAnimationFrame(detect); return
+    }
+    if (!detectorRef.current) {
+      animRef.current = requestAnimationFrame(detect); return
+    }
+
+    const vw = video.videoWidth || 640, vh = video.videoHeight || 480
+    canvas.width = vw; canvas.height = vh
+    const ctx = canvas.getContext('2d')
+
+    // Mirror the video
+    ctx.save(); ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, vw, vh); ctx.restore()
+
     try {
-      const poses=await detectorRef.current.estimatePoses(video)
-      if (poses?.length>0) {
-        let kps=poses[0].keypoints.map(k=>({...k,x:vw-k.x}))
-        kps=smoothKps(prevKpsRef.current,kps); prevKpsRef.current=kps
-        const analysis=analyzePose(kps,vw,vh)
-        setPoseIssues(analysis.issues); setPoseFound(analysis.shouldersOk&&analysis.hipsOk)
-        const ls=kps[KP.LS],rs=kps[KP.RS],lh=kps[KP.LH],rh=kps[KP.RH]
-        if (analysis.shouldersOk&&analysis.hipsOk) {
-          goodFrames.current=Math.min(goodFrames.current+1,24)
-          const torsoH=mid(lh,rh).y-mid(ls,rs).y
-          if (torsoH>20) {
-            torsoHRef.current = torsoH
-            const swPx=dist(ls,rs)
-            swHistRef.current.push(swPx)
-            if (swHistRef.current.length>24) swHistRef.current.shift()
-            const avgSw=swHistRef.current.reduce((a,b)=>a+b,0)/swHistRef.current.length
-            const pxPerCm = torsoH / 52
-            const estBust  = Math.round(avgSw / pxPerCm * 1.92)
-            const estWaist = Math.round(avgSw / pxPerCm * 1.56)
-            const estHips  = Math.round((dist(lh,rh) / pxPerCm) * 1.08)
-            const frames=goodFrames.current
-            const conf=Math.min(Math.round(38+(frames/24)*47+(analysis.kneesOk?12:0)),92)
-            setConfidence(conf)
+      const poses = await detectorRef.current.estimatePoses(video)
+      if (poses?.length > 0) {
+        let kps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
+        kps = smoothKps(prevKpsRef.current, kps); prevKpsRef.current = kps
+        liveKpsRef.current = kps
 
-            ctx.font='12px sans-serif'; ctx.fillStyle='rgba(93,202,165,.9)'
-            ctx.fillText(`Bust ~${estBust}cm`,ls.x+4,ls.y-14)
-            ctx.fillText(`Hips ~${estHips}cm`,lh.x+4,lh.y+18)
+        const analysis = analyzePose(kps, vw, vh)
+        setPoseIssues(analysis.issues); setPoseFound(analysis.shouldersOk && analysis.hipsOk)
 
+        const ls = kps[KP.LS], rs = kps[KP.RS], lh = kps[KP.LH], rh = kps[KP.RH]
+        const lk = kps[KP.LK], rk = kps[KP.RK]
+
+        if (analysis.shouldersOk && analysis.hipsOk) {
+          goodFrames.current = Math.min(goodFrames.current + 1, 30)
+          // REPLACE WITH:
+const torsoH  = mid(lh, rh).y - mid(ls, rs).y
+const nose    = kps[KP.NOSE]
+const la      = kps[KP.LA]
+const ra      = kps[KP.RA]
+
+const hasFullHeight = (
+  profile.height &&
+  nose?.score  > CONF &&
+  la?.score    > CONF &&
+  ra?.score    > CONF
+)
+
+const pxPerCm = (() => {
+  if (hasFullHeight) {
+    const ankleMid    = mid(la, ra)
+    const fullHeightPx = ankleMid.y - nose.y
+    return fullHeightPx / profile.height          // most accurate
+  }
+  // fallback: torso-only (no height entered)
+  const mults       = getMults()
+  const torsoAnchor = mults.torsoAnchorCm
+  return torsoH / torsoAnchor
+})()
+
+if (torsoH > 20 && pxPerCm > 0) {
+  torsoHRef.current = torsoH
+
+        // track hip width history alongside shoulder history
+        const swPx = dist(ls, rs)
+        const hwPx = dist(lh, rh)
+
+        swHistRef.current.push(swPx)
+        if (swHistRef.current.length > 30) swHistRef.current.shift()
+
+        hipHistRef.current.push(hwPx)
+        if (hipHistRef.current.length > 30) hipHistRef.current.shift()
+
+        const mults = getMults()
+
+        const sortedSw  = [...swHistRef.current].sort((a, b) => a - b)
+        const medianSw  = sortedSw[Math.floor(sortedSw.length / 2)] ?? swPx
+
+        const sortedHip = [...hipHistRef.current].sort((a, b) => a - b)
+        const medianHw  = sortedHip[Math.floor(sortedHip.length / 2)] ?? hwPx
+
+        // Waist: interpolate between shoulder and hip — more realistic than shoulder-only
+        const waistPx = Math.min(medianSw, medianHw) * 0.82
+
+        const estBust  = Math.round(medianSw / pxPerCm * mults.bust)
+        const estWaist = Math.round(waistPx  / pxPerCm * mults.waist)
+        const estHips  = Math.round(medianHw / pxPerCm * mults.hip)
+
+        // Replace the current conf calculation:
+        let conf = 35
+        conf += (goodFrames.current / 30) * 40
+        if (analysis.kneesOk)        conf += 8
+        if (hasFullHeight)            conf += 10
+        if (!analysis.issues.length) conf += 8
+        conf = Math.min(Math.round(conf), 95)
+        setConfidence(conf)
+        setLiveEst({ bust: estBust, waist: estWaist, hips: estHips })
+
+      
+
+            // Draw skeleton overlay
+            ctx.strokeStyle = `rgba(201,169,110,${conf > 60 ? 0.7 : 0.35})`
+            ctx.lineWidth   = 2
+            const drawLine  = (a, b) => {
+              if (a?.score > CONF && b?.score > CONF) {
+                ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+              }
+            }
+            drawLine(kps[KP.LS], kps[KP.RS])
+            drawLine(kps[KP.LS], kps[KP.LH])
+            drawLine(kps[KP.RS], kps[KP.RH])
+            drawLine(kps[KP.LH], kps[KP.RH])
+            drawLine(kps[KP.LH], kps[KP.LK])
+            drawLine(kps[KP.RH], kps[KP.RK])
+
+            // Draw keypoint dots
+            ctx.fillStyle = '#c9a96e'
+            ;[KP.LS, KP.RS, KP.LH, KP.RH, KP.LK, KP.RK].forEach(idx => {
+              const k = kps[idx]
+              if (k?.score > CONF) {
+                ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, Math.PI * 2); ctx.fill()
+              }
+            })
+
+            // Draw guide lines
+            const sm = mid(ls, rs), hm = mid(lh, rh)
+            ctx.setLineDash([4, 4])
+            ctx.strokeStyle = 'rgba(201,169,110,0.25)'
+            ctx.lineWidth   = 1
+            ctx.beginPath(); ctx.moveTo(0, sm.y); ctx.lineTo(vw, sm.y); ctx.stroke()
+            ctx.beginPath(); ctx.moveTo(0, hm.y); ctx.lineTo(vw, hm.y); ctx.stroke()
+            ctx.setLineDash([])
+
+            // Guide labels
+            ctx.font      = '11px system-ui'
+            ctx.fillStyle = 'rgba(201,169,110,0.7)'
+            ctx.fillText('shoulder', 8, sm.y - 5)
+            ctx.fillText('hip', 8, hm.y - 5)
+
+            // Body shape detection
             if (conf >= 55) {
               const shape = detectBodyShapeFromPose(kps, vw)
               if (shape) {
                 shapeVotesRef.current[shape] = (shapeVotesRef.current[shape] || 0) + 1
-                const votes = shapeVotesRef.current
-                const totalVotes = Object.values(votes).reduce((a,b)=>a+b,0)
+                const votes      = shapeVotesRef.current
+                const totalVotes = Object.values(votes).reduce((a, b) => a + b, 0)
                 if (totalVotes >= 10) {
-                  const leading = Object.entries(votes).sort((a,b)=>b[1]-a[1])[0]
+                  const leading      = Object.entries(votes).sort((a, b) => b[1] - a[1])[0]
                   const leadingShare = leading[1] / totalVotes
                   if (leadingShare > 0.45) setDetectedShape(leading[0])
                 }
               }
             }
 
-            const nose=kps[KP.NOSE]
-            if (nose?.score>0.4&&conf>=60) {
+            // Skin tone detection
+            // Skin tone detection
+            if (nose?.score > 0.4 && conf >= 60) {
               clearTimeout(skinDebounceRef.current)
-              skinDebounceRef.current=setTimeout(()=>{
-                const profile = detectSkinProfile(ctx, kps, vw, vh, KP)
-                if (profile) setDetectedTone(profile)
+              skinDebounceRef.current = setTimeout(() => {
+                const sp = detectSkinProfile(ctx, kps, vw, vh, KP)
+                if (sp) setDetectedTone(sp)
               }, 2000)
             }
-          }
+          }   // ← closes: if (torsoH > 20 && pxPerCm > 0)
+
         } else {
-          goodFrames.current=Math.max(0,goodFrames.current-2); setConfidence(0)
-        }
+          // shouldersOk && hipsOk failed — decay confidence
+          goodFrames.current = Math.max(0, goodFrames.current - 2)
+          setConfidence(0); setLiveEst(null)
+        }   // ← closes: if (analysis.shouldersOk && analysis.hipsOk)
       } else {
-        setPoseFound(false); setPoseIssues(['no_pose']); prevKpsRef.current=null; setConfidence(0)
+        setPoseFound(false); setPoseIssues(['no_pose']); prevKpsRef.current = null
+        setConfidence(0); setLiveEst(null); liveKpsRef.current = null
       }
-    } catch{}
-    animRef.current=requestAnimationFrame(detect)
-  }, [detectorRef])
+    } catch {}
+
+    animRef.current = requestAnimationFrame(detect)
+  }, [detectorRef, getMults, profile.height])
 
   useEffect(() => {
-    if (camState==='on') detect()
+    if (camState === 'on') detect()
     else if (animRef.current) cancelAnimationFrame(animRef.current)
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current) }
   }, [camState, detect])
@@ -555,26 +723,64 @@ function ScanPanel() {
 
   const lockMeasurement = useCallback(() => {
     if (!swHistRef.current.length) return
-    const torsoH  = torsoHRef.current || 130
-    const pxPerCm = torsoH / 52
-    const avgSw   = swHistRef.current.reduce((a,b)=>a+b,0)/swHistRef.current.length
-    const estBust  = Math.round(avgSw / pxPerCm * 1.92)
-    const estWaist = Math.round(avgSw / pxPerCm * 1.56)
-    const estHips  = Math.round(avgSw / pxPerCm * 2.15)
-    setAdjBust(String(estBust)); setAdjWaist(String(estWaist)); setAdjHips(String(estHips))
-    setLocked(true); stopCamera()
+    const mults = CAMERA_MULTS
+    const torsoH  = torsoHRef.current ?? 0
+    const kps     = liveKpsRef.current
+    const nose    = kps?.[KP.NOSE]
+    const la      = kps?.[KP.LA]
+    const ra      = kps?.[KP.RA]
+
+    const hasFullHeight = (
+      profile.height && kps &&
+      nose?.score > CONF &&
+      la?.score   > CONF &&
+      ra?.score   > CONF
+    )
+
+    const pxPerCm = (() => {
+      if (hasFullHeight) {
+        const ankleMid     = mid(la, ra)
+        const fullHeightPx = ankleMid.y - nose.y
+        return fullHeightPx / profile.height
+      }
+      if (torsoH > 0) return torsoH / mults.torsoAnchorCm
+      return 1   // last-resort guard; shouldn't reach here
+    })()
+
+    const sorted   = [...swHistRef.current].sort((a, b) => a - b)
+    const medianSw = sorted[Math.floor(sorted.length / 2)]
+
+    const lh = kps?.[KP.LH]
+    const rh = kps?.[KP.RH]
+    const hipPx = (lh?.score > CONF && rh?.score > CONF)
+      ? dist(lh, rh)
+      : medianSw * 1.05
+
+    // Waist: same narrowing logic as detect loop
+    const waistPx = Math.min(medianSw, hipPx) * 0.82
+
+    const estBust  = Math.round(medianSw / pxPerCm * mults.bust)
+    const estWaist = Math.round(waistPx  / pxPerCm * mults.waist)
+    const estHips  = Math.round(hipPx    / pxPerCm * mults.hip)
+
+    setAdjBust(String(estBust))
+    setAdjWaist(String(estWaist))
+    setAdjHips(String(estHips))
+    setLocked(true)
+    stopCamera()
+
     const patch = {}
-    if (detectedTone) { patch.skinTone = detectedTone.skinTone; patch.undertone = detectedTone.undertone }
-    if (detectedShape) patch.bodyShape = detectedShape
+    if (detectedTone)  { patch.skinTone = detectedTone.skinTone; patch.undertone = detectedTone.undertone }
+    if (detectedShape) { patch.bodyShape = detectedShape }
     if (Object.keys(patch).length) updateProfile(patch)
-  }, [stopCamera, detectedTone, detectedShape, updateProfile])
+  }, [stopCamera, detectedTone, detectedShape, updateProfile, profile])
 
   const confirmMeasurements = useCallback(() => {
     updateProfile({
-      bust:      parseFloat(adjBust)  || null,
-      waist:     parseFloat(adjWaist) || null,
-      hips:      parseFloat(adjHips)  || null,
-      source:    'camera',
+      bust:   parseFloat(adjBust)  || null,
+      waist:  parseFloat(adjWaist) || null,
+      hips:   parseFloat(adjHips)  || null,
+      source: 'camera',
       ...(detectedTone  ? { skinTone: detectedTone.skinTone, undertone: detectedTone.undertone } : {}),
       ...(detectedShape ? { bodyShape: detectedShape } : {}),
     })
@@ -587,174 +793,276 @@ function ScanPanel() {
       const err = validateField(k, v); if (err) errors[k] = err
     }
     if (!mBust && !mWaist && !mHips) { setMErrors({ _form: 'Enter at least one of bust, waist, or hips.' }); return }
-    if (Object.keys(errors).length) { setMErrors(errors); return }
+    if (Object.keys(errors).length)  { setMErrors(errors); return }
     setMErrors({})
     updateProfile({
-      bust: parseFloat(mBust)||null, waist: parseFloat(mWaist)||null,
-      hips: parseFloat(mHips)||null, height: parseFloat(mHeight)||null,
-      weight: parseFloat(mWeight)||null, source: 'manual',
+      bust: parseFloat(mBust) || null, waist: parseFloat(mWaist) || null,
+      hips: parseFloat(mHips) || null, height: parseFloat(mHeight) || null,
+      weight: parseFloat(mWeight) || null, source: 'manual',
     })
-  }, [mBust,mWaist,mHips,mHeight,mWeight,updateProfile])
+  }, [mBust, mWaist, mHips, mHeight, mWeight, updateProfile])
 
-  const confColor = confidence>=70?'#1D9E75':confidence>=50?'#EF9F27':'#E24B4A'
-  const issue = poseFound ? null : (poseIssues[0] ? GUIDANCE_MAP[poseIssues[0]] : null)
-  const canScan = modelState === 'ready'
-  const shapeInfo = detectedShape ? BODY_SHAPES.find(b=>b.id===detectedShape) : null
-  const toneHex   = detectedTone ? SKIN_TONES.find(t=>t.id===detectedTone.skinTone)?.hex : null
+  const confColor  = confidence >= 70 ? '#1D9E75' : confidence >= 50 ? '#EF9F27' : '#E24B4A'
+  const issue      = poseFound ? null : (poseIssues[0] ? GUIDANCE_MAP[poseIssues[0]] : null)
+  const canScan    = modelState === 'ready'
+  const shapeInfo  = detectedShape ? BODY_SHAPES.find(b => b.id === detectedShape) : null
+  const toneHex    = detectedTone  ? SKIN_TONES.find(t => t.id === detectedTone.skinTone)?.hex : null
+  const segLabel   = SEGMENTS.find(s => s.id === (profile.segment ?? 'women'))?.label || 'Women'
 
   return (
-    <div className="fr-panel-content">
-      <div className="fr-tab-row">
-        <button className={`fr-tab${activeTab==='camera'?' active':''}`} onClick={()=>setActiveTab('camera')}>📷 Camera scan</button>
-        <button className={`fr-tab${activeTab==='manual'?' active':''}`} onClick={()=>setActiveTab('manual')}>✏️ Manual entry</button>
-      </div>
+    <SegmentGate>
+      <div className="fr-panel-content">
+        <div className="fr-tab-row">
+          <button className={`fr-tab${activeTab === 'camera' ? ' active' : ''}`} onClick={() => setActiveTab('camera')}>Camera scan</button>
+          <button className={`fr-tab${activeTab === 'manual' ? ' active' : ''}`} onClick={() => setActiveTab('manual')}>Manual entry</button>
+        </div>
 
-      {activeTab==='camera' && (
-        <div>
-          <div className="fr-cam-area">
-            <video ref={videoRef} playsInline muted style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',transform:'scaleX(-1)',opacity:0}}/>
-            <canvas ref={canvasRef} style={{position:'absolute',inset:0,width:'100%',height:'100%',opacity:camState==='on'?1:0,transition:'opacity .3s'}}/>
-            {camState!=='on'&&!locked&&(
-              <div className="fr-cam-ph">
-                <svg width="40" height="40" viewBox="0 0 80 80" fill="none" opacity=".4">
-                  <rect x="8" y="22" width="64" height="44" rx="4" stroke="white" strokeWidth="1.5"/>
-                  <circle cx="40" cy="44" r="12" stroke="white" strokeWidth="1.5"/>
-                  <path d="M30 22l4-8h12l4 8" stroke="white" strokeWidth="1.5" strokeLinejoin="round"/>
-                </svg>
-                <span style={{color:'rgba(255,255,255,.4)',fontSize:'12px'}}>
-                  {modelState==='loading'?'Loading AI model…':modelState==='error'?'Model failed to load':'Camera off'}
-                </span>
-              </div>
-            )}
-            {camState==='on'&&(
-              <div className="fr-cam-hud">
-                <span className="fr-hud-dot" style={{background:confColor}}/>
-                <span className="fr-hud-text">{issue?`${issue.icon} ${issue.text}`:confidence>0?'Hold still, calibrating…':'Detecting pose…'}</span>
-                {confidence>0&&<span style={{color:confColor,fontWeight:600,fontSize:'12px'}}>{confidence}%</span>}
-              </div>
-            )}
-            {camState==='on'&&poseFound&&(
-              <div className="fr-cam-badges">
-                {detectedShape&&(
-                  <span className="fr-cam-badge fr-cam-badge--shape">
-                    {shapeInfo?.icon||'👤'} {detectedShape}
-                  </span>
+        {activeTab === 'camera' && (
+          <div className="scan-layout">
+            {/* Camera area */}
+            <div className="scan-cam-wrap">
+              <div className="fr-cam-area">
+                <video
+                  ref={videoRef}
+                  playsInline muted
+                  style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover',transform:'scaleX(-1)',opacity:0 }}
+                />
+                <canvas
+                  ref={canvasRef}
+                  style={{ position:'absolute',inset:0,width:'100%',height:'100%',opacity:camState==='on'?1:0,transition:'opacity .3s' }}
+                />
+
+                {camState !== 'on' && !locked && (
+                  <div className="fr-cam-ph">
+                    <div className="cam-ph-icon">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                      </svg>
+                    </div>
+                    <span className="cam-ph-text">
+                      {modelState === 'loading' ? 'Loading AI model…'
+                       : modelState === 'error'  ? 'Model failed to load'
+                       : 'Camera off'}
+                    </span>
+                    {modelState === 'loading' && <div className="cam-ph-bar"><div className="cam-ph-bar-fill"/></div>}
+                  </div>
                 )}
-                {detectedTone&&(
-                  <span className="fr-cam-badge fr-cam-badge--tone">
-                    <span style={{display:'inline-block',width:'10px',height:'10px',borderRadius:'50%',background:toneHex,verticalAlign:'middle',marginRight:'4px'}}/>
-                    {detectedTone.skinTone}
-                  </span>
+
+                {/* Confidence ring overlay — shown while scanning */}
+                {camState === 'on' && !locked && (
+                  <div className="cam-conf-ring-wrap">
+                    <svg width="48" height="48" viewBox="0 0 48 48">
+                      <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3"/>
+                      <circle
+                        cx="24" cy="24" r="20" fill="none"
+                        stroke={confColor} strokeWidth="3"
+                        strokeDasharray={`${(confidence / 100) * 125.6} 125.6`}
+                        strokeLinecap="round"
+                        transform="rotate(-90 24 24)"
+                        style={{ transition: 'stroke-dasharray .4s, stroke .4s' }}
+                      />
+                      <text x="24" y="28" textAnchor="middle" fill="white" fontSize="11" fontWeight="600">{confidence}%</text>
+                    </svg>
+                  </div>
                 )}
-              </div>
-            )}
-          </div>
 
-          <div className="fr-scan-detects">
-            <span className="fr-detect-item">📐 Measurements</span>
-            <span className="fr-detect-item">👤 Body shape</span>
-            <span className="fr-detect-item">🎨 Skin tone</span>
-          </div>
+                {/* HUD */}
+                {camState === 'on' && (
+                  <div className="fr-cam-hud">
+                    <span className="fr-hud-dot" style={{ background: confColor }}/>
+                    <span className="fr-hud-text">
+                      {issue ? issue : confidence > 0 ? 'Hold still…' : 'Detecting pose…'}
+                    </span>
+                  </div>
+                )}
 
-          <div className="fr-scan-body">
-            {!locked ? (
-              <>
-                <p className="fr-scan-tip">Stand 1.5–2 m away, arms slightly out, full body visible. The camera will detect your measurements, body shape, and skin tone automatically.</p>
-                {camError&&<div className="fr-alert fr-alert--err">{camError}</div>}
-                {modelState==='error'&&<div className="fr-alert fr-alert--err">AI model failed to load. Try refreshing the page.</div>}
-                <div className="fr-btn-row">
-                  {camState!=='on'?(
-                    <button className="fr-btn fr-btn--primary" onClick={startCamera}
-                      disabled={camState==='starting'||!canScan}>
-                      {camState==='starting'?<><span className="fr-spin"/>Starting…</>
-                       :modelState==='loading'?<><span className="fr-spin"/>Loading model…</>
-                       :'▶ Start scan'}
-                    </button>
-                  ):(
-                    <>
-                      <button className="fr-btn fr-btn--primary" onClick={lockMeasurement} disabled={confidence<50}>
-                        📐 Lock ({confidence}%)
-                      </button>
-                      <button className="fr-btn fr-btn--ghost" onClick={stopCamera}>■ Stop</button>
-                    </>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div>
-                <div className="fr-locked-header">
-                  <span className="fr-badge fr-badge--ok">✓ Captured</span>
-                  <div className="fr-locked-detections">
-                    {detectedTone&&(
-                      <span className="fr-tone-detected">
-                        <span className="fr-tone-dot" style={{background:toneHex}}/>
-                        {detectedTone.skinTone} · {detectedTone.undertone}
-                      </span>
+                {/* Live detection badges */}
+                {camState === 'on' && poseFound && (detectedShape || detectedTone) && (
+                  <div className="fr-cam-badges">
+                    {detectedShape && (
+                      <span className="fr-cam-badge">{detectedShape}</span>
                     )}
-                    {detectedShape&&(
-                      <span className="fr-tone-detected">
-                        {shapeInfo?.icon||'👤'} {detectedShape}
+                    {detectedTone && (
+                      <span className="fr-cam-badge">
+                        <span style={{ display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:toneHex,verticalAlign:'middle',marginRight:'3px' }}/>
+                        {detectedTone.skinTone}
                       </span>
                     )}
                   </div>
-                </div>
-                <div className="fr-field-row">
-                  {[['Bust',adjBust,setAdjBust],['Waist',adjWaist,setAdjWaist],['Hips',adjHips,setAdjHips]].map(([l,v,s])=>(
-                    <div key={l} className="fr-field">
-                      <label>{l} (cm)</label>
-                      <input type="number" value={v} onChange={e=>s(e.target.value)}/>
-                    </div>
-                  ))}
-                </div>
-                <p className="fr-note">Camera estimates carry ±4–6 cm variance. Confirm with a tape measure for bridal orders.</p>
-                <div className="fr-btn-row">
-                  <button className="fr-btn fr-btn--ghost" onClick={()=>{setLocked(false);setConfidence(0);shapeVotesRef.current={}}}>↩ Retake</button>
-                  <button className="fr-btn fr-btn--primary" onClick={confirmMeasurements}>Apply →</button>
-                </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
-      )}
 
-      {activeTab==='manual' && (
-        <div className="fr-scan-body">
-          {mErrors._form&&<div className="fr-alert fr-alert--err">{mErrors._form}</div>}
-          <div className="fr-field-row">
-            <div className="fr-field">
-              <label>Bust (cm)</label>
-              <input type="number" value={mBust} onChange={e=>{setMBust(e.target.value);setMErrors(p=>({...p,bust:undefined,_form:undefined}))}} placeholder="e.g. 88"/>
-              {mErrors.bust&&<span className="fr-field-err">{mErrors.bust}</span>}
+              {/* Controls below camera */}
+              {!locked ? (
+                <div className="scan-controls">
+                  {camError && <div className="fr-alert fr-alert--err">{camError}</div>}
+                  {modelState === 'error' && <div className="fr-alert fr-alert--err">AI model failed to load. Try refreshing.</div>}
+
+                  {camState !== 'on' ? (
+                    <button
+                      className="fr-btn fr-btn--primary scan-btn-full"
+                      onClick={startCamera}
+                      disabled={camState === 'starting' || !canScan}
+                    >
+                      {camState === 'starting'
+                        ? <><span className="fr-spin"/>Starting…</>
+                        : modelState === 'loading'
+                          ? <><span className="fr-spin"/>Loading model…</>
+                          : 'Start scan'}
+                    </button>
+                  ) : (
+                    <div className="scan-btn-pair">
+                      <button
+                        className="fr-btn fr-btn--primary"
+                        onClick={lockMeasurement}
+                        disabled={confidence < 50}
+                      >
+                        Lock measurements ({confidence}%)
+                      </button>
+                      <button className="fr-btn fr-btn--ghost" onClick={stopCamera}>Stop</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="scan-locked">
+                  <div className="scan-locked-header">
+                    <span className="fr-badge fr-badge--ok">Captured</span>
+                    <div className="scan-locked-detections">
+                      {detectedTone && (
+                        <span className="scan-detection-tag">
+                          <span style={{ display:'inline-block',width:'10px',height:'10px',borderRadius:'50%',background:toneHex,flexShrink:0 }}/>
+                          {detectedTone.skinTone} · {detectedTone.undertone}
+                        </span>
+                      )}
+                      {detectedShape && (
+                        <span className="scan-detection-tag">{detectedShape}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="fr-field-row">
+                    {[['Bust (cm)', adjBust, setAdjBust], ['Waist (cm)', adjWaist, setAdjWaist], ['Hips (cm)', adjHips, setAdjHips]].map(([l, v, s]) => (
+                      <div key={l} className="fr-field">
+                        <label>{l}</label>
+                        <input type="number" value={v} onChange={e => s(e.target.value)}/>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="fr-note">Camera estimates carry ±4–6 cm variance. Confirm with a tape measure for bridal orders.</p>
+                  <div className="fr-btn-row">
+                    <button className="fr-btn fr-btn--ghost" onClick={() => { setLocked(false); setConfidence(0); shapeVotesRef.current = {} }}>Retake</button>
+                    <button className="fr-btn fr-btn--primary" onClick={confirmMeasurements}>Apply</button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="fr-field">
-              <label>Waist (cm)</label>
-              <input type="number" value={mWaist} onChange={e=>{setMWaist(e.target.value);setMErrors(p=>({...p,waist:undefined,_form:undefined}))}} placeholder="e.g. 70"/>
-              {mErrors.waist&&<span className="fr-field-err">{mErrors.waist}</span>}
+
+            {/* Right column — live estimates + tip */}
+            <div className="scan-info-col">
+              <div className="scan-tip-card">
+                <p className="scan-tip-heading">Scanning for {segLabel}</p>
+                <p className="scan-tip-body">
+                  Stand 1.5–2 m away, arms slightly out, full body visible.
+                </p>
+                {!profile.height && (
+                  <p className="scan-tip-height-hint">
+                    ↑ Enter your height in the sidebar for up to 30% better accuracy.
+                  </p>
+                )}
+              </div>
+
+              {liveEst && camState === 'on' && !locked && (
+                <div className="scan-live-est">
+                  <p className="scan-live-heading">Live estimate</p>
+                  <div className="scan-live-grid">
+                    <div className="scan-live-item">
+                      <span className="scan-live-label">Bust</span>
+                      <span className="scan-live-val">{liveEst.bust} cm</span>
+                    </div>
+                    <div className="scan-live-item">
+                      <span className="scan-live-label">Waist</span>
+                      <span className="scan-live-val">{liveEst.waist} cm</span>
+                    </div>
+                    <div className="scan-live-item">
+                      <span className="scan-live-label">Hips</span>
+                      <span className="scan-live-val">{liveEst.hips} cm</span>
+                    </div>
+                  </div>
+                  <div className="scan-conf-bar-wrap">
+                    <div className="scan-conf-track">
+                      <div className="scan-conf-fill" style={{ width: `${confidence}%`, background: confColor }}/>
+                    </div>
+                    <span className="scan-conf-label" style={{ color: confColor }}>{confidence}%</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="scan-detects-list">
+                <p className="scan-detects-heading">This scan detects</p>
+                {['Measurements (bust · waist · hips)', 'Body shape', 'Skin tone & undertone'].map(item => (
+                  <div key={item} className="scan-detect-row">
+                    <span className="scan-detect-dot"/>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-          <div className="fr-field-row">
-            <div className="fr-field">
-              <label>Hips (cm)</label>
-              <input type="number" value={mHips} onChange={e=>{setMHips(e.target.value);setMErrors(p=>({...p,hips:undefined,_form:undefined}))}} placeholder="e.g. 95"/>
-              {mErrors.hips&&<span className="fr-field-err">{mErrors.hips}</span>}
+        )}
+
+        {activeTab === 'manual' && (
+          <div className="fr-scan-body">
+            <div className="scan-tip-card" style={{ marginBottom: '1rem' }}>
+              <p className="scan-tip-heading">Manual entry for {segLabel}</p>
+              <p className="scan-tip-body">Enter your measurements in centimetres. At least one of bust, waist, or hips is required.</p>
             </div>
-            <div className="fr-field">
-              <label>Height (cm)</label>
-              <input type="number" value={mHeight} onChange={e=>{setMHeight(e.target.value);setMErrors(p=>({...p,height:undefined}))}} placeholder="e.g. 162"/>
-              {mErrors.height&&<span className="fr-field-err">{mErrors.height}</span>}
+            {mErrors._form && <div className="fr-alert fr-alert--err">{mErrors._form}</div>}
+            <div className="fr-field-row">
+              <div className="fr-field">
+                <label>Bust (cm)</label>
+                <input type="number" value={mBust}
+                  onChange={e => { setMBust(e.target.value); setMErrors(p => ({ ...p, bust: undefined, _form: undefined })) }}
+                  placeholder="e.g. 88"/>
+                {mErrors.bust && <span className="fr-field-err">{mErrors.bust}</span>}
+              </div>
+              <div className="fr-field">
+                <label>Waist (cm)</label>
+                <input type="number" value={mWaist}
+                  onChange={e => { setMWaist(e.target.value); setMErrors(p => ({ ...p, waist: undefined, _form: undefined })) }}
+                  placeholder="e.g. 70"/>
+                {mErrors.waist && <span className="fr-field-err">{mErrors.waist}</span>}
+              </div>
             </div>
+            <div className="fr-field-row">
+              <div className="fr-field">
+                <label>Hips (cm)</label>
+                <input type="number" value={mHips}
+                  onChange={e => { setMHips(e.target.value); setMErrors(p => ({ ...p, hips: undefined, _form: undefined })) }}
+                  placeholder="e.g. 95"/>
+                {mErrors.hips && <span className="fr-field-err">{mErrors.hips}</span>}
+              </div>
+              <div className="fr-field">
+                <label>Height (cm)</label>
+                <input type="number" value={mHeight}
+                  onChange={e => { setMHeight(e.target.value); setMErrors(p => ({ ...p, height: undefined })) }}
+                  placeholder="e.g. 162"/>
+                {mErrors.height && <span className="fr-field-err">{mErrors.height}</span>}
+              </div>
+            </div>
+            <div className="fr-field-row fr-field-row--half">
+              <div className="fr-field">
+                <label>Weight (kg)</label>
+                <input type="number" value={mWeight}
+                  onChange={e => { setMWeight(e.target.value); setMErrors(p => ({ ...p, weight: undefined })) }}
+                  placeholder="e.g. 58"/>
+                {mErrors.weight && <span className="fr-field-err">{mErrors.weight}</span>}
+              </div>
+            </div>
+            <button className="fr-btn fr-btn--primary" onClick={confirmManual}>Apply measurements</button>
           </div>
-          <div className="fr-field-row fr-field-row--half">
-            <div className="fr-field">
-              <label>Weight (kg)</label>
-              <input type="number" value={mWeight} onChange={e=>{setMWeight(e.target.value);setMErrors(p=>({...p,weight:undefined}))}} placeholder="e.g. 58"/>
-              {mErrors.weight&&<span className="fr-field-err">{mErrors.weight}</span>}
-            </div>
-          </div>
-          <button className="fr-btn fr-btn--primary" onClick={confirmManual}>Apply measurements →</button>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </SegmentGate>
   )
 }
 
@@ -765,12 +1073,12 @@ function ScanPanel() {
 function SizePanel() {
   const { profile, sizeResult, sizes, supplierName } = useFittingRoom()
   const scoreConf  = sizeResult ? Math.min(95, Math.max(10, Math.round(100 - sizeResult.score * 3))) : 0
-  const scoreColor = scoreConf>=75?'#1D9E75':scoreConf>=55?'#EF9F27':'#E24B4A'
+  const scoreColor = scoreConf >= 75 ? '#1D9E75' : scoreConf >= 55 ? '#EF9F27' : '#E24B4A'
+  const segLabel   = SEGMENTS.find(s => s.id === (profile.segment ?? 'women'))?.label || 'Women'
 
   if (!profile.bust && !profile.waist && !profile.hips) {
     return (
       <div className="fr-panel-empty">
-        <p className="fr-empty-icon">📏</p>
         <p className="fr-empty-title">No measurements yet</p>
         <p className="fr-empty-sub">Use the Scan panel to capture your measurements and we'll find your size instantly.</p>
       </div>
@@ -785,33 +1093,35 @@ function SizePanel() {
     <div className="fr-panel-content">
       <div className="fr-size-hero">
         <div>
-          <p className="fr-size-hero-label">Recommended size</p>
+          <p className="fr-size-hero-label">Recommended size · {segLabel}</p>
           <p className="fr-size-hero-value">{sizeResult.size?.label ?? '—'}</p>
-          <p className="fr-size-hero-supplier">{supplierName || 'Standard'} size chart</p>
+          <p className="fr-size-hero-supplier">{supplierName || 'Philippine Standard'} size chart</p>
         </div>
         <div className="fr-size-conf-block">
           <p className="fr-size-hero-label">Match confidence</p>
-          <p className="fr-size-conf-pct" style={{color:scoreColor}}>{scoreConf}%</p>
+          <p className="fr-size-conf-pct" style={{ color: scoreColor }}>{scoreConf}%</p>
         </div>
       </div>
       <div className="fr-conf-bar-wrap">
         <div className="fr-conf-bar-track">
-          <div className="fr-conf-bar-fill" style={{width:`${scoreConf}%`,background:scoreColor}}/>
+          <div className="fr-conf-bar-fill" style={{ width: `${scoreConf}%`, background: scoreColor }}/>
         </div>
       </div>
+
       <div className="fr-size-section">
         <p className="fr-size-section-label">Size range</p>
         <div className="fr-size-pills">
-          {sizeResult.adjacent.map(sz=>(
-            <span key={sz.label} className={`fr-size-pill-lg${sz.label===sizeResult.size?.label?' match':''}`}>{sz.label}</span>
+          {sizeResult.adjacent.map(sz => (
+            <span key={sz.label} className={`fr-size-pill-lg${sz.label === sizeResult.size?.label ? ' match' : ''}`}>{sz.label}</span>
           ))}
         </div>
       </div>
+
       <div className="fr-size-section">
         <p className="fr-size-section-label">Your measurements</p>
         <div className="fr-meas-grid-lg">
-          {[['Bust',profile.bust,'cm'],['Waist',profile.waist,'cm'],['Hips',profile.hips,'cm'],
-            ['Height',profile.height,'cm'],['Weight',profile.weight,'kg']].filter(([,v])=>v).map(([l,v,u])=>(
+          {[['Bust', profile.bust, 'cm'], ['Waist', profile.waist, 'cm'], ['Hips', profile.hips, 'cm'],
+            ['Height', profile.height, 'cm'], ['Weight', profile.weight, 'kg']].filter(([, v]) => v).map(([l, v, u]) => (
             <div key={l} className="fr-meas-box">
               <span className="fr-meas-box-label">{l}</span>
               <span className="fr-meas-box-val">{v} <span className="fr-meas-box-unit">{u}</span></span>
@@ -820,30 +1130,33 @@ function SizePanel() {
           ))}
         </div>
       </div>
+
       {sizeResult.size && (
         <div className="fr-size-chart-ref">
-          <p className="fr-size-section-label">{supplierName||'Standard'} chart for {sizeResult.size.label}</p>
+          <p className="fr-size-section-label">{supplierName || 'Standard'} chart for {sizeResult.size.label}</p>
           <div className="fr-chart-row">
-            {sizeResult.size.bust_min!=null&&<span>Bust {sizeResult.size.bust_min}–{sizeResult.size.bust_max} cm</span>}
-            {sizeResult.size.waist_min!=null&&<span>Waist {sizeResult.size.waist_min}–{sizeResult.size.waist_max} cm</span>}
-            {sizeResult.size.hip_min!=null&&<span>Hips {sizeResult.size.hip_min}–{sizeResult.size.hip_max} cm</span>}
+            {sizeResult.size.bust_min  != null && <span>Bust {sizeResult.size.bust_min}–{sizeResult.size.bust_max} cm</span>}
+            {sizeResult.size.waist_min != null && <span>Waist {sizeResult.size.waist_min}–{sizeResult.size.waist_max} cm</span>}
+            {sizeResult.size.hip_min   != null && <span>Hips {sizeResult.size.hip_min}–{sizeResult.size.hip_max} cm</span>}
           </div>
         </div>
       )}
-      {sizeResult.score>5&&(
+
+      {sizeResult.score > 5 && (
         <div className="fr-alert fr-alert--warn">
           You're near a size boundary. For bridal gowns, size up when in doubt — it's easier to take in than let out.
         </div>
       )}
-      {profile.source==='camera'&&(
+      {profile.source === 'camera' && (
         <p className="fr-note">Camera estimates carry ±4–6 cm variance. Confirm with a tape measure for bridal orders.</p>
       )}
+
       <div className="fr-size-section">
-        <p className="fr-size-section-label">Full size chart</p>
+        <p className="fr-size-section-label">Full size chart — {segLabel}</p>
         <div className="fr-full-chart">
           <div className="fr-chart-header"><span>Size</span><span>Bust</span><span>Waist</span><span>Hips</span></div>
-          {sizes.map(sz=>(
-            <div key={sz.label} className={`fr-chart-row-item${sz.label===sizeResult.size?.label?' fr-chart-row-item--match':''}`}>
+          {sizes.map(sz => (
+            <div key={sz.label} className={`fr-chart-row-item${sz.label === sizeResult.size?.label ? ' fr-chart-row-item--match' : ''}`}>
               <span className="fr-chart-size-label">{sz.label}</span>
               <span>{sz.bust_min}–{sz.bust_max}</span>
               <span>{sz.waist_min}–{sz.waist_max}</span>
@@ -913,11 +1226,12 @@ function BodyShapePicker({ selected, onChange }) {
       {BODY_SHAPES.map(s => (
         <button
           key={s.id}
-          className={`fr-shape-card${selected===s.id?' sel':''}`}
+          className={`fr-shape-card${selected === s.id ? ' sel' : ''}`}
           onClick={() => onChange(s.id)}
-          aria-pressed={selected===s.id}
-          title={s.desc}>
-          <div className="fr-shape-figure" style={{color: selected===s.id?'#c9a96e':'#bbb'}}>
+          aria-pressed={selected === s.id}
+          title={s.desc}
+        >
+          <div className="fr-shape-figure" style={{ color: selected === s.id ? '#c9a96e' : '#bbb' }}>
             {SHAPE_SVGS[s.id]}
           </div>
           <span className="fr-shape-card-label">{s.label}</span>
@@ -945,7 +1259,7 @@ const TONE_DESCRIPTIONS = {
 const UNDERTONE_DESCRIPTIONS = {
   warm:    'Golden, peachy or yellow hues',
   cool:    'Pink, red or bluish hues',
-  neutral: 'Mix of warm & cool',
+  neutral: 'Mix of warm and cool',
 }
 
 function SkinTonePicker({ selectedTone, selectedUndertone, onToneChange, onUndertoneChange }) {
@@ -955,26 +1269,28 @@ function SkinTonePicker({ selectedTone, selectedUndertone, onToneChange, onUnder
         {SKIN_TONES.map(t => (
           <button
             key={t.id}
-            className={`fr-tone-card${selectedTone===t.id?' sel':''}`}
+            className={`fr-tone-card${selectedTone === t.id ? ' sel' : ''}`}
             onClick={() => onToneChange(t.id)}
-            aria-pressed={selectedTone===t.id}
+            aria-pressed={selectedTone === t.id}
             aria-label={`${t.label}: ${TONE_DESCRIPTIONS[t.id]}`}
-            title={TONE_DESCRIPTIONS[t.id]}>
-            <span className="fr-tone-swatch-lg" style={{background:t.hex}}/>
+            title={TONE_DESCRIPTIONS[t.id]}
+          >
+            <span className="fr-tone-swatch-lg" style={{ background: t.hex }}/>
             <span className="fr-tone-card-label">{t.label}</span>
             <span className="fr-tone-card-desc">{TONE_DESCRIPTIONS[t.id]}</span>
           </button>
         ))}
       </div>
-      <p className="fr-style-section-title" style={{marginTop:'14px',marginBottom:'8px'}}>Undertone</p>
+      <p className="fr-style-section-title" style={{ marginTop: '14px', marginBottom: '8px' }}>Undertone</p>
       <div className="fr-undertone-cards">
         {UNDERTONES.map(u => (
           <button
             key={u.id}
-            className={`fr-undertone-card${selectedUndertone===u.id?' sel':''}`}
+            className={`fr-undertone-card${selectedUndertone === u.id ? ' sel' : ''}`}
             onClick={() => onUndertoneChange(u.id)}
-            aria-pressed={selectedUndertone===u.id}>
-            <span className="fr-undertone-swatch" style={{background:u.hex}}/>
+            aria-pressed={selectedUndertone === u.id}
+          >
+            <span className="fr-undertone-swatch" style={{ background: u.hex }}/>
             <div>
               <span className="fr-undertone-card-label">{u.label}</span>
               <span className="fr-undertone-card-desc">{UNDERTONE_DESCRIPTIONS[u.id]}</span>
@@ -995,141 +1311,164 @@ function StylePanel() {
   const [refineOpen, setRefineOpen] = useState(false)
 
   function set(key, val) { updateProfile({ [key]: val }) }
-  function toggleMulti(key, val, max=4) {
-    const arr = profile[key]||[]
-    if (arr.includes(val)) updateProfile({ [key]: arr.filter(v=>v!==val) })
+  function toggleMulti(key, val, max = 4) {
+    const arr = profile[key] || []
+    if (arr.includes(val)) updateProfile({ [key]: arr.filter(v => v !== val) })
     else if (arr.length < max) updateProfile({ [key]: [...arr, val] })
   }
 
   return (
-    <div className="fr-panel-content">
-      <div className="fr-style-section">
-        <p className="fr-style-section-title">Body shape</p>
-        {profile.bodyShape && (
-          <p className="fr-scan-detected-note">
-            🎯 Auto-detected from camera scan — adjust if needed
-          </p>
+    <SegmentGate>
+      <div className="fr-panel-content">
+        <div className="fr-style-section">
+          <p className="fr-style-section-title">Body shape</p>
+          {profile.bodyShape && (
+            <p className="fr-scan-detected-note">Auto-detected from camera scan — adjust if needed</p>
+          )}
+          <BodyShapePicker selected={profile.bodyShape} onChange={v => set('bodyShape', v)}/>
+        </div>
+
+        <div className="fr-style-section">
+          <p className="fr-style-section-title">Skin tone &amp; undertone</p>
+          {(profile.skinTone || profile.undertone) && (
+            <p className="fr-scan-detected-note">Auto-detected from camera scan — adjust if needed</p>
+          )}
+          <SkinTonePicker
+            selectedTone={profile.skinTone}
+            selectedUndertone={profile.undertone}
+            onToneChange={v => set('skinTone', v)}
+            onUndertoneChange={v => set('undertone', v)}
+          />
+        </div>
+
+        <div className="fr-style-section">
+          <p className="fr-style-section-title">Occasion</p>
+          <div className="fr-occasion-row">
+            {OCCASIONS.map(o => (
+              <button
+                key={o.id}
+                className={`fr-occasion-btn${profile.occasion === o.id ? ' sel' : ''}`}
+                onClick={() => set('occasion', o.id)}
+                aria-pressed={profile.occasion === o.id}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="fr-refine-toggle"
+          onClick={() => setRefineOpen(v => !v)}
+          role="button" tabIndex={0}
+          onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setRefineOpen(v => !v)}
+        >
+          <span>Refine preferences</span>
+          <span className={`fr-refine-arrow${refineOpen ? ' open' : ''}`}>▾</span>
+        </div>
+
+        {refineOpen && (
+          <div className="fr-refine-content">
+            <div className="fr-style-section">
+              <p className="fr-style-section-title">Preferred colors</p>
+              <div className="fr-color-row">
+                {COLOR_OPTIONS.map(c => (
+                  <button
+                    key={c.id}
+                    className={`fr-color-btn${(profile.colors || []).includes(c.id) ? ' sel' : ''}`}
+                    onClick={() => toggleMulti('colors', c.id, 4)}
+                    aria-label={c.id} aria-pressed={(profile.colors || []).includes(c.id)}
+                    title={c.id}
+                  >
+                    <span className="fr-color-swatch" style={{ background: c.hex }}/>
+                    <span>{c.id}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="fr-style-section">
+              <p className="fr-style-section-title">Preferred fabrics</p>
+              <div className="fr-fabric-row">
+                {FABRIC_OPTIONS.map(f => (
+                  <button
+                    key={f}
+                    className={`fr-fabric-btn${(profile.fabrics || []).includes(f) ? ' sel' : ''}`}
+                    onClick={() => toggleMulti('fabrics', f, 6)}
+                    aria-pressed={(profile.fabrics || []).includes(f)}
+                  >{f}</button>
+                ))}
+              </div>
+            </div>
+            <div className="fr-style-section">
+              <p className="fr-style-section-title">Budget</p>
+              <div className="fr-budget-row">
+                {BUDGET_RANGES.map(b => (
+                  <button
+                    key={b.id}
+                    className={`fr-budget-btn${profile.budget === b.id ? ' sel' : ''}`}
+                    onClick={() => set('budget', b.id)}
+                    aria-pressed={profile.budget === b.id}
+                  >{b.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
-        <BodyShapePicker selected={profile.bodyShape} onChange={v=>set('bodyShape',v)}/>
-      </div>
 
-      <div className="fr-style-section">
-        <p className="fr-style-section-title">Skin tone &amp; undertone</p>
-        {(profile.skinTone || profile.undertone) && (
-          <p className="fr-scan-detected-note">
-            🎨 Auto-detected from camera scan — adjust if needed
-          </p>
+        {!profile.bodyShape && (
+          <div className="fr-style-empty">
+            <p>Select your body shape above to see gown recommendations.</p>
+          </div>
         )}
-        <SkinTonePicker
-          selectedTone={profile.skinTone}
-          selectedUndertone={profile.undertone}
-          onToneChange={v=>set('skinTone',v)}
-          onUndertoneChange={v=>set('undertone',v)}
-        />
-      </div>
-
-      <div className="fr-style-section">
-        <p className="fr-style-section-title">Occasion</p>
-        <div className="fr-occasion-row">
-          {OCCASIONS.map(o=>(
-            <button key={o.id} className={`fr-occasion-btn${profile.occasion===o.id?' sel':''}`}
-              onClick={()=>set('occasion',o.id)} aria-pressed={profile.occasion===o.id}>
-              <span className="fr-occasion-icon">{o.icon}</span>
-              <span>{o.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="fr-refine-toggle" onClick={()=>setRefineOpen(v=>!v)} role="button" tabIndex={0}
-        onKeyDown={e=>(e.key==='Enter'||e.key===' ')&&setRefineOpen(v=>!v)}>
-        <span>⚙️ Refine preferences</span>
-        <span className={`fr-refine-arrow${refineOpen?' open':''}`}>▾</span>
-      </div>
-
-      {refineOpen && (
-        <div className="fr-refine-content">
-          <div className="fr-style-section">
-            <p className="fr-style-section-title">Preferred colors</p>
-            <div className="fr-color-row">
-              {COLOR_OPTIONS.map(c=>(
-                <button key={c.id} className={`fr-color-btn${(profile.colors||[]).includes(c.id)?' sel':''}`}
-                  onClick={()=>toggleMulti('colors',c.id,4)} aria-label={c.id} aria-pressed={(profile.colors||[]).includes(c.id)} title={c.id}>
-                  <span className="fr-color-swatch" style={{background:c.hex}}/>
-                  <span>{c.id}</span>
-                </button>
-              ))}
-            </div>
+        {profile.bodyShape && !styleResults?.length && (
+          <div className="fr-style-empty">
+            <p>No matches found. Try relaxing your budget or occasion filter.</p>
           </div>
-          <div className="fr-style-section">
-            <p className="fr-style-section-title">Preferred fabrics</p>
-            <div className="fr-fabric-row">
-              {FABRIC_OPTIONS.map(f=>(
-                <button key={f} className={`fr-fabric-btn${(profile.fabrics||[]).includes(f)?' sel':''}`}
-                  onClick={()=>toggleMulti('fabrics',f,6)} aria-pressed={(profile.fabrics||[]).includes(f)}>{f}</button>
-              ))}
-            </div>
-          </div>
-          <div className="fr-style-section">
-            <p className="fr-style-section-title">Budget</p>
-            <div className="fr-budget-row">
-              {BUDGET_RANGES.map(b=>(
-                <button key={b.id} className={`fr-budget-btn${profile.budget===b.id?' sel':''}`}
-                  onClick={()=>set('budget',b.id)} aria-pressed={profile.budget===b.id}>{b.label}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!profile.bodyShape && (
-        <div className="fr-style-empty">
-          <p>Select your body shape above to see gown recommendations.</p>
-        </div>
-      )}
-      {profile.bodyShape && !styleResults?.length && (
-        <div className="fr-style-empty">
-          <p>No matches found. Try relaxing your budget or occasion filter.</p>
-        </div>
-      )}
-      {styleResults?.length > 0 && (
-        <div className="fr-style-results">
-          <p className="fr-results-label">{styleResults.length} matches · updates as you refine</p>
-          <div className="fr-gown-grid">
-            {styleResults.map((g, i) => {
-              const displayScore = normaliseScore(g._score)
-              return (
-                <div key={g.id} className="fr-gown-card" style={{animationDelay:`${i*0.05}s`}}>
-                  <div className="fr-gown-img">
-                    <img src={g.image} alt={g.alt||g.name}/>
-                    {i===0&&<span className="fr-gown-badge">Best match</span>}
-                    <span className="fr-gown-rank">#{i+1}</span>
-                  </div>
-                  <div className="fr-gown-info">
-                    <p className="fr-gown-name">{g.name}</p>
-                    <p className="fr-gown-price">{g.price}</p>
-                    {g.silhouette&&<p className="fr-gown-meta">{g.silhouette}{g.color?` · ${g.color}`:''}</p>}
-                    <div className="fr-gown-reasons">
-                      {g._reasons.slice(0,2).map((r,j)=>(
-                        <div key={j} className="fr-gown-reason"><span className="fr-reason-dot"/>{r}</div>
-                      ))}
+        )}
+        {styleResults?.length > 0 && (
+          <div className="fr-style-results">
+            <p className="fr-results-label">{styleResults.length} matches · updates as you refine</p>
+            <div className="fr-gown-grid">
+              {styleResults.map((g, i) => {
+                const displayScore = normaliseScore(g._score)
+                return (
+                  <div key={g.id} className="fr-gown-card" style={{ animationDelay: `${i * 0.05}s` }}>
+                    <div className="fr-gown-img">
+                      <img src={g.image} alt={g.alt || g.name}/>
+                      {i === 0 && <span className="fr-gown-badge">Best match</span>}
+                      <span className="fr-gown-rank">#{i + 1}</span>
                     </div>
-                    <div className="fr-score-row">
-                      <div className="fr-score-bar"><div className="fr-score-fill" style={{width:`${displayScore}%`}}/></div>
-                      <span className="fr-score-pct">{displayScore}%</span>
-                    </div>
-                    <div className="fr-gown-actions">
-                      <Link href={`/gowns/${g.id}`} className="fr-gown-btn fr-gown-btn--ghost">Details</Link>
-                      <Link href={`/fitting-room?gown=${g.id}`} className="fr-gown-btn fr-gown-btn--primary">Try on →</Link>
+                    <div className="fr-gown-info">
+                      <p className="fr-gown-name">{g.name}</p>
+                      <p className="fr-gown-price">{g.price}</p>
+                      {g.silhouette && <p className="fr-gown-meta">{g.silhouette}{g.color ? ` · ${g.color}` : ''}</p>}
+                      <div className="fr-gown-reasons">
+                        {g._reasons.slice(0, 2).map((r, j) => (
+                          <div key={j} className="fr-gown-reason">
+                            <span className="fr-reason-dot"/>
+                            {r}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="fr-score-row">
+                        <div className="fr-score-bar">
+                          <div className="fr-score-fill" style={{ width: `${displayScore}%` }}/>
+                        </div>
+                        <span className="fr-score-pct">{displayScore}%</span>
+                      </div>
+                      <div className="fr-gown-actions">
+                        <Link href={`/gowns/${g.id}`} className="fr-gown-btn fr-gown-btn--ghost">Details</Link>
+                        <Link href={`/fitting-room?gown=${g.id}`} className="fr-gown-btn fr-gown-btn--primary">Try on</Link>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </SegmentGate>
   )
 }
 
@@ -1145,7 +1484,7 @@ function TryOnPanel({ initialGownId }) {
 
   useEffect(() => {
     if (!gowns.length) return
-    const chosen = (initialGownId ? gowns.find(g=>String(g.id)===String(initialGownId)) : null) || gowns[0]
+    const chosen = (initialGownId ? gowns.find(g => String(g.id) === String(initialGownId)) : null) || gowns[0]
     setSelectedGown(chosen)
   }, [gowns, initialGownId])
 
@@ -1176,7 +1515,8 @@ function TryOnPanel({ initialGownId }) {
         modelState={modelState}
       />
       {saveMsg && (
-        <p className={`fr-save-msg${saveMsg.startsWith('✓')?' ok':' err'}`} style={{padding:'4px 12px',fontSize:'12px'}}>{saveMsg}</p>
+        <p className={`fr-save-msg${saveMsg.startsWith('✓') ? ' ok' : ' err'}`}
+          style={{ padding: '4px 12px', fontSize: '12px' }}>{saveMsg}</p>
       )}
     </div>
   )
@@ -1188,29 +1528,29 @@ function TryOnPanel({ initialGownId }) {
 
 function SkeletonLoader() {
   return (
-    <main style={{minHeight:'100vh',background:'#faf9f7'}}>
-      <div style={{height:'72px',background:'#1a1108'}}/>
-      <div style={{background:'#1a1108',padding:'2.5rem 1.5rem 2rem'}}>
-        <div className="sk-line" style={{width:'80px',height:'10px',marginBottom:'12px'}}/>
-        <div className="sk-line" style={{width:'340px',height:'36px',marginBottom:'12px'}}/>
-        <div className="sk-line" style={{width:'420px',height:'13px'}}/>
+    <main style={{ minHeight: '100vh', background: '#faf9f7' }}>
+      <div style={{ height: '72px', background: '#1a1108' }}/>
+      <div style={{ background: '#1a1108', padding: '2.5rem 1.5rem 2rem' }}>
+        <div className="sk-line" style={{ width: '80px', height: '10px', marginBottom: '12px' }}/>
+        <div className="sk-line" style={{ width: '340px', height: '36px', marginBottom: '12px' }}/>
+        <div className="sk-line" style={{ width: '420px', height: '13px' }}/>
       </div>
-      <div style={{display:'grid',gridTemplateColumns:'240px 1fr',maxWidth:'1160px',margin:'0 auto'}}>
-        <div style={{padding:'1.25rem',borderRight:'1px solid #eee',display:'flex',flexDirection:'column',gap:'12px'}}>
-          <div className="sk-line" style={{height:'14px',width:'80px'}}/>
-          <div className="sk-line" style={{height:'80px'}}/>
-          <div className="sk-line" style={{height:'60px'}}/>
+      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', maxWidth: '1160px', margin: '0 auto' }}>
+        <div style={{ padding: '1.25rem', borderRight: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="sk-line" style={{ height: '14px', width: '80px' }}/>
+          <div className="sk-line" style={{ height: '80px' }}/>
+          <div className="sk-line" style={{ height: '60px' }}/>
         </div>
-        <div style={{padding:'1.25rem',display:'flex',flexDirection:'column',gap:'12px'}}>
-          <div style={{display:'flex',gap:'8px'}}>
-            {[1,2,3,4].map(i=><div key={i} className="sk-line" style={{flex:1,height:'72px',borderRadius:'8px'}}/>)}
+        <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {[1,2,3,4].map(i => <div key={i} className="sk-line" style={{ flex: 1, height: '72px', borderRadius: '8px' }}/>)}
           </div>
-          <div className="sk-line" style={{height:'320px',borderRadius:'10px'}}/>
+          <div className="sk-line" style={{ height: '320px', borderRadius: '10px' }}/>
         </div>
       </div>
       <style>{`
-        .sk-line { background:linear-gradient(90deg,#e8e3db 25%,#f5f0e8 50%,#e8e3db 75%);
-          background-size:200% 100%; animation:sk-shimmer 1.4s ease-in-out infinite; border-radius:6px; }
+        .sk-line { background: linear-gradient(90deg, #e8e3db 25%, #f5f0e8 50%, #e8e3db 75%);
+          background-size: 200% 100%; animation: sk-shimmer 1.4s ease-in-out infinite; border-radius: 6px; }
         @keyframes sk-shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
       `}</style>
     </main>
@@ -1218,14 +1558,14 @@ function SkeletonLoader() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PANEL NAV
+// PANEL DEFINITIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PANELS = [
-  { id:'scan',   label:'Scan',   icon:'📷', sub:'Measure & detect' },
-  { id:'size',   label:'Size',   icon:'📐', sub:'Find your fit'    },
-  { id:'style',  label:'Style',  icon:'✨', sub:'Gown matches'     },
-  { id:'tryon',  label:'Try On', icon:'👗', sub:'See it on you'    },
+  { id: 'scan',  label: 'Scan',   sub: 'Measure & detect' },
+  { id: 'size',  label: 'Size',   sub: 'Find your fit'    },
+  { id: 'style', label: 'Style',  sub: 'Gown matches'     },
+  { id: 'tryon', label: 'Try On', sub: 'See it on you'    },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1242,13 +1582,9 @@ function FittingRoomInner() {
   const [saveMsg,     setSaveMsg    ] = useState('')
   const user = mounted ? getCurrentUser() : null
 
-  // ── CMS content ─────────────────────────────────────────────────────────────
   const [cmsContent, setCmsContent] = useState({
-    heading:     'My Fitting Room',
-    subheading:  'Gowns you have saved for your appointment.',
-    empty_title: 'Nothing saved yet',
-    empty_body:  'Browse the catalogue and save gowns you love.',
-    cta_label:   'Browse catalogue',
+    heading:    'My Fitting Room',
+    subheading: 'Find your size, match your style, try on virtually.',
   })
 
   useEffect(() => {
@@ -1257,11 +1593,9 @@ function FittingRoomInner() {
       .then(d => { if (d.ok && d.fields) setCmsContent(prev => ({ ...prev, ...d.fields })) })
       .catch(() => {})
   }, [])
-  // ────────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     setMounted(true)
-    if (typeof window === 'undefined') return
     const u = getCurrentUser()
     if (!u) return
     fetch('/api/measurements', { headers: { 'x-user-id': u.id } })
@@ -1277,7 +1611,7 @@ function FittingRoomInner() {
       .then(d => {
         if (d.ok && d.prefs) {
           const p = d.prefs
-          updateProfile({ bodyShape: p.bodyType||null, skinTone: p.skinTone||null, occasion: p.styleTags?.[0]||null, colors: p.preferredColors||[] })
+          updateProfile({ bodyShape: p.bodyType || null, skinTone: p.skinTone || null, occasion: p.styleTags?.[0] || null, colors: p.preferredColors || [] })
         }
       }).catch(() => {})
   }, [updateProfile])
@@ -1290,13 +1624,21 @@ function FittingRoomInner() {
         fetch('/api/measurements', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
-          body: JSON.stringify({ bust_cm: profile.bust??null, waist_cm: profile.waist??null, hips_cm: profile.hips??null, height_cm: profile.height??null, weight_kg: profile.weight??null, source: profile.source??'manual' }),
-        }).then(r=>r.json()),
+          body: JSON.stringify({
+            bust_cm: profile.bust ?? null, waist_cm: profile.waist ?? null,
+            hips_cm: profile.hips ?? null, height_cm: profile.height ?? null,
+            weight_kg: profile.weight ?? null, source: profile.source ?? 'manual',
+          }),
+        }).then(r => r.json()),
         fetch('/api/auth/save-style-prefs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
-          body: JSON.stringify({ bodyType: profile.bodyShape||null, skinTone: profile.skinTone||null, styleTags: profile.occasion?[profile.occasion]:[], preferredSilhouettes: [], preferredColors: profile.colors||[] }),
-        }).then(r=>r.json()),
+          body: JSON.stringify({
+            bodyType: profile.bodyShape || null, skinTone: profile.skinTone || null,
+            styleTags: profile.occasion ? [profile.occasion] : [],
+            preferredSilhouettes: [], preferredColors: profile.colors || [],
+          }),
+        }).then(r => r.json()),
       ])
       if (measRes.ok && styleRes.ok) setSaveMsg('✓ Profile saved')
       else setSaveMsg(measRes.error || styleRes.error || 'Save failed')
@@ -1326,34 +1668,35 @@ function FittingRoomInner() {
           <nav className="fr-panel-nav" aria-label="Fitting room sections">
             {PANELS.map((p, i) => {
               const isActive = activePanel === p.id
-              const hasBadge = (p.id==='size'&&sizeResult?.size) || (p.id==='scan'&&profile.bust)
+              const hasBadge = (p.id === 'size' && sizeResult?.size) || (p.id === 'scan' && profile.bust)
               return (
-                <button key={p.id}
-                  className={`fr-panel-tab${isActive?' active':''}`}
+                <button
+                  key={p.id}
+                  className={`fr-panel-tab${isActive ? ' active' : ''}`}
                   onClick={() => setActivePanel(p.id)}
-                  aria-selected={isActive} role="tab">
+                  aria-selected={isActive}
+                  role="tab"
+                >
                   <span className="fr-tab-step">{i + 1}</span>
-                  <span className="fr-tab-icon">{p.icon}</span>
                   <div className="fr-tab-text">
                     <span className="fr-tab-label">{p.label}</span>
                     <span className="fr-tab-sub">{p.sub}</span>
                   </div>
                   {hasBadge && (
                     <span className="fr-panel-badge">
-                      {p.id==='size' ? sizeResult.size.label : '✓'}
+                      {p.id === 'size' ? sizeResult.size.label : 'Done'}
                     </span>
                   )}
-                  {isActive && <span className="fr-tab-active-bar"/>}
                 </button>
               )
             })}
           </nav>
 
           <div className="fr-panel-body" role="tabpanel">
-            {activePanel==='scan'  && <ScanPanel/>}
-            {activePanel==='size'  && <SizePanel/>}
-            {activePanel==='style' && <StylePanel/>}
-            {activePanel==='tryon' && <TryOnPanel initialGownId={gownId}/>}
+            {activePanel === 'scan'  && <ScanPanel/>}
+            {activePanel === 'size'  && <SizePanel/>}
+            {activePanel === 'style' && <StylePanel/>}
+            {activePanel === 'tryon' && <TryOnPanel initialGownId={gownId}/>}
           </div>
         </div>
       </div>
@@ -1361,40 +1704,49 @@ function FittingRoomInner() {
       <Footer/>
 
       <style suppressHydrationWarning>{`
+        /* ── Page shell ── */
         .fr-page { min-height:100vh; display:flex; flex-direction:column; background:#faf9f7; }
         .fr-spacer { height:72px; }
         .fr-hero { background:#2c1a0e; padding:2rem 2.5rem; }
         .fr-hero-inner { max-width:680px; margin:0 auto; }
         .fr-eyebrow { font-size:11px; letter-spacing:.18em; text-transform:uppercase; color:#c9a96e; display:block; margin-bottom:8px; font-weight:500; }
         .fr-h1 { font-size:clamp(1.8rem,3.5vw,2.4rem); font-weight:400; color:#faf9f7; margin:0 0 8px; line-height:1.12; font-family:'Georgia',serif; }
-        .fr-h1 em { font-style:italic; color:#c9a96e; }
         .fr-hero-sub { font-size:13px; color:rgba(250,249,247,.55); line-height:1.65; max-width:520px; }
-        .fr-layout { display:grid; grid-template-columns:240px 1fr; gap:0; max-width:1160px; margin:0 auto; width:100%; min-height:calc(100vh - 200px); }
+
+        /* ── Layout grid ── */
+        .fr-layout { display:grid; grid-template-columns:220px 1fr; max-width:1160px; margin:0 auto; width:100%; min-height:calc(100vh - 200px); }
+
+        /* ── Sidebar ── */
         .fr-sidebar { background:#fff; border-right:1px solid #eee; padding:1.25rem; display:flex; flex-direction:column; gap:0; position:sticky; top:72px; height:calc(100vh - 72px); overflow-y:auto; }
-        .fr-sidebar-header { padding-bottom:1rem; border-bottom:1px solid #f0ede8; }
+        .fr-sidebar-header { padding-bottom:.875rem; border-bottom:1px solid #f0ede8; }
         .fr-sidebar-eyebrow { font-size:10px; letter-spacing:.35em; text-transform:uppercase; color:#c9a96e; display:block; }
         .fr-sidebar-user { font-size:12px; color:#888; display:block; margin-top:2px; }
-        .fr-sidebar-section { padding:1rem 0; border-bottom:1px solid #f0ede8; }
-        .fr-sidebar-label { font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:#aaa; margin-bottom:8px; }
+        .fr-sidebar-section { padding:.875rem 0; border-bottom:1px solid #f0ede8; }
+        .fr-sidebar-section:last-child { border-bottom:none; }
+        .fr-sidebar-label { font-size:10px; letter-spacing:.2em; text-transform:uppercase; color:#aaa; margin-bottom:7px; }
         .fr-sidebar-empty { font-size:12px; color:#bbb; line-height:1.5; }
-        .fr-sidebar-manual { background:#faf9f7; border-radius:8px; padding:10px; margin-top:4px; }
+        .fr-sidebar-manual { background:#faf9f7; border-radius:8px; padding:10px; }
+        .fr-sidebar-seg-row { display:flex; gap:4px; }
+        .fr-seg-mini { flex:1; padding:5px 4px; border:1px solid #e0ddd8; border-radius:6px; font-size:10px; font-weight:500; color:#888; background:#fff; cursor:pointer; transition:all .13s; }
+        .fr-seg-mini.sel { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; }
+        .fr-seg-mini:hover:not(.sel) { border-color:#c9a96e; }
         .fr-meas-grid { display:flex; flex-direction:column; gap:4px; }
-        .fr-meas-chip { display:flex; justify-content:space-between; font-size:12px; padding:4px 0; }
+        .fr-meas-chip { display:flex; justify-content:space-between; font-size:12px; padding:3px 0; }
         .fr-meas-key { color:#999; }
         .fr-meas-val { font-weight:500; color:#333; }
-        .fr-sidebar-size { background:linear-gradient(135deg,#faf6ee,#fff); border-radius:10px; padding:12px; margin:4px -4px; }
-        .fr-size-display { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:8px; }
-        .fr-size-label { font-size:2.2rem; font-weight:300; color:#1a1108; font-family:'Georgia',serif; line-height:1; }
-        .fr-size-conf { display:flex; align-items:center; gap:6px; margin-top:4px; }
-        .fr-conf-bar { flex:1; height:3px; background:#eee; border-radius:2px; overflow:hidden; min-width:60px; }
+        .fr-sidebar-size { background:linear-gradient(135deg,#faf6ee,#fff); border-radius:10px; padding:10px; margin:0 -4px; border:1px solid #f0e8d0; }
+        .fr-size-display { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:7px; }
+        .fr-size-label { font-size:2rem; font-weight:300; color:#1a1108; font-family:'Georgia',serif; line-height:1; }
+        .fr-size-conf { display:flex; align-items:center; gap:5px; }
+        .fr-conf-bar { flex:1; height:3px; background:#eee; border-radius:2px; overflow:hidden; min-width:50px; }
         .fr-conf-fill { height:100%; border-radius:2px; transition:width .4s; }
         .fr-size-range { display:flex; gap:4px; flex-wrap:wrap; }
-        .fr-size-pill { padding:3px 10px; border-radius:20px; font-size:11px; border:1px solid #ddd; color:#888; }
+        .fr-size-pill { padding:2px 8px; border-radius:20px; font-size:10px; border:1px solid #ddd; color:#888; }
         .fr-size-pill--match { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; }
         .fr-profile-chips { display:flex; flex-wrap:wrap; gap:4px; }
         .fr-chip { font-size:10px; padding:3px 8px; border-radius:20px; background:#f0ede8; color:#666; display:flex; align-items:center; gap:4px; }
         .fr-chip-swatch { width:10px; height:10px; border-radius:50%; }
-        .fr-save-btn { width:100%; padding:9px; background:#1a1108; color:#faf9f7; border:none; border-radius:8px; font-size:12px; font-weight:500; cursor:pointer; transition:background .2s; }
+        .fr-save-btn { width:100%; padding:8px; background:#1a1108; color:#faf9f7; border:none; border-radius:7px; font-size:12px; font-weight:500; cursor:pointer; transition:background .2s; }
         .fr-save-btn:hover:not(:disabled) { background:#3d2c14; }
         .fr-save-btn:disabled { opacity:.5; cursor:not-allowed; }
         .fr-save-msg { font-size:11px; margin-top:4px; }
@@ -1402,67 +1754,107 @@ function FittingRoomInner() {
         .fr-save-msg.err { color:#A32D2D; }
         .fr-manual-grid { display:flex; flex-direction:column; gap:6px; }
         .fr-manual-field { display:flex; align-items:center; gap:6px; font-size:11px; color:#888; }
-        .fr-manual-field span:first-child { width:38px; flex-shrink:0; }
-        .fr-manual-field input { flex:1; padding:5px 8px; border:1px solid #e0ddd8; border-radius:6px; font-size:12px; background:#fff; min-width:0; }
+        .fr-manual-field span:first-child { width:36px; flex-shrink:0; }
+        .fr-manual-field input { flex:1; padding:4px 7px; border:1px solid #e0ddd8; border-radius:5px; font-size:12px; background:#fff; min-width:0; }
         .fr-manual-field input:focus { outline:none; border-color:#c9a96e; }
         .fr-manual-unit { color:#bbb; font-size:10px; }
+
+        /* ── Segment gate ── */
+        .sg-wrap { display:flex; flex-direction:column; }
+        .sg-picker { padding:1rem 1.25rem; border-bottom:1px solid #f0ede8; background:#fff; }
+        .sg-label { font-size:11px; font-weight:600; color:#aaa; text-transform:uppercase; letter-spacing:.12em; margin-bottom:8px; }
+        .sg-row { display:flex; gap:6px; }
+        .sg-btn { flex:1; padding:10px 8px; border:1.5px solid #e0ddd8; border-radius:8px; font-size:13px; font-weight:500; color:#888; background:#fff; cursor:pointer; font-family:inherit; transition:all .13s; }
+        .sg-btn:hover { border-color:#c9a96e; }
+        .sg-btn--sel { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; }
+
+        /* ── Panel nav ── */
         .fr-main { display:flex; flex-direction:column; min-height:0; }
-        .fr-panel-nav { display:flex; background:#fff; border-bottom:2px solid #f0ede8; position:sticky; top:72px; z-index:10; overflow-x:auto; }
+        .fr-panel-nav { display:flex; background:#fff; border-bottom:2px solid #f0ede8; position:sticky; top:72px; z-index:10; overflow-x:auto; scrollbar-width:none; }
         .fr-panel-nav::-webkit-scrollbar { display:none; }
-        .fr-panel-tab { flex:1; min-width:100px; padding:14px 10px 12px; border:none; background:none; cursor:pointer; display:flex; align-items:center; gap:8px; position:relative; transition:background .15s; border-bottom:3px solid transparent; margin-bottom:-2px; }
+        .fr-panel-tab { flex:1; min-width:90px; padding:12px 10px 11px; border:none; background:none; cursor:pointer; display:flex; align-items:center; gap:8px; position:relative; transition:background .15s; border-bottom:3px solid transparent; margin-bottom:-2px; }
         .fr-panel-tab:hover { background:#faf9f7; }
         .fr-panel-tab.active { background:#fff8ee; border-bottom-color:#c9a96e; }
         .fr-tab-step { width:20px; height:20px; border-radius:50%; border:1.5px solid #ddd; display:flex; align-items:center; justify-content:center; font-size:10px; color:#aaa; flex-shrink:0; font-weight:600; transition:all .15s; }
         .fr-panel-tab.active .fr-tab-step { background:#c9a96e; border-color:#c9a96e; color:#fff; }
-        .fr-tab-icon { font-size:18px; flex-shrink:0; }
         .fr-tab-text { display:flex; flex-direction:column; align-items:flex-start; min-width:0; }
         .fr-tab-label { font-size:12px; font-weight:600; color:#888; white-space:nowrap; }
         .fr-panel-tab.active .fr-tab-label { color:#1a1108; }
         .fr-tab-sub { font-size:10px; color:#bbb; white-space:nowrap; }
         .fr-panel-tab.active .fr-tab-sub { color:#c9a96e; }
-        .fr-panel-badge { position:absolute; top:8px; right:6px; font-size:9px; background:#c9a96e; color:#fff; padding:1px 5px; border-radius:10px; font-weight:600; }
-        .fr-tab-active-bar { position:absolute; bottom:-2px; left:0; right:0; height:3px; background:#c9a96e; border-radius:2px 2px 0 0; }
+        .fr-panel-badge { margin-left:auto; font-size:9px; background:#c9a96e; color:#fff; padding:2px 6px; border-radius:10px; font-weight:600; white-space:nowrap; }
         .fr-panel-body { flex:1; overflow-y:auto; }
         .fr-panel-content { padding:1.25rem; display:flex; flex-direction:column; gap:1rem; }
-        .fr-panel-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4rem 2rem; gap:12px; text-align:center; }
-        .fr-empty-icon { font-size:2.5rem; }
+        .fr-panel-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:4rem 2rem; gap:10px; text-align:center; }
         .fr-empty-title { font-size:16px; font-weight:500; color:#333; }
         .fr-empty-sub { font-size:13px; color:#999; line-height:1.6; max-width:320px; }
+
+        /* ── Tab row inside panel ── */
         .fr-tab-row { display:flex; border-bottom:1px solid #f0ede8; margin:-1.25rem -1.25rem 1rem; }
-        .fr-tab { flex:1; padding:11px; font-size:12px; font-weight:500; border:none; background:none; cursor:pointer; color:#aaa; border-bottom:2px solid transparent; transition:all .15s; }
+        .fr-tab { flex:1; padding:11px; font-size:12px; font-weight:500; border:none; background:none; cursor:pointer; color:#aaa; border-bottom:2px solid transparent; transition:all .15s; font-family:inherit; }
         .fr-tab.active { color:#1a1108; border-bottom-color:#c9a96e; }
-        .fr-cam-area { position:relative; background:#111; border-radius:10px; overflow:hidden; aspect-ratio:4/3; max-height:320px; }
+
+        /* ── Scanner layout ── */
+        .scan-layout { display:grid; grid-template-columns:1fr 280px; gap:1.25rem; align-items:start; }
+        .scan-cam-wrap { display:flex; flex-direction:column; gap:.75rem; }
+        .fr-cam-area { position:relative; background:#111; border-radius:12px; overflow:hidden; aspect-ratio:4/3; }
         .fr-cam-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
-        .fr-cam-hud { position:absolute; bottom:8px; left:8px; right:8px; background:rgba(0,0,0,.65); border-radius:8px; padding:7px 10px; display:flex; align-items:center; gap:7px; }
+        .cam-ph-icon { color:rgba(255,255,255,.25); }
+        .cam-ph-text { color:rgba(255,255,255,.35); font-size:12px; }
+        .cam-ph-bar { width:120px; height:2px; background:rgba(255,255,255,.1); border-radius:2px; overflow:hidden; }
+        .cam-ph-bar-fill { height:100%; background:#c9a96e; border-radius:2px; animation:cam-load 2s ease-in-out infinite; }
+        @keyframes cam-load { 0%{width:0;opacity:1} 80%{width:100%;opacity:1} 100%{width:100%;opacity:0} }
+        .cam-conf-ring-wrap { position:absolute; top:10px; right:10px; }
+        .fr-cam-hud { position:absolute; bottom:8px; left:8px; right:8px; background:rgba(0,0,0,.65); border-radius:8px; padding:7px 10px; display:flex; align-items:center; gap:7px; backdrop-filter:blur(4px); }
         .fr-hud-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; transition:background .3s; }
-        .fr-hud-text { font-size:11px; color:rgba(255,255,255,.8); flex:1; }
-        .fr-cam-badges { position:absolute; top:8px; left:8px; display:flex; gap:5px; flex-wrap:wrap; }
-        .fr-cam-badge { font-size:10px; font-weight:500; padding:3px 8px; border-radius:12px; display:flex; align-items:center; gap:3px; }
-        .fr-cam-badge--shape { background:rgba(26,17,8,.75); color:#fff; }
-        .fr-cam-badge--tone  { background:rgba(26,17,8,.75); color:#fff; }
-        .fr-scan-detects { display:flex; gap:8px; padding:8px 0 4px; flex-wrap:wrap; }
-        .fr-detect-item { font-size:11px; color:#888; background:#f5f0e8; padding:3px 10px; border-radius:20px; }
+        .fr-hud-text { font-size:11px; color:rgba(255,255,255,.8); flex:1; line-height:1.3; }
+        .fr-cam-badges { position:absolute; top:10px; left:10px; display:flex; gap:4px; flex-wrap:wrap; }
+        .fr-cam-badge { font-size:10px; font-weight:500; padding:3px 8px; border-radius:12px; background:rgba(26,17,8,.8); color:#fff; display:flex; align-items:center; gap:3px; backdrop-filter:blur(4px); }
+        .scan-controls { display:flex; flex-direction:column; gap:8px; }
+        .scan-btn-full { width:100%; justify-content:center; }
+        .scan-btn-pair { display:flex; gap:7px; }
+        .scan-btn-pair .fr-btn { flex:1; justify-content:center; }
+        .scan-locked { background:#faf9f7; border:1px solid #f0ede8; border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:10px; }
+        .scan-locked-header { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+        .scan-locked-detections { display:flex; gap:6px; flex-wrap:wrap; }
+        .scan-detection-tag { display:flex; align-items:center; gap:5px; font-size:11px; color:#888; background:#f0ede8; padding:3px 8px; border-radius:12px; }
+
+        /* Scanner info column */
+        .scan-info-col { display:flex; flex-direction:column; gap:.75rem; }
+        .scan-tip-card { background:#fff8ee; border:1px solid #f0e0b0; border-radius:10px; padding:14px; }
+        .scan-tip-heading { font-size:12px; font-weight:600; color:#7a5a1a; margin-bottom:5px; }
+        .scan-tip-body { font-size:12px; color:#9a7030; line-height:1.5; }
+        .scan-live-est { background:#fff; border:1px solid #f0ede8; border-radius:10px; padding:14px; }
+        .scan-live-heading { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:#aaa; margin-bottom:10px; }
+        .scan-live-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+        .scan-live-item { text-align:center; }
+        .scan-live-label { display:block; font-size:10px; color:#aaa; margin-bottom:3px; }
+        .scan-live-val { display:block; font-size:16px; font-weight:500; color:#1a1108; font-family:'Georgia',serif; }
+        .scan-conf-bar-wrap { display:flex; align-items:center; gap:8px; }
+        .scan-conf-track { flex:1; height:4px; background:#f0ede8; border-radius:2px; overflow:hidden; }
+        .scan-conf-fill { height:100%; border-radius:2px; transition:width .4s, background .4s; }
+        .scan-conf-label { font-size:11px; font-weight:600; min-width:30px; text-align:right; }
+        .scan-detects-list { background:#fff; border:1px solid #f0ede8; border-radius:10px; padding:14px; }
+        .scan-detects-heading { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:#aaa; margin-bottom:10px; }
+        .scan-detect-row { display:flex; align-items:center; gap:8px; font-size:12px; color:#666; padding:4px 0; }
+        .scan-detect-dot { width:4px; height:4px; border-radius:50%; background:#c9a96e; flex-shrink:0; }
+
+        /* ── Shared form elements ── */
         .fr-scan-body { display:flex; flex-direction:column; gap:.75rem; }
-        .fr-scan-tip { font-size:12px; color:#666; line-height:1.5; padding:8px 10px; background:#f5f0e8; border-radius:7px; border-left:2px solid #c9a96e; }
-        .fr-locked-header { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-        .fr-locked-detections { display:flex; gap:8px; flex-wrap:wrap; }
-        .fr-tone-detected { display:flex; align-items:center; gap:6px; font-size:11px; color:#888; background:#f9f7f5; padding:3px 8px; border-radius:12px; }
-        .fr-tone-dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
         .fr-field-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
         .fr-field-row--half { grid-template-columns:1fr; max-width:50%; }
-        .fr-field { display:flex; flex-direction:column; gap:3px; }
-        .fr-field label { font-size:11px; color:#888; }
-        .fr-field input { padding:7px 9px; border:1px solid #e0ddd8; border-radius:7px; font-size:13px; background:#fff; }
+        .fr-field { display:flex; flex-direction:column; gap:4px; }
+        .fr-field label { font-size:11px; color:#888; font-weight:500; }
+        .fr-field input { padding:8px 10px; border:1px solid #e0ddd8; border-radius:7px; font-size:13px; background:#fff; font-family:inherit; }
         .fr-field input:focus { outline:none; border-color:#c9a96e; box-shadow:0 0 0 2px rgba(201,169,110,.12); }
         .fr-field-err { font-size:10px; color:#A32D2D; }
         .fr-btn-row { display:flex; gap:7px; flex-wrap:wrap; }
-        .fr-btn { padding:8px 14px; border-radius:7px; font-size:12px; font-weight:500; cursor:pointer; border:1px solid #ddd; background:#fff; color:#333; display:inline-flex; align-items:center; gap:5px; text-decoration:none; transition:background .15s; }
+        .fr-btn { padding:8px 14px; border-radius:7px; font-size:12px; font-weight:500; cursor:pointer; border:1px solid #ddd; background:#fff; color:#333; display:inline-flex; align-items:center; gap:5px; text-decoration:none; transition:background .15s; font-family:inherit; }
         .fr-btn:hover:not(:disabled) { background:#f5f5f5; }
         .fr-btn:disabled { opacity:.4; cursor:not-allowed; }
         .fr-btn--primary { background:#1a1108; border-color:#1a1108; color:#faf9f7; }
         .fr-btn--primary:hover:not(:disabled) { background:#3d2c14; }
         .fr-btn--ghost { background:transparent; border-color:#e0ddd8; color:#666; }
-        .fr-btn--outline { border-color:#c9a96e; color:#7a5a1a; background:transparent; }
         .fr-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:500; }
         .fr-badge--ok { background:#eaf3de; color:#27500a; border:1px solid #97c459; }
         .fr-alert { font-size:12px; padding:9px 12px; border-radius:7px; line-height:1.4; }
@@ -1471,17 +1863,18 @@ function FittingRoomInner() {
         .fr-note { font-size:11px; color:#aaa; line-height:1.5; }
         .fr-spin { display:inline-block; width:11px; height:11px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite; }
         @keyframes spin { to { transform:rotate(360deg); } }
+
+        /* ── Size panel ── */
         .fr-size-hero { display:flex; justify-content:space-between; align-items:flex-end; padding:1.25rem; background:linear-gradient(135deg,#faf6ee,#fff7f0); border-radius:10px; margin:-1.25rem -1.25rem 0; }
         .fr-size-hero-label { font-size:10px; color:#aaa; text-transform:uppercase; letter-spacing:.15em; margin-bottom:4px; }
         .fr-size-hero-value { font-size:3.5rem; font-weight:300; color:#1a1108; line-height:1; font-family:'Georgia',serif; }
         .fr-size-hero-supplier { font-size:11px; color:#c9a96e; margin-top:2px; }
-        .fr-size-conf-block .fr-size-hero-label { font-size:10px; color:#aaa; }
         .fr-size-conf-pct { font-size:1.4rem; font-weight:500; }
         .fr-conf-bar-wrap { margin-top:-.5rem; }
         .fr-conf-bar-track { height:3px; background:#f0ede8; border-radius:2px; overflow:hidden; }
         .fr-conf-bar-fill { height:100%; border-radius:2px; transition:width .5s; }
-        .fr-size-section { }
-        .fr-size-section-label { font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:#aaa; margin-bottom:8px; }
+        .fr-size-section { display:flex; flex-direction:column; gap:8px; }
+        .fr-size-section-label { font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:#aaa; }
         .fr-size-pills { display:flex; gap:6px; flex-wrap:wrap; }
         .fr-size-pill-lg { padding:6px 16px; border-radius:20px; font-size:13px; font-weight:500; border:1px solid #e0ddd8; color:#888; }
         .fr-size-pill-lg.match { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; }
@@ -1494,15 +1887,17 @@ function FittingRoomInner() {
         .fr-size-chart-ref { background:#faf6ee; border-radius:8px; padding:10px 14px; }
         .fr-chart-row { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:#7a5a1a; }
         .fr-full-chart { border:1px solid #f0ede8; border-radius:8px; overflow:hidden; font-size:12px; }
-        .fr-chart-header { display:grid; grid-template-columns:60px 1fr 1fr 1fr; padding:8px 12px; background:#f9f7f5; color:#aaa; font-size:10px; text-transform:uppercase; letter-spacing:.1em; }
-        .fr-chart-row-item { display:grid; grid-template-columns:60px 1fr 1fr 1fr; padding:7px 12px; border-top:1px solid #f5f3ef; color:#666; }
+        .fr-chart-header { display:grid; grid-template-columns:70px 1fr 1fr 1fr; padding:8px 12px; background:#f9f7f5; color:#aaa; font-size:10px; text-transform:uppercase; letter-spacing:.1em; }
+        .fr-chart-row-item { display:grid; grid-template-columns:70px 1fr 1fr 1fr; padding:7px 12px; border-top:1px solid #f5f3ef; color:#666; }
         .fr-chart-row-item--match { background:#fff8ee; color:#7a5a1a; }
         .fr-chart-size-label { font-weight:500; color:#1a1108; }
-        .fr-style-section { }
-        .fr-style-section-title { font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:#aaa; margin-bottom:10px; }
-        .fr-scan-detected-note { font-size:11px; color:#c9a96e; margin:-4px 0 10px; display:flex; align-items:center; gap:4px; }
+
+        /* ── Style panel ── */
+        .fr-style-section { display:flex; flex-direction:column; gap:8px; }
+        .fr-style-section-title { font-size:10px; text-transform:uppercase; letter-spacing:.2em; color:#aaa; }
+        .fr-scan-detected-note { font-size:11px; color:#c9a96e; }
         .fr-shape-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
-        .fr-shape-card { padding:10px 6px 8px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:4px; transition:all .15s; }
+        .fr-shape-card { padding:10px 6px 8px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:4px; transition:all .15s; font-family:inherit; }
         .fr-shape-card:hover { border-color:#c9a96e; background:#faf6ee; }
         .fr-shape-card.sel { background:#fff8ee; border-color:#c9a96e; box-shadow:0 0 0 2px rgba(201,169,110,.15); }
         .fr-shape-figure { height:52px; display:flex; align-items:center; justify-content:center; }
@@ -1511,7 +1906,7 @@ function FittingRoomInner() {
         .fr-shape-card.sel .fr-shape-card-label { color:#7a5a1a; }
         .fr-shape-card-desc { font-size:9px; color:#aaa; text-align:center; line-height:1.3; }
         .fr-tone-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
-        .fr-tone-card { padding:10px 6px 8px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:5px; transition:all .15s; }
+        .fr-tone-card { padding:10px 6px 8px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:5px; transition:all .15s; font-family:inherit; }
         .fr-tone-card:hover { border-color:#c9a96e; }
         .fr-tone-card.sel { background:#fff8ee; border-color:#c9a96e; box-shadow:0 0 0 2px rgba(201,169,110,.15); }
         .fr-tone-swatch-lg { width:36px; height:36px; border-radius:50%; border:2px solid rgba(0,0,0,.08); display:block; }
@@ -1519,7 +1914,7 @@ function FittingRoomInner() {
         .fr-tone-card.sel .fr-tone-card-label { color:#7a5a1a; }
         .fr-tone-card-desc { font-size:9px; color:#aaa; text-align:center; line-height:1.3; }
         .fr-undertone-cards { display:flex; gap:8px; }
-        .fr-undertone-card { flex:1; padding:10px 12px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; align-items:center; gap:10px; transition:all .15s; }
+        .fr-undertone-card { flex:1; padding:10px 12px; border:1.5px solid #e0ddd8; border-radius:10px; cursor:pointer; background:#fff; display:flex; align-items:center; gap:10px; transition:all .15s; font-family:inherit; }
         .fr-undertone-card:hover { border-color:#c9a96e; }
         .fr-undertone-card.sel { background:#fff8ee; border-color:#c9a96e; }
         .fr-undertone-swatch { width:22px; height:22px; border-radius:50%; border:1.5px solid rgba(0,0,0,.1); flex-shrink:0; }
@@ -1527,8 +1922,7 @@ function FittingRoomInner() {
         .fr-undertone-card.sel .fr-undertone-card-label { color:#7a5a1a; }
         .fr-undertone-card-desc { font-size:10px; color:#aaa; display:block; line-height:1.3; }
         .fr-occasion-row { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
-        .fr-occasion-btn { padding:10px 8px; border:1.5px solid #e0ddd8; border-radius:8px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:4px; font-size:11px; color:#666; transition:all .15s; }
-        .fr-occasion-icon { font-size:20px; }
+        .fr-occasion-btn { padding:10px 8px; border:1.5px solid #e0ddd8; border-radius:8px; cursor:pointer; background:#fff; display:flex; flex-direction:column; align-items:center; gap:4px; font-size:11px; color:#666; transition:all .15s; font-family:inherit; }
         .fr-occasion-btn:hover { border-color:#c9a96e; }
         .fr-occasion-btn.sel { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; font-weight:500; }
         .fr-refine-toggle { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid #f0ede8; border-bottom:1px solid #f0ede8; cursor:pointer; font-size:12px; font-weight:500; color:#888; user-select:none; }
@@ -1537,18 +1931,18 @@ function FittingRoomInner() {
         .fr-refine-arrow.open { transform:rotate(180deg); }
         .fr-refine-content { display:flex; flex-direction:column; gap:.75rem; padding-top:.75rem; }
         .fr-color-row { display:flex; flex-wrap:wrap; gap:6px; }
-        .fr-color-btn { display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 8px; border:1.5px solid #e0ddd8; border-radius:8px; cursor:pointer; background:#fff; font-size:10px; color:#888; transition:all .15s; }
+        .fr-color-btn { display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 8px; border:1.5px solid #e0ddd8; border-radius:8px; cursor:pointer; background:#fff; font-size:10px; color:#888; transition:all .15s; font-family:inherit; }
         .fr-color-btn.sel { border-color:#c9a96e; background:#fff8ee; }
         .fr-color-swatch { width:28px; height:28px; border-radius:50%; border:1px solid rgba(0,0,0,.08); }
         .fr-fabric-row { display:flex; flex-wrap:wrap; gap:5px; }
-        .fr-fabric-btn { padding:5px 11px; border:1px solid #e0ddd8; border-radius:20px; font-size:11px; cursor:pointer; color:#888; background:#fff; transition:all .15s; }
+        .fr-fabric-btn { padding:5px 11px; border:1px solid #e0ddd8; border-radius:20px; font-size:11px; cursor:pointer; color:#888; background:#fff; transition:all .15s; font-family:inherit; }
         .fr-fabric-btn.sel { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; }
         .fr-budget-row { display:flex; flex-direction:column; gap:5px; }
-        .fr-budget-btn { padding:8px 12px; border:1px solid #e0ddd8; border-radius:7px; font-size:12px; cursor:pointer; color:#666; background:#fff; text-align:left; transition:all .15s; }
+        .fr-budget-btn { padding:8px 12px; border:1px solid #e0ddd8; border-radius:7px; font-size:12px; cursor:pointer; color:#666; background:#fff; text-align:left; transition:all .15s; font-family:inherit; }
         .fr-budget-btn.sel { background:#fff8ee; border-color:#c9a96e; color:#7a5a1a; font-weight:500; }
         .fr-style-empty { padding:1.5rem; text-align:center; color:#bbb; font-size:13px; background:#f9f7f5; border-radius:8px; }
-        .fr-style-results { }
-        .fr-results-label { font-size:11px; color:#aaa; margin-bottom:10px; }
+        .fr-style-results { display:flex; flex-direction:column; gap:.75rem; }
+        .fr-results-label { font-size:11px; color:#aaa; }
         .fr-gown-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; }
         .fr-gown-card { border:1px solid #f0ede8; border-radius:10px; overflow:hidden; background:#fff; animation:fadeIn .3s ease both; }
         @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
@@ -1574,34 +1968,119 @@ function FittingRoomInner() {
         .fr-gown-btn--ghost:hover { background:#f5f3ef; }
         .fr-gown-btn--primary { background:#1a1108; color:#faf9f7; border:1px solid #1a1108; }
         .fr-gown-btn--primary:hover { background:#3d2c14; }
+
+        /* ── Try-on ── */
         .fr-tryon-layout { height:calc(100vh - 152px); min-height:600px; display:flex; flex-direction:column; }
+
+        /* ────────────────────────────────────────────────────────
+           RESPONSIVE
+        ──────────────────────────────────────────────────────── */
+
+        /* Tablet — 1024px and below */
+        @media (max-width:1024px) {
+          .fr-layout { grid-template-columns:190px 1fr; }
+          .scan-layout { grid-template-columns:1fr 220px; }
+        }
+
+        /* Narrow tablet / large phone — 860px and below */
         @media (max-width:860px) {
+          /* Layout collapses to single column */
           .fr-layout { grid-template-columns:1fr; }
-          .fr-sidebar { position:static; height:auto; flex-direction:row; flex-wrap:wrap; gap:8px; padding:10px 12px; border-right:none; border-bottom:1px solid #eee; overflow:visible; }
-          .fr-sidebar-header { width:100%; padding-bottom:8px; border-bottom:none; }
-          .fr-sidebar-section { padding:6px 0; border-bottom:none; min-width:130px; flex:1; }
+
+          /* Sidebar becomes a compact horizontal strip */
+          .fr-sidebar {
+            position:static; height:auto;
+            display:grid;
+            grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+            gap:0;
+            padding:10px 12px;
+            border-right:none;
+            border-bottom:1px solid #eee;
+            overflow:visible;
+          }
+          .fr-sidebar-header { grid-column:1/-1; padding-bottom:6px; border-bottom:1px solid #f0ede8; margin-bottom:4px; }
+          .fr-sidebar-section { padding:6px 8px; border-bottom:none; border-right:1px solid #f0ede8; }
+          .fr-sidebar-section:last-child { border-right:none; }
           .fr-sidebar-manual { display:none; }
-          .fr-panel-nav { position:fixed; bottom:0; left:0; right:0; top:auto; z-index:100; border-top:1px solid #eee; border-bottom:none; box-shadow:0 -2px 12px rgba(0,0,0,.06); }
-          .fr-panel-tab { flex-direction:column; gap:2px; padding:8px 4px 6px; align-items:center; }
+
+          /* Panel nav moves to bottom */
+          .fr-panel-nav {
+            position:fixed; bottom:0; left:0; right:0; top:auto;
+            z-index:100; border-top:1px solid #eee; border-bottom:none;
+            box-shadow:0 -2px 12px rgba(0,0,0,.06);
+          }
+          .fr-panel-tab { flex-direction:column; gap:2px; padding:8px 4px 6px; align-items:center; min-width:0; }
           .fr-tab-step { display:none; }
           .fr-tab-text { align-items:center; }
           .fr-tab-sub { display:none; }
-          .fr-tab-icon { font-size:20px; }
           .fr-tab-label { font-size:10px; }
-          .fr-main { padding-bottom:64px; }
-          .fr-tryon-layout { height:auto; }
-          .fr-shape-grid { grid-template-columns:repeat(4,1fr); gap:5px; }
-          .fr-tone-grid { grid-template-columns:repeat(4,1fr); gap:5px; }
-          .fr-undertone-cards { flex-direction:column; }
+          .fr-panel-badge { position:absolute; top:6px; right:6px; margin-left:0; font-size:8px; padding:1px 4px; }
+          .fr-main { padding-bottom:60px; }
+
+          /* Scanner goes single column */
+          .scan-layout { grid-template-columns:1fr; }
+          .scan-info-col { display:grid; grid-template-columns:1fr 1fr; gap:.75rem; }
+
+          /* Try-on height */
+          .fr-tryon-layout { height:auto; min-height:400px; }
+
+          /* Segment gate picker larger touch targets */
+          .sg-btn { padding:12px 8px; }
+
+          /* Shape grid tighter */
+          .fr-shape-grid { grid-template-columns:repeat(4,1fr); gap:6px; }
+          .fr-tone-grid  { grid-template-columns:repeat(4,1fr); gap:6px; }
         }
-        @media (max-width:580px) {
+
+        /* Phone — 640px and below */
+        @media (max-width:640px) {
+          .fr-hero { padding:1.5rem 1rem; }
+          .fr-panel-content { padding:.875rem; }
+
+          .fr-sidebar {
+            grid-template-columns:1fr;
+            padding:8px 12px;
+          }
+          .fr-sidebar-section { border-right:none; border-bottom:1px solid #f0ede8; }
+          .fr-sidebar-section:last-child { border-bottom:none; }
+
+          .sg-picker { padding:.875rem; }
+          .sg-btn { padding:11px 6px; font-size:12px; }
+
+          .scan-info-col { grid-template-columns:1fr; }
+          .scan-live-grid { grid-template-columns:repeat(3,1fr); }
+
           .fr-field-row { grid-template-columns:1fr; }
           .fr-field-row--half { max-width:100%; }
+
           .fr-occasion-row { grid-template-columns:repeat(2,1fr); }
           .fr-gown-grid { grid-template-columns:1fr 1fr; }
           .fr-shape-grid { grid-template-columns:repeat(3,1fr); }
-          .fr-tone-grid { grid-template-columns:repeat(4,1fr); }
+          .fr-tone-grid  { grid-template-columns:repeat(4,1fr); }
+          .fr-undertone-cards { flex-direction:column; }
+
+          .fr-size-hero { flex-direction:column; align-items:flex-start; gap:12px; padding:1rem; }
+          .fr-size-hero-value { font-size:2.5rem; }
         }
+
+
+        .scan-tip-height-hint {
+          font-size: 11px;
+          color: #c9a96e;
+          margin-top: 6px;
+          font-weight: 500;
+          line-height: 1.4;
+        }
+
+        /* Very small phone — 400px and below */
+        @media (max-width:400px) {
+          .fr-shape-grid { grid-template-columns:repeat(2,1fr); }
+          .fr-tone-grid  { grid-template-columns:repeat(3,1fr); }
+          .fr-gown-grid  { grid-template-columns:1fr; }
+          .scan-btn-pair { flex-direction:column; }
+        }
+
+        
       `}</style>
     </main>
   )
@@ -1619,15 +2098,21 @@ export default function FittingRoomPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/gowns').then(r=>r.json()).then(d=>setGowns((d.gowns||[]).filter(g=>g.image))).catch(()=>{}),
-      fetch('/api/size-chart').then(r=>r.json()).then(d=>{if(d.ok){setSizes(d.sizes);setSupplierName(d.supplierName||'')}}).catch(()=>{}),
+      fetch('/api/gowns')
+        .then(r => r.json())
+        .then(d => setGowns((d.gowns || []).filter(g => g.image)))
+        .catch(() => {}),
+      fetch('/api/size-chart?segment=women')
+        .then(r => r.json())
+        .then(d => { if (d.ok) { setSizes(d.sizes); setSupplierName(d.supplierName || '') } })
+        .catch(() => {}),
     ]).finally(() => setReady(true))
   }, [])
 
   if (!ready) return <SkeletonLoader/>
 
   return (
-    <FittingRoomProvider gowns={gowns} sizes={sizes} supplierName={supplierName}>
+    <FittingRoomProvider gowns={gowns} initialSizes={sizes} initialSupplierName={supplierName}>
       <FittingRoomInner/>
     </FittingRoomProvider>
   )
