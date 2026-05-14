@@ -73,10 +73,10 @@ export const PRESET_SIZES_BY_SEGMENT = {
 //   when user height is not available. When height IS known, prefer:
 //   torsoAnchorCm = userHeight / torsoHeightDivisor
 export const CAMERA_MULTS = {
-  bust:          1.85,   // shoulder → chest circumference
-  waist:         1.55,   // narrowed torso → waist circumference
-  hip:           1.95,   // hip landmark span → hip circumference
-  torsoAnchorCm: 42,     // fallback when no height entered
+  bust:          2.30,   // was 1.85 — shoulder span → bust circumference
+  waist:         1.85,   // was 1.55 — narrowed torso → waist circumference  
+  hip:           2.80,   // was 1.95 — hip landmark span → hip circumference
+  torsoAnchorCm: 50,     // was 42 — adult shoulder→hip torso height fallback
 }
 
 // ── Column header labels per segment (for size chart display) ────────────────
