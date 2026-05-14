@@ -14,11 +14,10 @@ export default function AdminDashboardPage() {
   const [ready,        setReady       ] = useState(false)
   const [orderStats,   setOrderStats  ] = useState(null)
   const [gownCount,    setGownCount   ] = useState(null)
-  const [secretPrompt, setSecretPrompt] = useState(false)   // show the secret input box?
+  const [secretPrompt, setSecretPrompt] = useState(false)
   const [secretInput,  setSecretInput ] = useState('')
   const [secretError,  setSecretError ] = useState('')
 
-  // ── Auth guard ────────────────────────────────────────────────────────────
   useEffect(() => {
     const u = getCurrentUser()
     if (!u || !['admin', 'staff'].includes(u.role)) { router.replace('/login'); return }
@@ -27,11 +26,10 @@ export default function AdminDashboardPage() {
     setReady(true)
   }, [router])
 
-  // ── Data fetch ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!ready) return
     const secret = getAdminSecret()
-    if (!secret) { setSecretPrompt(true); return }   // no secret stored → show prompt
+    if (!secret) { setSecretPrompt(true); return }
     loadData(secret)
   }, [ready])
 
@@ -50,7 +48,6 @@ export default function AdminDashboardPage() {
           .reduce((s, o) => s + Number(o.total || 0), 0)
         setOrderStats({ total: orders.length, counts, revenue })
       } else if (od?.error === 'unauthorized') {
-        // Stored secret is wrong → force re-prompt
         setSecretError('Incorrect secret. Please try again.')
         setSecretPrompt(true)
       }
@@ -80,7 +77,6 @@ export default function AdminDashboardPage() {
         {user && <p className="adm-dash-user">Signed in as {user.email}</p>}
       </div>
 
-      {/* ── Secret prompt / change-secret ── */}
       {secretPrompt ? (
         <form className="adm-secret-prompt" onSubmit={handleSecretSubmit}>
           <p className="adm-secret-title">Enter admin secret</p>
@@ -146,12 +142,13 @@ export default function AdminDashboardPage() {
 
       <div className="adm-nav-cards">
         {[
-          { href: '/admin/gowns',         title: 'Catalogue',       desc: 'Add, edit, or remove listings.'           },
-          { href: '/admin/orders',        title: 'Orders',          desc: 'View and manage all orders.'              },
-          { href: '/admin/dashboard',     title: 'Sales dashboard', desc: 'Revenue charts and analytics.'            },
-          { href: '/admin/users',         title: 'Users',           desc: 'View registered accounts.'                },
-          { href: '/admin/contents',      title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'   },
-          { href: '/admin/change-secret', title: 'Change secret',   desc: 'Update the admin secret with 2FA verification.' },
+          { href: '/admin/gowns',         title: 'Catalogue',       desc: 'Add, edit, or remove listings.'                        },
+          { href: '/admin/orders',        title: 'Orders',          desc: 'View and manage all orders.'                           },
+          { href: '/admin/dashboard',     title: 'Sales dashboard', desc: 'Revenue charts and analytics.'                         },
+          { href: '/admin/users',         title: 'Users',           desc: 'View registered accounts.'                             },
+          { href: '/admin/contents',      title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'                },
+          { href: '/admin/audit',         title: 'Audit trail',     desc: 'Append-only log of all admin mutations and events.'    },
+          { href: '/admin/change-secret', title: 'Change secret',   desc: 'Update the admin secret with 2FA verification.'       },
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">
             <div className="adm-nav-card-title">{title}</div>

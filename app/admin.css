@@ -2672,3 +2672,227 @@
 [data-adm-theme="light"] .adm-stat-val-purple { color: #4f46e5; }
 [data-adm-theme="light"] .adm-stat-val-green  { color: #166534; }
 [data-adm-theme="light"] .adm-stat-val-amber  { color: #92400e; }
+
+/* ============================================================
+   AUDIT PAGE
+   Append this block to the existing admin.css
+   ============================================================ */
+
+/* ── Page layout ─────────────────────────────────────────── */
+.adm-audit-page {
+  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Count badge in the topbar */
+.adm-audit-count-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--adm-surface-alt);
+  border: 1.5px solid var(--adm-border-em);
+  color: var(--adm-text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Filter form ─────────────────────────────────────────── */
+.adm-audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+}
+
+.adm-audit-filters .adm-form-row {
+  flex: 1;
+  min-width: 140px;
+}
+
+.adm-audit-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-shrink: 0;
+  padding-bottom: 0;
+}
+
+/* ── Table wrapper ───────────────────────────────────────── */
+.adm-audit-table-wrap {
+  background: var(--adm-surface);
+  border: 1px solid var(--adm-border);
+  border-radius: var(--adm-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--adm-shadow-sm);
+}
+
+.adm-audit-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.adm-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* ── Table head ──────────────────────────────────────────── */
+.adm-audit-th {
+  text-align: left;
+  padding: 11px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--adm-text-3);
+  background: var(--adm-surface-alt);
+  border-bottom: 1px solid var(--adm-border-em);
+  white-space: nowrap;
+}
+
+/* ── Table rows ──────────────────────────────────────────── */
+.adm-audit-tr {
+  background: var(--adm-surface);
+  border-bottom: 1px solid var(--adm-border);
+  transition: background 0.12s;
+}
+
+.adm-audit-tr--alt {
+  background: var(--adm-surface-alt);
+}
+
+.adm-audit-tr:last-child {
+  border-bottom: none;
+}
+
+.adm-audit-tr:hover {
+  background: var(--adm-accent-bg);
+}
+
+/* ── Table cells ─────────────────────────────────────────── */
+.adm-audit-td {
+  padding: 11px 14px;
+  vertical-align: top;
+}
+
+.adm-audit-td--nowrap { white-space: nowrap; }
+
+.adm-audit-td--payload { max-width: 280px; }
+
+/* Cell content atoms */
+.adm-audit-ts {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--adm-text-2);
+  white-space: nowrap;
+}
+
+.adm-audit-actor {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--adm-text);
+  word-break: break-all;
+}
+
+.adm-audit-entity-type {
+  font-size: 12px;
+  color: var(--adm-text-3);
+}
+
+.adm-audit-entity-id {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--adm-text-3);
+  word-break: break-all;
+}
+
+.adm-audit-ip {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--adm-text-3);
+}
+
+/* ── Empty / loading state ───────────────────────────────── */
+.adm-audit-empty {
+  text-align: center;
+  padding: 52px 20px;
+  color: var(--adm-text-3);
+  font-size: 14px;
+}
+
+/* ── Pagination bar ──────────────────────────────────────── */
+.adm-audit-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--adm-border);
+  background: var(--adm-surface-alt);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 680px) {
+  .adm-audit-page {
+    gap: 16px;
+  }
+
+  /* Stack filters vertically on mobile */
+  .adm-audit-filters {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .adm-audit-filters .adm-form-row {
+    min-width: 100%;
+  }
+
+  .adm-audit-filter-actions {
+    width: 100%;
+  }
+
+  .adm-audit-filter-actions .adm-btn,
+  .adm-audit-filter-actions .adm-btn-outline {
+    flex: 1;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* Hide less critical columns on small screens */
+  .adm-audit-table .adm-audit-th:nth-child(5),
+  .adm-audit-table .adm-audit-td:nth-child(5),
+  .adm-audit-table .adm-audit-th:nth-child(6),
+  .adm-audit-table .adm-audit-td:nth-child(6) {
+    display: none;
+  }
+
+  .adm-audit-td--payload {
+    max-width: 160px;
+  }
+
+  .adm-audit-count-badge {
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* On very small screens, also hide entity-type column */
+  .adm-audit-table .adm-audit-th:nth-child(4),
+  .adm-audit-table .adm-audit-td:nth-child(4) {
+    display: none;
+  }
+
+  .adm-audit-pagination {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}

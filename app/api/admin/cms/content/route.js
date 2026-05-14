@@ -1,5 +1,9 @@
+// app/api/admin/contents/route.js
+// Audit-instrumented version — logAudit() added to PUT.
+
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 const USE_DB = process.env.USE_DB === 'true'
 
@@ -66,6 +70,17 @@ export async function PUT(request) {
              updated_at = NOW()`,
       [section, JSON.stringify(fields)]
     )
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    // Log which keys changed but not the full field values (can be large/noisy)
+    logAudit({
+      request,
+      action:     'cms.content.update',
+      entityType: 'cms_block',
+      entityId:   section,
+      payload:    { section, updatedKeys: Object.keys(fields) },
+    })
+
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('CMS content PUT error:', err)

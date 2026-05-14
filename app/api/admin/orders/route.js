@@ -1,7 +1,11 @@
+// app/api/admin/orders/route.js
+// Audit-instrumented version — logAudit() added to all PATCH actions.
+
 import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'orders.json')
@@ -25,7 +29,6 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url)
   const filterStatus = searchParams.get('status') || ''
 
-  // ── JSON path ───────────────────────────────────────────────────────────────
   if (!USE_DB) {
     let orders = loadJson()
     if (filterStatus) orders = orders.filter(o => o.status === filterStatus)
@@ -55,7 +58,6 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, orders })
   }
 
-  // ── DB path ─────────────────────────────────────────────────────────────────
   try {
     const { query } = await import('@/lib/db')
     const rows = await query(`
@@ -116,11 +118,6 @@ export async function GET(request) {
 }
 
 // ── PATCH /api/admin/orders ───────────────────────────────────────────────────
-// Body: { action, orderId, ...actionPayload }
-// actions:
-//   'status'         — { status, note? }
-//   'verify-payment' — { referenceNo? }
-//   'reject-payment' — { reason? }
 
 export async function PATCH(request) {
   if (!await checkAdminAuth(request)) {
@@ -146,16 +143,13 @@ export async function PATCH(request) {
       if (!status || !VALID.includes(status))
         return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 })
 
-      all[idx].status = status
+      const prevStatus = all[idx].status
+      all[idx].status  = status
 
-      // Mark payment as paid when:
-      // 1. Status explicitly set to 'paid' or 'completed'
-      // 2. Cash-on-pickup advancing to any post-placed status (payment happens at pickup)
       const isCashPickup = all[idx].deliveryMethod === 'pickup' && all[idx].paymentMethod === 'cash'
       if (
-        status === 'paid' ||
-        status === 'completed' ||
-        (isCashPickup && ['processing', 'ready', 'shipped', 'completed'].includes(status))
+        status === 'paid' || status === 'completed' ||
+        (isCashPickup && ['processing','ready','shipped','completed'].includes(status))
       ) {
         all[idx].paymentStatus = 'paid'
       }
@@ -163,15 +157,25 @@ export async function PATCH(request) {
       all[idx].updatedAt = new Date().toISOString()
       saveJson(all)
       sendStatusEmail(all[idx], status, note).catch(console.error)
+
+      // ── AUDIT ──────────────────────────────────────────────────────────────
+      logAudit({
+        request,
+        action:     'order.status',
+        entityType: 'order',
+        entityId:   String(orderId),
+        payload:    {
+          orderNumber: all[idx].orderNumber || null,
+          from:        prevStatus,
+          to:          status,
+          note:        note || null,
+        },
+      })
+
       return NextResponse.json({ ok: true, order: all[idx] })
     }
 
     if (action === 'verify-payment') {
-      // ── GUARD: require proof to exist before verifying ───────────────────
-      // Prevents marking an order paid when no proof was uploaded.
-      // This closes a race-condition where the ProofModal could be submitted
-      // before its internal proof-fetch completed, leaving proofImage falsy
-      // client-side but the server accepting the request anyway.
       const hasProof = all[idx].proofImage || all[idx].proofReferenceNo
       if (!hasProof) {
         return NextResponse.json(
@@ -187,11 +191,24 @@ export async function PATCH(request) {
       all[idx].updatedAt        = new Date().toISOString()
       saveJson(all)
       sendVerifyEmail(all[idx]).catch(console.error)
+
+      // ── AUDIT ──────────────────────────────────────────────────────────────
+      logAudit({
+        request,
+        action:     'order.payment.verify',
+        entityType: 'order',
+        entityId:   String(orderId),
+        payload:    {
+          orderNumber:  all[idx].orderNumber || null,
+          referenceNo:  referenceNo || null,
+          customerEmail: all[idx].customerEmail || null,
+        },
+      })
+
       return NextResponse.json({ ok: true, order: all[idx] })
     }
 
     if (action === 'reject-payment') {
-      // ── GUARD: require proof to exist before rejecting ───────────────────
       const hasProof = all[idx].proofImage || all[idx].proofReferenceNo
       if (!hasProof) {
         return NextResponse.json(
@@ -206,6 +223,20 @@ export async function PATCH(request) {
       all[idx].updatedAt     = new Date().toISOString()
       saveJson(all)
       sendRejectEmail(all[idx], reason).catch(console.error)
+
+      // ── AUDIT ──────────────────────────────────────────────────────────────
+      logAudit({
+        request,
+        action:     'order.payment.reject',
+        entityType: 'order',
+        entityId:   String(orderId),
+        payload:    {
+          orderNumber:  all[idx].orderNumber || null,
+          reason:       reason || null,
+          customerEmail: all[idx].customerEmail || null,
+        },
+      })
+
       return NextResponse.json({ ok: true, order: all[idx] })
     }
 
@@ -222,26 +253,20 @@ export async function PATCH(request) {
       if (!status || !VALID.includes(status))
         return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 })
 
-      // Single atomic UPDATE — CASE handles all payment_status transitions:
-      //
-      //  → 'paid' or 'completed'          always mark payment_status = 'paid'
-      //  → 'processing' + cash+pickup     mark paid (customer pays at pickup,
-      //                                   processing confirms order is active)
-      //  → anything else                  leave payment_status unchanged
-      //
-      // This also handles the cancellation / refund path correctly —
-      // those statuses fall into ELSE and do not touch payment_status.
+      // Fetch previous status for the audit diff
+      const prevRows = await query(`SELECT status, order_number FROM orders WHERE id=$1`, [orderId])
+      const prevStatus    = prevRows[0]?.status || null
+      const orderNumber   = prevRows[0]?.order_number || null
+
       const rows = await query(
         `UPDATE orders
          SET
            status         = $1,
            payment_status = CASE
-             WHEN $1 IN ('paid', 'completed')
-               THEN 'paid'
+             WHEN $1 IN ('paid', 'completed') THEN 'paid'
              WHEN $1 = 'processing'
               AND delivery_method = 'pickup'
-              AND payment_method  = 'cash'
-               THEN 'paid'
+              AND payment_method  = 'cash'   THEN 'paid'
              ELSE payment_status
            END,
            updated_at     = NOW()
@@ -254,6 +279,16 @@ export async function PATCH(request) {
         return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
 
       sendStatusEmail(rows[0], status, note).catch(console.error)
+
+      // ── AUDIT ──────────────────────────────────────────────────────────────
+      logAudit({
+        request,
+        action:     'order.status',
+        entityType: 'order',
+        entityId:   String(orderId),
+        payload:    { orderNumber, from: prevStatus, to: status, note: note || null },
+      })
+
       return NextResponse.json({ ok: true })
     }
 
@@ -263,13 +298,9 @@ export async function PATCH(request) {
       try {
         await conn.query('BEGIN')
 
-        // ── GUARD: require an uploaded proof record before verifying ─────────
-        // Checks that the payments row has either an image or a reference number.
-        // Without this, an admin could verify payment on an order where the
-        // customer never uploaded anything (race condition or direct API call).
         const { rows: proofRows } = await conn.query(
           `SELECT id FROM payments
-           WHERE order_id = $1
+           WHERE order_id=$1
              AND (proof_image_url IS NOT NULL OR reference_no IS NOT NULL)
            LIMIT 1`,
           [orderId]
@@ -282,23 +313,17 @@ export async function PATCH(request) {
           )
         }
 
-        // Mark the payment record as verified and store the reference number
         await conn.query(
           `UPDATE payments
-           SET status       = 'verified',
-               reference_no = COALESCE($1, reference_no)
-           WHERE order_id = $2`,
+           SET status='verified', reference_no=COALESCE($1, reference_no)
+           WHERE order_id=$2`,
           [referenceNo || null, orderId]
         )
 
-        // Advance order to 'paid'
         const { rows } = await conn.query(
           `UPDATE orders
-           SET status         = 'paid',
-               payment_status = 'paid',
-               updated_at     = NOW()
-           WHERE id = $1
-           RETURNING *`,
+           SET status='paid', payment_status='paid', updated_at=NOW()
+           WHERE id=$1 RETURNING *`,
           [orderId]
         )
 
@@ -309,6 +334,20 @@ export async function PATCH(request) {
 
         await conn.query('COMMIT')
         sendVerifyEmail(rows[0]).catch(console.error)
+
+        // ── AUDIT ────────────────────────────────────────────────────────────
+        logAudit({
+          request,
+          action:     'order.payment.verify',
+          entityType: 'order',
+          entityId:   String(orderId),
+          payload:    {
+            orderNumber:   rows[0].order_number || null,
+            referenceNo:   referenceNo || null,
+            customerEmail: rows[0].customer_email || null,
+          },
+        })
+
         return NextResponse.json({ ok: true })
       } catch (err) {
         await conn.query('ROLLBACK')
@@ -324,10 +363,9 @@ export async function PATCH(request) {
       try {
         await conn.query('BEGIN')
 
-        // ── GUARD: require an uploaded proof record before rejecting ─────────
         const { rows: proofRows } = await conn.query(
           `SELECT id FROM payments
-           WHERE order_id = $1
+           WHERE order_id=$1
              AND (proof_image_url IS NOT NULL OR reference_no IS NOT NULL)
            LIMIT 1`,
           [orderId]
@@ -341,17 +379,14 @@ export async function PATCH(request) {
         }
 
         await conn.query(
-          `UPDATE payments SET status = 'rejected' WHERE order_id = $1`,
+          `UPDATE payments SET status='rejected' WHERE order_id=$1`,
           [orderId]
         )
 
         const { rows } = await conn.query(
           `UPDATE orders
-           SET status         = 'placed',
-               payment_status = 'unpaid',
-               updated_at     = NOW()
-           WHERE id = $1
-           RETURNING *`,
+           SET status='placed', payment_status='unpaid', updated_at=NOW()
+           WHERE id=$1 RETURNING *`,
           [orderId]
         )
 
@@ -362,6 +397,20 @@ export async function PATCH(request) {
 
         await conn.query('COMMIT')
         sendRejectEmail(rows[0], reason).catch(console.error)
+
+        // ── AUDIT ────────────────────────────────────────────────────────────
+        logAudit({
+          request,
+          action:     'order.payment.reject',
+          entityType: 'order',
+          entityId:   String(orderId),
+          payload:    {
+            orderNumber:   rows[0].order_number || null,
+            reason:        reason || null,
+            customerEmail: rows[0].customer_email || null,
+          },
+        })
+
         return NextResponse.json({ ok: true })
       } catch (err) {
         await conn.query('ROLLBACK')
@@ -385,10 +434,7 @@ async function getTransporter() {
   const nodemailer = (await import('nodemailer')).default
   return nodemailer.createTransport({
     service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
   })
 }
 
@@ -400,54 +446,22 @@ async function sendStatusEmail(order, status, note = '') {
   if (!to) return
 
   const templates = {
-    pending_payment: [
-      `Awaiting payment — ${num}`,
-      `Hi ${name},\n\nWe're waiting for your proof of payment for order ${num}.\n\nPlease upload within 24 hours to avoid cancellation.\n\nJCE Bridal Boutique`,
-    ],
-    paid: [
-      `Payment verified ✓ — ${num}`,
-      `Hi ${name},\n\nYour payment for order ${num} has been verified. We'll now begin preparing your order.\n\nJCE Bridal Boutique`,
-    ],
-    processing: [
-      `Order being prepared — ${num}`,
-      `Hi ${name},\n\nYour order ${num} is now being prepared.\n\nJCE Bridal Boutique`,
-    ],
-    ready: [
-      `Ready for pickup — ${num}`,
-      `Hi ${name},\n\nYour order ${num} is ready! Please visit our store at your earliest convenience.\n\nStore hours: Mon–Sat 9AM–6PM\nAddress: 4I-19 Soler Wing 168 Mall Recto Mla, Manila\n\nJCE Bridal Boutique`,
-    ],
-    shipped: [
-      `Order on its way — ${num}`,
-      `Hi ${name},\n\nOrder ${num} has been dispatched via Lalamove. You will receive it shortly.\n\nJCE Bridal Boutique`,
-    ],
-    completed: [
-      `Order completed — ${num}`,
-      `Hi ${name},\n\nOrder ${num} is complete. We hope you love your gown!\n\nThank you for choosing JCE Bridal Boutique.\n\nWith love,\nJCE Bridal Boutique`,
-    ],
-    cancelled: [
-      `Order cancelled — ${num}`,
-      `Hi ${name},\n\nYour order ${num} has been cancelled.${note ? `\n\nReason: ${note}` : ''}\n\nIf you have questions, please contact us.\n\nJCE Bridal Boutique`,
-    ],
-    refunded: [
-      `Refund processed — ${num}`,
-      `Hi ${name},\n\nA refund for order ${num} has been processed. Please allow 7–14 business days for the amount to reflect.\n\nJCE Bridal Boutique`,
-    ],
+    pending_payment: [`Awaiting payment — ${num}`, `Hi ${name},\n\nWe're waiting for your proof of payment for order ${num}.\n\nPlease upload within 24 hours to avoid cancellation.\n\nJCE Bridal Boutique`],
+    paid:            [`Payment verified ✓ — ${num}`, `Hi ${name},\n\nYour payment for order ${num} has been verified. We'll now begin preparing your order.\n\nJCE Bridal Boutique`],
+    processing:      [`Order being prepared — ${num}`, `Hi ${name},\n\nYour order ${num} is now being prepared.\n\nJCE Bridal Boutique`],
+    ready:           [`Ready for pickup — ${num}`, `Hi ${name},\n\nYour order ${num} is ready! Please visit our store at your earliest convenience.\n\nStore hours: Mon–Sat 9AM–6PM\nAddress: 4I-19 Soler Wing 168 Mall Recto Mla, Manila\n\nJCE Bridal Boutique`],
+    shipped:         [`Order on its way — ${num}`, `Hi ${name},\n\nOrder ${num} has been dispatched via Lalamove. You will receive it shortly.\n\nJCE Bridal Boutique`],
+    completed:       [`Order completed — ${num}`, `Hi ${name},\n\nOrder ${num} is complete. We hope you love your gown!\n\nThank you for choosing JCE Bridal Boutique.\n\nWith love,\nJCE Bridal Boutique`],
+    cancelled:       [`Order cancelled — ${num}`, `Hi ${name},\n\nYour order ${num} has been cancelled.${note ? `\n\nReason: ${note}` : ''}\n\nIf you have questions, please contact us.\n\nJCE Bridal Boutique`],
+    refunded:        [`Refund processed — ${num}`, `Hi ${name},\n\nA refund for order ${num} has been processed. Please allow 7–14 business days for the amount to reflect.\n\nJCE Bridal Boutique`],
   }
 
   const tmpl = templates[status]
   if (!tmpl) return
-
   try {
     const t = await getTransporter()
-    await t.sendMail({
-      from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
-      to,
-      subject: tmpl[0],
-      text:    tmpl[1],
-    })
-  } catch (e) {
-    console.warn('Status email failed:', e.message)
-  }
+    await t.sendMail({ from: `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`, to, subject: tmpl[0], text: tmpl[1] })
+  } catch (e) { console.warn('Status email failed:', e.message) }
 }
 
 async function sendVerifyEmail(order) {
@@ -458,15 +472,8 @@ async function sendVerifyEmail(order) {
   if (!to) return
   try {
     const t = await getTransporter()
-    await t.sendMail({
-      from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
-      to,
-      subject: `Payment verified ✓ — ${num}`,
-      text:    `Hi ${name},\n\nYour payment for order ${num} has been verified. We'll now begin preparing your order.\n\nThank you,\nJCE Bridal Boutique`,
-    })
-  } catch (e) {
-    console.warn('Verify email failed:', e.message)
-  }
+    await t.sendMail({ from: `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`, to, subject: `Payment verified ✓ — ${num}`, text: `Hi ${name},\n\nYour payment for order ${num} has been verified. We'll now begin preparing your order.\n\nThank you,\nJCE Bridal Boutique` })
+  } catch (e) { console.warn('Verify email failed:', e.message) }
 }
 
 async function sendRejectEmail(order, reason = '') {
@@ -477,13 +484,6 @@ async function sendRejectEmail(order, reason = '') {
   if (!to) return
   try {
     const t = await getTransporter()
-    await t.sendMail({
-      from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
-      to,
-      subject: `Payment proof rejected — ${num}`,
-      text:    `Hi ${name},\n\nUnfortunately your payment proof for order ${num} was rejected.${reason ? `\n\nReason: ${reason}` : ''}\n\nPlease re-upload a clear screenshot of your payment confirmation.\n\nJCE Bridal Boutique`,
-    })
-  } catch (e) {
-    console.warn('Reject email failed:', e.message)
-  }
+    await t.sendMail({ from: `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`, to, subject: `Payment proof rejected — ${num}`, text: `Hi ${name},\n\nUnfortunately your payment proof for order ${num} was rejected.${reason ? `\n\nReason: ${reason}` : ''}\n\nPlease re-upload a clear screenshot of your payment confirmation.\n\nJCE Bridal Boutique` })
+  } catch (e) { console.warn('Reject email failed:', e.message) }
 }

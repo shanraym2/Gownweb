@@ -1,5 +1,9 @@
+// app/api/admin/cms/testimonials/route.js
+// Audit-instrumented version — logAudit() added to POST, PUT, DELETE.
+
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 const USE_DB = process.env.USE_DB === 'true'
 
@@ -14,9 +18,7 @@ export async function GET(request) {
 
   try {
     const { query } = await import('@/lib/db')
-    const testimonials = await query(
-      `SELECT * FROM cms_testimonials ORDER BY sort_order ASC`
-    )
+    const testimonials = await query(`SELECT * FROM cms_testimonials ORDER BY sort_order ASC`)
     return NextResponse.json({ ok: true, testimonials })
   } catch (err) {
     console.error('CMS testimonials GET error:', err)
@@ -42,6 +44,16 @@ export async function POST(request) {
        VALUES ($1,$2,$3,$4) RETURNING *`,
       [quote_text.trim(), author_name.trim(), (image_url||'').trim(), sort_order ?? 0]
     )
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    logAudit({
+      request,
+      action:     'cms.testimonial.create',
+      entityType: 'testimonial',
+      entityId:   String(rows[0].id),
+      payload:    { authorName: author_name.trim(), sortOrder: sort_order ?? 0 },
+    })
+
     return NextResponse.json({ ok: true, testimonial: rows[0] })
   } catch (err) {
     console.error('CMS testimonials POST error:', err)
@@ -55,7 +67,6 @@ export async function PUT(request) {
 
   const body = await request.json()
   const { id, quote_text, author_name, image_url, sort_order, is_active } = body
-
   if (!id)
     return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 })
 
@@ -74,11 +85,21 @@ export async function PUT(request) {
         (image_url   || '').trim(),
         sort_order ?? 0,
         is_active ?? true,
-        id
+        id,
       ]
     )
     if (!rows.length)
       return NextResponse.json({ ok: false, error: 'Testimonial not found' }, { status: 404 })
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    logAudit({
+      request,
+      action:     'cms.testimonial.update',
+      entityType: 'testimonial',
+      entityId:   String(id),
+      payload:    { authorName: (author_name || '').trim(), isActive: is_active ?? true },
+    })
+
     return NextResponse.json({ ok: true, testimonial: rows[0] })
   } catch (err) {
     console.error('CMS testimonials PUT error:', err)
@@ -100,7 +121,20 @@ export async function DELETE(request) {
 
   try {
     const { query } = await import('@/lib/db')
+
+    // Fetch author before deletion
+    const before = await query(`SELECT author_name FROM cms_testimonials WHERE id=$1`, [id])
     await query(`DELETE FROM cms_testimonials WHERE id=$1`, [id])
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    logAudit({
+      request,
+      action:     'cms.testimonial.delete',
+      entityType: 'testimonial',
+      entityId:   String(id),
+      payload:    { authorName: before[0]?.author_name || null },
+    })
+
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('CMS testimonials DELETE error:', err)

@@ -1,9 +1,13 @@
+// app/api/admin/change-secret/route.js
+// Audit-instrumented version — logAudit() added on successful step=change.
+
 import { NextResponse } from 'next/server'
-import { query } from '@/lib/db'
-import { sendOtp } from '@/lib/sendOtp'
-import bcrypt from 'bcryptjs'
-import crypto from 'crypto'
+import { query }        from '@/lib/db'
+import { sendOtp }      from '@/lib/sendOtp'
+import bcrypt           from 'bcryptjs'
+import crypto           from 'crypto'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 const WINDOW_MS     = 15 * 60 * 1000
 const MAX_PWD_FAILS = 5
@@ -35,22 +39,16 @@ function checkRateLimit(map, ip, max) {
 function recordFail(map, ip) {
   const now    = Date.now()
   const record = map.get(ip)
-  if (record && now < record.resetAt) {
-    record.count++
-  } else {
-    map.set(ip, { count: 1, resetAt: now + WINDOW_MS })
-  }
+  if (record && now < record.resetAt) record.count++
+  else map.set(ip, { count: 1, resetAt: now + WINDOW_MS })
 }
 
-function clearFails(map, ip) {
-  map.delete(ip)
-}
+function clearFails(map, ip) { map.delete(ip) }
 
 function hashOtp(otp) {
   return crypto.createHash('sha256').update(String(otp).trim()).digest('hex')
 }
 
-// ── Persist secret to DB instead of .env.local ────────────────────────────────
 async function writeSecretToDb(newSecret) {
   await query(
     `INSERT INTO admin_config (key, value)
@@ -64,11 +62,8 @@ export async function POST(request) {
   const ip = getIp(request)
 
   let body
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 })
-  }
+  try { body = await request.json() }
+  catch { return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 }) }
 
   const { step, adminEmail } = body
 
@@ -79,23 +74,17 @@ export async function POST(request) {
   const cleanEmail = adminEmail.trim().toLowerCase()
 
   const userRows = await query(
-    `SELECT id, password_hash, role FROM users WHERE email = $1 AND is_active = TRUE`,
+    `SELECT id, password_hash, role FROM users WHERE email=$1 AND is_active=TRUE`,
     [cleanEmail]
   ).catch(() => [])
 
   if (!userRows.length || userRows[0].role !== 'admin') {
-    return NextResponse.json(
-      { ok: false, error: 'Incorrect email or password.' },
-      { status: 403 }
-    )
+    return NextResponse.json({ ok: false, error: 'Incorrect email or password.' }, { status: 403 })
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // STEP 1 — send_otp
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── STEP 1 — send_otp ──────────────────────────────────────────────────────
   if (step === 'send_otp') {
     const { password } = body
-
     if (!password)
       return NextResponse.json({ ok: false, error: 'Password is required.' }, { status: 400 })
 
@@ -133,16 +122,10 @@ export async function POST(request) {
       )
     }
 
-    return NextResponse.json({
-      ok:      true,
-      devMode: otpData.devMode ?? false,
-      message: 'Verification code sent to admin email.',
-    })
+    return NextResponse.json({ ok: true, devMode: otpData.devMode ?? false, message: 'Verification code sent to admin email.' })
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // STEP 2 — change
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ── STEP 2 — change ────────────────────────────────────────────────────────
   if (step === 'change') {
     const { password, otp, newSecret } = body
 
@@ -180,26 +163,18 @@ export async function POST(request) {
     clearFails(pwdFailMap, ip)
 
     if (newSecret.trim().length < 16) {
-      return NextResponse.json(
-        { ok: false, error: 'New secret must be at least 16 characters.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ ok: false, error: 'New secret must be at least 16 characters.' }, { status: 400 })
     }
     if (/\s/.test(newSecret)) {
-      return NextResponse.json(
-        { ok: false, error: 'New secret must not contain spaces.' },
-        { status: 400 }
-      )
+      return NextResponse.json({ ok: false, error: 'New secret must not contain spaces.' }, { status: 400 })
     }
 
     const otpRows = await query(
       `SELECT id, code_hash, attempts, max_attempts, expires_at
        FROM otp_codes
-       WHERE email = $1 AND purpose = 'password_reset'
-         AND consumed_at IS NULL
-         AND expires_at > NOW()
-       ORDER BY created_at DESC
-       LIMIT 1`,
+       WHERE email=$1 AND purpose='password_reset'
+         AND consumed_at IS NULL AND expires_at > NOW()
+       ORDER BY created_at DESC LIMIT 1`,
       [cleanEmail]
     ).catch(() => [])
 
@@ -216,50 +191,37 @@ export async function POST(request) {
 
     if (codeHash !== record.code_hash) {
       const attemptsLeft = record.max_attempts - nextAttempts
-
       if (nextAttempts >= record.max_attempts) {
-        await query(
-          `UPDATE otp_codes SET attempts = $1, consumed_at = NOW() WHERE id = $2`,
-          [nextAttempts, record.id]
-        )
-        return NextResponse.json(
-          { ok: false, error: 'Too many incorrect attempts. Please request a new code.' },
-          { status: 429 }
-        )
+        await query(`UPDATE otp_codes SET attempts=$1, consumed_at=NOW() WHERE id=$2`, [nextAttempts, record.id])
+        return NextResponse.json({ ok: false, error: 'Too many incorrect attempts. Please request a new code.' }, { status: 429 })
       }
-
-      await query(
-        `UPDATE otp_codes SET attempts = $1 WHERE id = $2`,
-        [nextAttempts, record.id]
-      )
-
+      await query(`UPDATE otp_codes SET attempts=$1 WHERE id=$2`, [nextAttempts, record.id])
       return NextResponse.json(
-        {
-          ok:           false,
-          error:        `Incorrect code. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`,
-          attemptsLeft,
-        },
+        { ok: false, error: `Incorrect code. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`, attemptsLeft },
         { status: 400 }
       )
     }
 
-    await query(
-      `UPDATE otp_codes SET consumed_at = NOW(), attempts = $1 WHERE id = $2`,
-      [nextAttempts, record.id]
-    )
+    await query(`UPDATE otp_codes SET consumed_at=NOW(), attempts=$1 WHERE id=$2`, [nextAttempts, record.id])
 
-    // ── Save new secret to DB (works on DigitalOcean, no restart needed) ──
     try {
       await writeSecretToDb(newSecret.trim())
     } catch (err) {
       console.error('Failed to persist new admin secret:', err)
-      return NextResponse.json(
-        { ok: false, error: 'Could not save the new secret. Check database connection.' },
-        { status: 500 }
-      )
+      return NextResponse.json({ ok: false, error: 'Could not save the new secret. Check database connection.' }, { status: 500 })
     }
 
     clearFails(pwdFailMap, ip)
+
+    // ── AUDIT ── (no payload — secret value is NEVER logged) ─────────────────
+    logAudit({
+      request,
+      action:     'secret.changed',
+      entityType: 'secret',
+      entityId:   'admin_secret',
+      payload:    { changedBy: cleanEmail },
+      // The new secret value is intentionally omitted
+    })
 
     return NextResponse.json({ ok: true })
   }

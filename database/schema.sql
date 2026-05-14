@@ -906,3 +906,36 @@ ALTER TABLE public.supplier_size_metrics
 
 CREATE INDEX IF NOT EXISTS idx_supplier_size_metrics_segment
   ON public.supplier_size_metrics (supplier_id, segment);
+
+  -- =============================================================
+-- Migration: admin_audit_log
+-- Append-only audit trail for all admin mutations.
+-- Safe to run multiple times (uses IF NOT EXISTS).
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS public.admin_audit_log (
+  id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_email citext      NOT NULL,          -- resolved from session cookie; falls back to 'admin@system'
+  action      text        NOT NULL,          -- e.g. 'order.status', 'user.create', 'gown.delete'
+  entity_type text,                          -- 'order' | 'user' | 'gown' | 'cms_block' | 'hero_slide' | 'testimonial' | 'upload' | 'secret' | 'report'
+  entity_id   text,                          -- UUID, section name, or SKU — whatever identifies the record
+  payload     jsonb,                         -- structured diff / summary; sensitive fields always redacted
+  ip          text,                          -- X-Forwarded-For or X-Real-IP
+  logged_at   timestamptz NOT NULL DEFAULT now()
+);
+
+-- Rows are NEVER updated or deleted — enforce via policy if desired:
+-- ALTER TABLE public.admin_audit_log ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY audit_insert_only ON public.admin_audit_log FOR INSERT WITH CHECK (true);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logged_at
+  ON public.admin_audit_log (logged_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_actor
+  ON public.admin_audit_log (actor_email, logged_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_entity
+  ON public.admin_audit_log (entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_audit_action
+  ON public.admin_audit_log (action);

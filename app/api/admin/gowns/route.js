@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'gowns.json')
@@ -150,8 +151,8 @@ export async function POST(request) {
       id: Date.now(), name: name.trim(),
       price: '₱' + salePrice.toLocaleString('en-PH'), salePrice,
       image: image.trim(), alt: (alt||name).trim(),
-      tryonImage:     (tryonImage || image).trim(),
-      tryonImageBack: (tryonImageBack || '').trim() || null,  // ← FIX: persist back image
+      tryonImage:       (tryonImage || image).trim(),
+      tryonImageBack:   (tryonImageBack || '').trim() || null,
       tryonCalibration: tryonCalibration || null,
       type: (type||'').trim(), color: (color||'').trim(),
       silhouette: (silhouette||'').trim(), fabric: (fabric||'').trim(),
@@ -160,6 +161,15 @@ export async function POST(request) {
       createdAt: new Date().toISOString(),
     }
     saveJson([...gowns, newGown])
+
+    logAudit({
+      request,
+      action:     'gown.create',
+      entityType: 'gown',
+      entityId:   String(newGown.id),
+      payload:    { name: newGown.name, salePrice },
+    })
+
     return NextResponse.json({ ok: true, gown: newGown })
   }
 
@@ -199,7 +209,6 @@ export async function POST(request) {
         )
       }
 
-      // ── FIX: persist back image on POST ──────────────────────────────────
       const resolvedBack = (tryonImageBack || '').trim()
       if (resolvedBack) {
         await conn.query(
@@ -224,15 +233,24 @@ export async function POST(request) {
       }
 
       await conn.query('COMMIT')
+
+      logAudit({
+        request,
+        action:     'gown.create',
+        entityType: 'gown',
+        entityId:   gownRow.id,
+        payload:    { name: gownRow.name, sku, salePrice },
+      })
+
       return NextResponse.json({
         ok: true,
         gown: {
           ...rowToGown({
             ...gownRow,
-            image_url:             image.trim(),
-            alt:                   (alt||name).trim(),
-            tryon_image_url:       resolvedTryon || image.trim(),
-            tryon_image_back_url:  resolvedBack || null,  // ← FIX: include in response
+            image_url:            image.trim(),
+            alt:                  (alt||name).trim(),
+            tryon_image_url:      resolvedTryon || image.trim(),
+            tryon_image_back_url: resolvedBack || null,
           }),
           inventory: inventory || [],
         },
@@ -254,6 +272,7 @@ export async function PUT(request) {
   const body = await request.json()
   const { id, restore } = body
 
+  // ── Restore archived gown ─────────────────────────────────────────────────
   if (restore && id) {
     if (!USE_DB) {
       const gowns = loadJson()
@@ -261,6 +280,15 @@ export async function PUT(request) {
       if (idx === -1) return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
       gowns[idx].is_active = true
       saveJson(gowns)
+
+      logAudit({
+        request,
+        action:     'gown.restore',
+        entityType: 'gown',
+        entityId:   String(id),
+        payload:    { name: gowns[idx].name },
+      })
+
       return NextResponse.json({ ok: true, gown: gowns[idx] })
     }
     try {
@@ -271,6 +299,15 @@ export async function PUT(request) {
         [id]
       )
       if (!rows.length) return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
+
+      logAudit({
+        request,
+        action:     'gown.restore',
+        entityType: 'gown',
+        entityId:   id,
+        payload:    { name: rows[0].name },
+      })
+
       return NextResponse.json({ ok: true, gown: rowToGown(rows[0]) })
     } catch (err) {
       console.error('Admin gowns RESTORE error:', err)
@@ -289,6 +326,15 @@ export async function PUT(request) {
         return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
       gowns[idx].inventory = body.inventory
       saveJson(gowns)
+
+      logAudit({
+        request,
+        action:     'gown.inventory',
+        entityType: 'gown',
+        entityId:   String(id),
+        payload:    { name: gowns[idx].name, sizes: body.inventory?.map(i => i.size) },
+      })
+
       return NextResponse.json({ ok: true, gown: gowns[idx] })
     }
 
@@ -323,6 +369,15 @@ export async function PUT(request) {
         }
 
         await conn.query('COMMIT')
+
+        logAudit({
+          request,
+          action:     'gown.inventory',
+          entityType: 'gown',
+          entityId:   id,
+          payload:    { sizes: newSizeLabels },
+        })
+
         return NextResponse.json({ ok: true, gown: { id, inventory: body.inventory } })
       } catch (err) {
         await conn.query('ROLLBACK')
@@ -336,6 +391,7 @@ export async function PUT(request) {
     }
   }
 
+  // ── Full gown update ──────────────────────────────────────────────────────
   const {
     name, price, image, alt,
     tryonImage, tryonImageBack, tryonCalibration,
@@ -357,8 +413,8 @@ export async function PUT(request) {
       ...gowns[idx],
       name: name.trim(), price: '₱' + salePrice.toLocaleString('en-PH'), salePrice,
       image: image.trim(), alt: (alt||name).trim(),
-      tryonImage:     (tryonImage || image).trim(),
-      tryonImageBack: (tryonImageBack || '').trim() || null,  // ← FIX: was missing entirely
+      tryonImage:       (tryonImage || image).trim(),
+      tryonImageBack:   (tryonImageBack || '').trim() || null,
       tryonCalibration: tryonCalibration || null,
       type: (type||'').trim(), color: (color||'').trim(),
       silhouette: (silhouette||'').trim(), fabric: (fabric||'').trim(),
@@ -367,6 +423,15 @@ export async function PUT(request) {
     }
     gowns[idx] = updated
     saveJson(gowns)
+
+    logAudit({
+      request,
+      action:     'gown.update',
+      entityType: 'gown',
+      entityId:   String(id),
+      payload:    { name: updated.name, salePrice },
+    })
+
     return NextResponse.json({ ok: true, gown: updated })
   }
 
@@ -457,6 +522,15 @@ export async function PUT(request) {
       }
 
       await conn.query('COMMIT')
+
+      logAudit({
+        request,
+        action:     'gown.update',
+        entityType: 'gown',
+        entityId:   id,
+        payload:    { name: rows[0].name, salePrice },
+      })
+
       return NextResponse.json({
         ok: true,
         gown: {
@@ -465,7 +539,7 @@ export async function PUT(request) {
             image_url:            image.trim(),
             alt:                  (alt||name).trim(),
             tryon_image_url:      resolvedTryon || image.trim(),
-            tryon_image_back_url: resolvedBack || null,  // ← FIX: include in response
+            tryon_image_back_url: resolvedBack || null,
           }),
           inventory: inventory || [],
         },
@@ -502,10 +576,27 @@ export async function DELETE(request) {
           { status: 400 }
         )
       }
+      const name = gowns[idx].name
       saveJson(gowns.filter((_, i) => i !== idx))
+
+      logAudit({
+        request,
+        action:     'gown.delete',
+        entityType: 'gown',
+        entityId:   String(id),
+        payload:    { name, permanent: true },
+      })
     } else {
       gowns[idx].is_active = false
       saveJson(gowns)
+
+      logAudit({
+        request,
+        action:     'gown.archive',
+        entityType: 'gown',
+        entityId:   String(id),
+        payload:    { name: gowns[idx].name },
+      })
     }
     return NextResponse.json({ ok: true })
   }
@@ -518,7 +609,7 @@ export async function DELETE(request) {
       try {
         await conn.query('BEGIN')
         const check = await conn.query(
-          `SELECT is_active FROM gowns WHERE id=$1 FOR UPDATE`, [id]
+          `SELECT is_active, name FROM gowns WHERE id=$1 FOR UPDATE`, [id]
         )
         if (!check.rows.length) {
           await conn.query('ROLLBACK')
@@ -531,8 +622,17 @@ export async function DELETE(request) {
             { status: 400 }
           )
         }
+        const gownName = check.rows[0].name
         await conn.query(`DELETE FROM gowns WHERE id=$1`, [id])
         await conn.query('COMMIT')
+
+        logAudit({
+          request,
+          action:     'gown.delete',
+          entityType: 'gown',
+          entityId:   id,
+          payload:    { name: gownName, permanent: true },
+        })
       } catch (err) {
         await conn.query('ROLLBACK')
         throw err
@@ -541,8 +641,19 @@ export async function DELETE(request) {
       }
     } else {
       const { query } = await import('@/lib/db')
-      const rows = await query(`UPDATE gowns SET is_active=FALSE WHERE id=$1 RETURNING id`, [id])
+      const rows = await query(
+        `UPDATE gowns SET is_active=FALSE WHERE id=$1 RETURNING id, name`,
+        [id]
+      )
       if (!rows.length) return NextResponse.json({ ok: false, error: 'Gown not found' }, { status: 404 })
+
+      logAudit({
+        request,
+        action:     'gown.archive',
+        entityType: 'gown',
+        entityId:   id,
+        payload:    { name: rows[0].name },
+      })
     }
 
     return NextResponse.json({ ok: true })

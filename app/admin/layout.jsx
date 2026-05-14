@@ -14,6 +14,7 @@ const ADMIN_NAV_LINKS = [
   { href: '/admin/dashboard', label: 'Sales'                  },
   { href: '/admin/users',     label: 'Users'                  },
   { href: '/admin/contents',  label: 'Content'                },
+  { href: '/admin/audit',     label: 'Audit'                  },
 ]
 
 const STAFF_NAV_LINKS = [
@@ -24,7 +25,7 @@ const STAFF_NAV_LINKS = [
   { href: '/admin/users',     label: 'Customers'              },
 ]
 
-const ADMIN_ONLY_ROUTES = ['/admin/contents', '/admin/users']
+const ADMIN_ONLY_ROUTES = ['/admin/contents', '/admin/users', '/admin/audit']
 
 function useAdminTheme() {
   const [theme, setTheme] = useState('system')
@@ -112,7 +113,6 @@ function SecretGate({ onSuccess }) {
         <button type="submit" disabled={validating} className="adm-btn">
           {validating ? 'Checking…' : 'Continue'}
         </button>
-        {/* ── Change secret link ── */}
         <Link href="/admin/change-secret" className="adm-secret-change-link">
           Change secret
         </Link>
@@ -395,7 +395,6 @@ export default function AdminLayout({ children }) {
           >
             Clear secret
           </button>
-          {/* ── Change secret link ── */}
           <Link href="/admin/change-secret" className="adm-footer-btn" onClick={() => setSidebarOpen(false)}>
             Change secret
           </Link>

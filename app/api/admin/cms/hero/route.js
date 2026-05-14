@@ -1,5 +1,9 @@
+// app/api/admin/cms/hero/route.js
+// Audit-instrumented version — logAudit() added to POST, PUT, DELETE.
+
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 const USE_DB = process.env.USE_DB === 'true'
 
@@ -9,8 +13,7 @@ export async function GET(request) {
 
   if (!USE_DB) {
     const { getHeroSlides } = await import('@/lib/cms')
-    const slides = await getHeroSlides()
-    return NextResponse.json({ ok: true, slides })
+    return NextResponse.json({ ok: true, slides: await getHeroSlides() })
   }
 
   try {
@@ -41,6 +44,16 @@ export async function POST(request) {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [image_url.trim(), (subtitle||'').trim(), heading.trim(), (body||'').trim(), sort_order ?? 0]
     )
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    logAudit({
+      request,
+      action:     'cms.hero.create',
+      entityType: 'hero_slide',
+      entityId:   String(rows[0].id),
+      payload:    { heading: heading.trim(), sortOrder: sort_order ?? 0 },
+    })
+
     return NextResponse.json({ ok: true, slide: rows[0] })
   } catch (err) {
     console.error('CMS hero POST error:', err)
@@ -71,6 +84,16 @@ export async function PUT(request) {
     )
     if (!rows.length)
       return NextResponse.json({ ok: false, error: 'Slide not found' }, { status: 404 })
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    logAudit({
+      request,
+      action:     'cms.hero.update',
+      entityType: 'hero_slide',
+      entityId:   String(id),
+      payload:    { heading: heading.trim(), sortOrder: sort_order ?? 0, isActive: is_active ?? true },
+    })
+
     return NextResponse.json({ ok: true, slide: rows[0] })
   } catch (err) {
     console.error('CMS hero PUT error:', err)
@@ -92,7 +115,20 @@ export async function DELETE(request) {
 
   try {
     const { query } = await import('@/lib/db')
+
+    // Fetch heading before deletion for the audit record
+    const before = await query(`SELECT heading FROM cms_hero_slides WHERE id=$1`, [id])
     await query(`DELETE FROM cms_hero_slides WHERE id=$1`, [id])
+
+    // ── AUDIT ────────────────────────────────────────────────────────────────
+    logAudit({
+      request,
+      action:     'cms.hero.delete',
+      entityType: 'hero_slide',
+      entityId:   String(id),
+      payload:    { heading: before[0]?.heading || null },
+    })
+
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('CMS hero DELETE error:', err)
