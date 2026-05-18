@@ -14,7 +14,7 @@ const ADMIN_NAV_LINKS = [
   { href: '/admin/dashboard', label: 'Sales'                  },
   { href: '/admin/users',     label: 'Users'                  },
   { href: '/admin/contents',  label: 'Content'                },
-  { href: '/admin/audit',     label: 'Audit'                  },
+ // { href: '/admin/audit',     label: 'Audit'                  },
 ]
 
 const STAFF_NAV_LINKS = [
