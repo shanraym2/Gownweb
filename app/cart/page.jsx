@@ -56,7 +56,7 @@ export default function CartPage() {
   const [content, setContent] = useState({
     heading:        'Your Fitting Room',
     empty_title:    'Your cart is empty',
-    empty_body:     'Browse our catalogue to add gowns to your fitting room.',
+    empty_body:     'Browse our catalogue to add products to cart.',
     checkout_label: 'Proceed to Checkout',
     promo_banner:   '',
   })
