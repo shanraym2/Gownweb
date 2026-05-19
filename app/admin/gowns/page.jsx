@@ -1240,10 +1240,10 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
       </div>
     ):null
     setConfirm({
-      title:isEdit?'Save changes?':'Add new product?',
+      title:isEdit?'Save changes?':'Add new gown?',
       message:isEdit?`Review the changes to "${form.name}" below:`:`Add "${form.name}" to the collection?`,
       detail,
-      confirmLabel:isEdit?'Save changes':'Add product',
+      confirmLabel:isEdit?'Save changes':'Add gown',
       danger:false,
       onConfirm:()=>doSubmit(),
     })
@@ -1405,7 +1405,7 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
 
           <div className="sidebar-footer">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={saving}>{saving?'Saving…':isEdit?'Update product':'Add product'}</button>
+            <button type="submit" className="btn-primary" disabled={saving}>{saving?'Saving…':isEdit?'Update gown':'Add gown'}</button>
           </div>
         </form>
       </aside>
@@ -1952,7 +1952,7 @@ export default function AdminGownsPage() {
           </div>
           <button className="btn-primary" onClick={openAdd}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Product
+            Add Gown
           </button>
         </div>
 
