@@ -129,25 +129,38 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
 
     const seg = profile.segment ?? 'women'
 
+    // ── Dev diagnostic — remove before shipping ───────────────────────────
+    if (process.env.NODE_ENV === 'development') {
+      const missing = gowns.filter(g => !g.segment).length
+      if (missing > 0) {
+        console.warn(
+          `[FittingRoomProvider] ${missing}/${gowns.length} gowns have no segment field. ` +
+          `Ensure /api/gowns returns segment in the mapped response. ` +
+          `These gowns will pass the segment filter (safe-mode fallback).`
+        )
+      }
+      console.log(
+        `[FittingRoomProvider] Scoring for segment="${seg}". ` +
+        `Gowns with matching segment: ${gowns.filter(g => g.segment === seg).length}/${gowns.length}.`
+      )
+    }
+    // ── End dev diagnostic ────────────────────────────────────────────────
+
+    // Segment filter: keep gown when g.segment matches the active segment,
+    // or when g.segment is absent (safe-mode for JSON flat-file gowns that
+    // predate the segment column).
     const segmentFiltered = gowns.filter(g => !g.segment || g.segment === seg)
 
-    const score = (list) =>
-      list
-        .map(g => { const { score, reasons } = scoreGown(g, profile); return { ...g, _score: score, _reasons: reasons } })
-        .filter(g => g._score > 0)
-        .sort((a, b) => b._score - a._score)
-        .slice(0, 8)
+    const scored = segmentFiltered
+      .map(g => {
+        const { score, reasons } = scoreGown(g, profile)
+        return { ...g, _score: score, _reasons: reasons }
+      })
+      .filter(g => g._score > 0)
+      .sort((a, b) => b._score - a._score)
+      .slice(0, 8)
 
-    const primary = score(segmentFiltered)
-
-    // When the active segment has no scored results, fall back to all gowns
-    // so the panel is never empty. Flag the fallback so the UI can show a note.
-    if (primary.length > 0) {
-      setStyleResults({ items: primary, fallback: false })
-    } else {
-      const fallbackList = score(gowns)
-      setStyleResults({ items: fallbackList, fallback: true, requestedSegment: seg })
-    }
+    setStyleResults(scored)
   }, [
     profile.bodyShape, profile.skinTone, profile.undertone, profile.occasion,
     profile.colors, profile.fabrics, profile.budget, profile.height,

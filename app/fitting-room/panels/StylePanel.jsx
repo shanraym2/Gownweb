@@ -261,65 +261,62 @@ export default function StylePanel() {
           </div>
         )}
 
-          {!profile.bodyShape && (
-            <div className="fr-style-empty">
-              <p>Select your body shape above to see gown recommendations.</p>
-            </div>
-          )}
-
-          {profile.bodyShape && !styleResults?.items?.length && (
-            <div className="fr-style-empty">
+        {!profile.bodyShape && (
+          <div className="fr-style-empty">
+            <p>Select your body shape above to see gown recommendations.</p>
+          </div>
+        )}
+        {profile.bodyShape && !styleResults?.length && (
+          <div className="fr-style-empty">
+            {profile.segment && profile.segment !== 'women' ? (
+              <p>No matching gowns found for your selected segment. Try switching segment or adjusting filters.</p>
+            ) : (
               <p>No matches found. Try relaxing your budget or occasion filter.</p>
-            </div>
-          )}
-
-          {styleResults?.items?.length > 0 && (
-            <div className="fr-style-results">
-              {styleResults.fallback && (
-                <div className="fr-alert fr-alert--warn" style={{ marginBottom: '12px' }}>
-                  No gowns tagged for {styleResults.requestedSegment} yet — showing closest style matches from all categories.
-                </div>
-              )}
-              <p className="fr-results-label">{styleResults.items.length} matches · updates as you refine</p>
-              <div className="fr-gown-grid">
-                {styleResults.items.map((g, i) => {
-                  const displayScore = normaliseScore(g._score)
-                  return (
-                    <div key={g.id} className="fr-gown-card" style={{ animationDelay: `${i * 0.05}s` }}>
-                      <div className="fr-gown-img">
-                        <img src={g.image} alt={g.alt || g.name}/>
-                        {i === 0 && <span className="fr-gown-badge">Best match</span>}
-                        <span className="fr-gown-rank">#{i + 1}</span>
-                      </div>
-                      <div className="fr-gown-info">
-                        <p className="fr-gown-name">{g.name}</p>
-                        <p className="fr-gown-price">{g.price}</p>
-                        {g.silhouette && <p className="fr-gown-meta">{g.silhouette}{g.color ? ` · ${g.color}` : ''}</p>}
-                        <div className="fr-gown-reasons">
-                          {g._reasons.slice(0, 2).map((r, j) => (
-                            <div key={j} className="fr-gown-reason">
-                              <span className="fr-reason-dot"/>
-                              {r}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="fr-score-row">
-                          <div className="fr-score-bar">
-                            <div className="fr-score-fill" style={{ width: `${displayScore}%` }}/>
+            )}
+          </div>
+        )}
+        {styleResults?.length > 0 && (
+          <div className="fr-style-results">
+            <p className="fr-results-label">{styleResults.length} matches · updates as you refine</p>
+            <div className="fr-gown-grid">
+              {styleResults.map((g, i) => {
+                const displayScore = normaliseScore(g._score)
+                return (
+                  <div key={g.id} className="fr-gown-card" style={{ animationDelay: `${i * 0.05}s` }}>
+                    <div className="fr-gown-img">
+                      <img src={g.image} alt={g.alt || g.name}/>
+                      {i === 0 && <span className="fr-gown-badge">Best match</span>}
+                      <span className="fr-gown-rank">#{i + 1}</span>
+                    </div>
+                    <div className="fr-gown-info">
+                      <p className="fr-gown-name">{g.name}</p>
+                      <p className="fr-gown-price">{g.price}</p>
+                      {g.silhouette && <p className="fr-gown-meta">{g.silhouette}{g.color ? ` · ${g.color}` : ''}</p>}
+                      <div className="fr-gown-reasons">
+                        {g._reasons.slice(0, 2).map((r, j) => (
+                          <div key={j} className="fr-gown-reason">
+                            <span className="fr-reason-dot"/>
+                            {r}
                           </div>
-                          <span className="fr-score-pct">{displayScore}%</span>
+                        ))}
+                      </div>
+                      <div className="fr-score-row">
+                        <div className="fr-score-bar">
+                          <div className="fr-score-fill" style={{ width: `${displayScore}%` }}/>
                         </div>
-                        <div className="fr-gown-actions">
-                          <Link href={`/gowns/${g.id}`} className="fr-gown-btn fr-gown-btn--ghost">Details</Link>
-                          <Link href={`/fitting-room?gown=${g.id}`} className="fr-gown-btn fr-gown-btn--primary">Try on</Link>
-                        </div>
+                        <span className="fr-score-pct">{displayScore}%</span>
+                      </div>
+                      <div className="fr-gown-actions">
+                        <Link href={`/gowns/${g.id}`} className="fr-gown-btn fr-gown-btn--ghost">Details</Link>
+                        <Link href={`/fitting-room?gown=${g.id}`} className="fr-gown-btn fr-gown-btn--primary">Try on</Link>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                  </div>
+                )
+              })}
             </div>
-          )}
+          </div>
+        )}
       </div>
     </SegmentGate>
   )
