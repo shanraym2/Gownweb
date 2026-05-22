@@ -11,6 +11,7 @@
 @import url("recommender.css");
 @import url("Virtual.css");
 @import url("myorders.css");
+@import url("fitting-room.css");
 :root {
     --color-bg: #FFFBFF; /* Very light off-white background */
     --color-text: #2C2C2C;

@@ -369,7 +369,6 @@ export default function Header({ solid = false, cmsTheme = null }) {
           <Link href="/gowns"        className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>{navLabels.nav_catalogue_label}</Link>
       {/*     <Link href="/virtual-try-on" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Virtual Try-On</Link> */}
           <Link href="/fitting-room" className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>{navLabels.nav_fitting_label}</Link>
-          <Link href="/about"        className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>About</Link>
           <Link href="/contact"      className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>{navLabels.nav_contact_label}</Link>
           <Link href="/cart"         className="mobile-nav-link" onClick={() => { setIsMobileOpen(false); refreshCartCount() }}>
             Cart{cartCount > 0 ? ` (${cartCount})` : ''}
