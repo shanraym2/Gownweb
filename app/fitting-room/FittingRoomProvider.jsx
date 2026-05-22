@@ -141,7 +141,12 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
       }
       console.log(
         `[FittingRoomProvider] Scoring for segment="${seg}". ` +
-        `Gowns with matching segment: ${gowns.filter(g => g.segment === seg).length}/${gowns.length}.`
+        `Gowns with matching segment: ${
+          gowns.filter(
+            g => g.segment &&
+            String(g.segment).toLowerCase() === String(seg).toLowerCase()
+          ).length
+        }/${gowns.length}.`
       )
     }
     // ── End dev diagnostic ────────────────────────────────────────────────
@@ -149,7 +154,11 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
     // Segment filter: keep gown when g.segment matches the active segment,
     // or when g.segment is absent (safe-mode for JSON flat-file gowns that
     // predate the segment column).
-    const segmentFiltered = gowns.filter(g => !g.segment || g.segment === seg)
+    const segmentFiltered = gowns.filter(g => {
+      if (!g.segment) return true
+
+      return String(g.segment).toLowerCase() === String(seg).toLowerCase()
+    })
 
     const scored = segmentFiltered
       .map(g => {
