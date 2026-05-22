@@ -20,30 +20,15 @@ export async function POST(request) {
       )
     }
 
-    // ── Rate limit ────────────────────────────────────────────────────────────
-    // Allow max 10 login attempts per email per 15 minutes.
-    // Uses otp_codes attempt history as a lightweight signal — no extra table needed.
-    // For a production system, consider a dedicated failed_logins table or Redis.
-    const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
-    const recentOtps = await query(
-      `SELECT COUNT(*) AS cnt FROM otp_codes
-       WHERE email = $1 AND created_at > now() - INTERVAL '15 minutes'`,
-      [cleanEmail]
-    )
-    // Note: this is a soft signal. Replace with a proper failed_logins table
-    // if you need strict per-IP enforcement.
-
     const rows = await query(
       `SELECT id, first_name, last_name, email, password_hash, role, is_active, created_at
-      FROM users
-      WHERE email = $1
-      LIMIT 1`,
+       FROM users
+       WHERE email = $1
+       LIMIT 1`,
       [cleanEmail]
     )
 
-    // ── SECURITY: use the same error message whether email exists or not ──────
-    // Distinct messages allow attackers to enumerate registered emails.
-    // Both "not found" and "wrong password" return 401 with the same text.
+    // Same error message whether email exists or not — prevents email enumeration
     if (rows.length === 0) {
       return NextResponse.json(
         { ok: false, error: 'Invalid email or password.' },
@@ -62,25 +47,37 @@ export async function POST(request) {
 
     const passwordMatch = await bcrypt.compare(cleanPass, user.password_hash)
     if (!passwordMatch) {
-      // Same message as "not found" — do not distinguish the two cases
       return NextResponse.json(
         { ok: false, error: 'Invalid email or password.' },
         { status: 401 }
       )
     }
 
-    return NextResponse.json({
-      ok: true,
-      user: {
-        id:        user.id,
-        firstName: user.first_name,
-        lastName:  user.last_name,
-        name:      `${user.first_name} ${user.last_name}`.trim(),
-        email:     user.email,
-        role:      user.role,
-        createdAt: user.created_at,
-      },
+    // Build the response with a session cookie so middleware can identify the user
+    const userData = {
+      id:        user.id,
+      firstName: user.first_name,
+      lastName:  user.last_name,
+      name:      `${user.first_name} ${user.last_name}`.trim(),
+      email:     user.email,
+      role:      user.role,
+      createdAt: user.created_at,
+    }
+
+    const response = NextResponse.json({ ok: true, user: userData })
+
+    // Persist a simple session cookie so the user stays logged in across
+    // page navigations without localStorage being the sole source of truth.
+    // HttpOnly so JS cannot read it — used only by middleware for role checks.
+    response.cookies.set('jce_session', user.id, {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge:   60 * 60 * 24 * 7,   // 7 days
+      path:     '/',
     })
+
+    return response
   } catch (err) {
     console.error('Login error:', err)
     return NextResponse.json(
