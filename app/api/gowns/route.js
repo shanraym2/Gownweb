@@ -16,12 +16,13 @@ export async function GET() {
   if (!USE_DB) {
     const all   = loadJson()
     const gowns = all.filter(g => g.is_active !== false)
-    // FIX #1: ensure tryonImage is always present in JSON mode
     return NextResponse.json({
       ok: true,
       gowns: gowns.map(g => ({
         ...g,
         tryonImage: g.tryonImage || g.image || '',
+        // JSON flat-file gowns default to 'women' when segment is absent
+        segment:    g.segment || 'women',
       })),
     })
   }
@@ -29,12 +30,12 @@ export async function GET() {
   try {
     const { query } = await import('@/lib/db')
 
-    // FIX #1: join tryon asset image so tryonImage is returned to the try-on page
     const rows = await query(`
       SELECT
         g.id, g.sku, g.name, g.description,
         g.color, g.silhouette, g.fabric, g.neckline,
         g.sale_price, g.is_active, g.tryon_calibration,
+        g.segment,
         c.name            AS category,
         gi.image_url      AS image,
         gi.alt,
@@ -60,7 +61,7 @@ export async function GET() {
               ORDER BY sort_order LIMIT 1
             )
       WHERE g.is_active = TRUE
-      ORDER BY g.created_at DESC
+      ORDER BY g.updated_at DESC
     `)
 
     if (!rows.length) return NextResponse.json({ ok: true, gowns: [] })
@@ -97,12 +98,15 @@ export async function GET() {
       category:         r.category,
       image:            r.image || '/images/placeholder.jpg',
       alt:              r.alt   || r.name,
-      // FIX #1: return tryonImage — falls back to display image if no tryon asset
-      tryonImage:       r.tryon_image_url || r.image || '/images/placeholder.jpg',
+      tryonImage:       r.tryon_image_url  || r.image || '/images/placeholder.jpg',
       tryonImageBack:   r.tryon_image_back_url || null,
       tryonCalibration: r.tryon_calibration || null,
       sizeStock:        invByGown[r.id] || [],
       sizes:            (invByGown[r.id] || []).map(s => s.size),
+      // ── segment field — drives StylePanel filtering in FittingRoomProvider
+      // DB column has CHECK (segment IN ('women','men','children')) DEFAULT 'women'
+      // so r.segment should always be present; fallback guards against NULL edge case
+      segment:          r.segment || 'women',
     }))
 
     return NextResponse.json({ ok: true, gowns })
