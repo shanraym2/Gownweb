@@ -740,7 +740,24 @@ export default function OrderConfirmationPage() {
     const remaining = Math.ceil(7 - (Date.now() - new Date(order.placedAt).getTime()) / 86_400_000)
     return remaining <= 3 ? remaining : null
   })()
+const statusLabel = {
+    placed:          'Order Placed',
+    pending_payment: 'Awaiting Payment',
+    paid:            'Payment Confirmed',
+    processing:      'Processing',
+    ready:           'Ready for Pickup / Delivery',
+    shipped:         'Out for Delivery',
+    completed:       'Completed',
+    cancelled:       'Cancelled',
+    refunded:        'Refunded',
+  }
 
+  const proofStatusLabel = {
+    pending:  'Uploaded — Awaiting Verification',
+    verified: 'Verified',
+    rejected: 'Rejected — Please Re-upload',
+    unpaid:   'Not yet uploaded',
+  }
   return (
     <main className="conf-page">
       <Header solid />
@@ -821,13 +838,47 @@ export default function OrderConfirmationPage() {
                     </ol>
                   </div>
 
-                  <ProofUpload
-                    orderId={order.id}
-                    userId={user.id}
-                    paymentMethod={order.paymentMethod}
-                    onUploaded={() => setOrder(o => ({ ...o, paymentStatus: 'pending' }))}
-                    content={content}
-                  />
+                  {/* Proof status banner when already submitted */}
+                  {order.proofStatus === 'pending' && (
+                    <div className="conf-card" style={{ borderLeft: '3px solid #0a5276', background: '#f0f8ff' }}>
+                      <p className="conf-card-title" style={{ color: '#0a5276' }}>🕐 Proof under review</p>
+                      <p className="conf-card-sub">
+                        Your payment screenshot has been received and is awaiting verification by our team.
+                        We'll notify you by email once confirmed — usually within 1–2 hours.
+                      </p>
+                    </div>
+                  )}
+                  {order.proofStatus === 'verified' && (
+                    <div className="conf-card" style={{ borderLeft: '3px solid #155724', background: '#f0faf3' }}>
+                      <p className="conf-card-title" style={{ color: '#155724' }}>✓ Payment verified</p>
+                      <p className="conf-card-sub">Your payment has been confirmed. Your order is now being processed.</p>
+                    </div>
+                  )}
+                  {order.proofStatus === 'rejected' && (
+                    <div className="conf-card" style={{ borderLeft: '3px solid #721c24', background: '#fff5f5' }}>
+                      <p className="conf-card-title" style={{ color: '#721c24' }}>✕ Proof rejected — please re-upload</p>
+                      <p className="conf-card-sub" style={{ marginBottom: 12 }}>
+                        Your payment screenshot could not be verified. Please upload a clear screenshot of your
+                        {order.paymentMethod === 'gcash' ? ' GCash' : ' BDO'} transaction success screen.
+                      </p>
+                      <ProofUpload
+                        orderId={order.id}
+                        userId={user.id}
+                        paymentMethod={order.paymentMethod}
+                        onUploaded={() => setOrder(o => ({ ...o, proofStatus: 'pending', paymentStatus: 'pending' }))}
+                        content={content}
+                      />
+                    </div>
+                  )}
+                  {(!order.proofStatus || order.proofStatus === 'none' || !['pending','verified','rejected'].includes(order.proofStatus)) && order.paymentMethod !== 'cash' && (
+                    <ProofUpload
+                      orderId={order.id}
+                      userId={user.id}
+                      paymentMethod={order.paymentMethod}
+                      onUploaded={() => setOrder(o => ({ ...o, proofStatus: 'pending', paymentStatus: 'pending' }))}
+                      content={content}
+                    />
+                  )}
 
                   {['ready', 'shipped'].includes(order.status) && (
                     <div className="conf-card conf-card--action">
@@ -883,10 +934,18 @@ export default function OrderConfirmationPage() {
                   )}
                   <div className="conf-meta-row">
                     <span>Order status</span>
-                    <span className={`conf-status conf-status--${order.status}`}>
-                      {(order.status || '').replace(/_/g, ' ')}
+                    <span className={`conf-status conf-status--${isVoided ? 'expired' : order.status}`}>
+                      {isVoided ? 'Expired' : (statusLabel[order.status] || order.status.replace(/_/g, ' '))}
                     </span>
                   </div>
+                  {order.paymentMethod !== 'cash' && (
+                    <div className="conf-meta-row">
+                      <span>Proof status</span>
+                      <span className={`conf-status conf-status--${order.proofStatus || 'none'}`}>
+                        {proofStatusLabel[order.proofStatus] || 'Not yet uploaded'}
+                      </span>
+                    </div>
+                  )}
                   <div className="conf-meta-row">
                     <span>Payment status</span>
                     <span className={`conf-status conf-status--${order.paymentStatus}`}>
@@ -895,6 +954,60 @@ export default function OrderConfirmationPage() {
                   </div>
                 </div>
               </div>
+              {/* Completed order — return window notice */}
+              {order.status === 'completed' && (() => {
+                const completedAt  = new Date(order.updatedAt || order.placedAt)
+                const hoursElapsed = (Date.now() - completedAt.getTime()) / 3600000
+                const hoursLeft    = Math.max(0, 48 - hoursElapsed)
+                const withinWindow = hoursElapsed <= 48
+
+                return (
+                  <div className="conf-card" style={{
+                    borderLeft: `3px solid ${withinWindow ? '#856404' : '#6b3f2a'}`,
+                    background:  withinWindow ? '#fffdf0' : '#faf7f4',
+                    marginTop: 12,
+                  }}>
+                    {withinWindow ? (
+                      <>
+                        <p className="conf-card-title" style={{ color: '#856404' }}>
+                          ↩ Return window open — {Math.floor(hoursLeft)}h {Math.round((hoursLeft % 1) * 60)}m remaining
+                        </p>
+                        <p className="conf-card-sub" style={{ color: '#856404' }}>
+                          You may request a return, refund, or exchange for defective or incorrect items within
+                          48 hours of order completion. Items must be unworn, unaltered, and have tags attached.
+                        </p>
+                        <Link href="/my-orders" className="conf-btn-primary" style={{
+                          display: 'inline-block', marginTop: 10, fontSize: 11,
+                          padding: '8px 16px', letterSpacing: '.2em', textTransform: 'uppercase',
+                        }}>
+                          Go to My Orders to request →
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <p className="conf-card-title" style={{ color: '#6b3f2a' }}>
+                          Return window closed
+                        </p>
+                        <p className="conf-card-sub" style={{ color: '#6b3f2a' }}>
+                          The 48-hour return window for this order has passed. Returns and refund requests
+                          are no longer accepted. Contact us if you have concerns.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* Expired order notice in sidebar */}
+              {isVoided && (
+                <div className="conf-card" style={{ borderLeft: '3px solid #721c24', background: '#fff5f5', marginTop: 12 }}>
+                  <p className="conf-card-title" style={{ color: '#721c24' }}>⚠ Order expired</p>
+                  <p className="conf-card-sub" style={{ color: '#721c24' }}>
+                    This order expired after 7 days without payment confirmation and has been voided.
+                    Please place a new order or contact us for assistance.
+                  </p>
+                </div>
+              )}
               <div className="conf-sidebar-links">
                 <Link href="/my-orders" className="conf-link">View all orders →</Link>
                 <Link href="/gowns"     className="conf-link">Continue browsing →</Link>

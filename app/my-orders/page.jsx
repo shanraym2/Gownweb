@@ -852,63 +852,81 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestRetur
               )}
 
               {/* Completed: show confirmation + return CTA if within window */}
-              {order.status === 'completed' && (
-                <div style={{ marginTop: 20 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    fontSize: 12, color: '#155724', fontWeight: 300,
-                    marginBottom: canRequestReturn ? 16 : 0,
-                  }}>
-                    <span style={{
-                      width: 20, height: 20, borderRadius: '50%',
-                      background: '#d4edda', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, flexShrink: 0,
-                    }}>✓</span>
-                    Order completed — thank you for choosing JCE Bridal!
-                  </div>
+              {/* Completed: return window countdown + CTA */}
+              {order.status === 'completed' && (() => {
+                const completedAt  = new Date(order.updatedAt || order.createdAt || order.placedAt)
+                const hoursElapsed = (Date.now() - completedAt.getTime()) / 3600000
+                const hoursLeft    = Math.max(0, 48 - hoursElapsed)
+                const minsLeft     = Math.round((hoursLeft % 1) * 60)
+                const withinWindow = hoursElapsed <= 48
 
-                  {canRequestReturn && (
+                return (
+                  <div style={{ marginTop: 20 }}>
+                    {/* Completion confirmation */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      fontSize: 12, color: '#155724', fontWeight: 300,
+                      marginBottom: 14,
+                    }}>
+                      <span style={{
+                        width: 20, height: 20, borderRadius: '50%',
+                        background: '#d4edda', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, flexShrink: 0,
+                      }}>✓</span>
+                      Order completed — thank you for choosing JCE Bridal!
+                    </div>
+
+                    {/* Return window card */}
                     <div style={{
                       padding: '14px 16px',
-                      background: '#faf7f4',
-                      border: '1px solid var(--ch)',
+                      background: withinWindow ? '#fffdf0' : '#faf7f4',
+                      border: `1px solid ${withinWindow ? '#ffe08a' : 'var(--ch)'}`,
+                      borderLeft: `3px solid ${withinWindow ? '#856404' : '#c9b89a'}`,
                       borderRadius: 3,
                     }}>
-                      <p style={{ margin: '0 0 3px', fontSize: 12, fontWeight: 500, color: 'var(--es)' }}>
-                        Issue with your order?
-                      </p>
-                      <p style={{ margin: '0 0 12px', fontSize: 11, color: 'var(--mu)', fontWeight: 300, lineHeight: 1.5 }}>
-                        Returns and refund requests accepted within 48 hours of completion for defective or incorrect items.
-                      </p>
-                      <button
-                        onClick={() => onRequestReturn(order)}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6,
-                          padding: '9px 18px',
-                          background: 'transparent',
-                          border: '1px solid var(--wb, #7a5a44)',
-                          color: 'var(--wb, #7a5a44)',
-                          fontFamily: 'Jost, sans-serif',
-                          fontSize: 10, letterSpacing: '.25em', textTransform: 'uppercase',
-                          cursor: 'pointer',
-                          transition: 'background .15s, color .15s',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--wb, #7a5a44)'; e.currentTarget.style.color = 'var(--iv, #faf7f4)' }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--wb, #7a5a44)' }}
-                      >
-                        <span>↩</span> Request Return / Refund
-                      </button>
+                      {withinWindow ? (
+                        <>
+                          <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 600, color: '#856404' }}>
+                            ↩ Return window open — {Math.floor(hoursLeft)}h {minsLeft}m remaining
+                          </p>
+                          <p style={{ margin: '0 0 12px', fontSize: 11, color: '#856404', fontWeight: 300, lineHeight: 1.5 }}>
+                            You may request a return, refund, or exchange for defective or incorrect items.
+                            Items must be unworn, unaltered, and have tags attached.
+                          </p>
+                          <button
+                            onClick={() => onRequestReturn(order)}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 6,
+                              padding: '9px 18px',
+                              background: 'transparent',
+                              border: '1px solid #856404',
+                              color: '#856404',
+                              fontFamily: 'Jost, sans-serif',
+                              fontSize: 10, letterSpacing: '.25em', textTransform: 'uppercase',
+                              cursor: 'pointer',
+                              transition: 'background .15s, color .15s',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#856404'; e.currentTarget.style.color = '#fff' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#856404' }}
+                          >
+                            <span>↩</span> Request Return / Refund
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 500, color: 'var(--mu)' }}>
+                            Return window closed
+                          </p>
+                          <p style={{ margin: 0, fontSize: 11, color: 'var(--mu)', fontWeight: 300, lineHeight: 1.5 }}>
+                            The 48-hour return window has passed. Returns and refund requests are no longer
+                            accepted for this order.
+                          </p>
+                        </>
+                      )}
                     </div>
-                  )}
-
-                  {/* Order is completed but past return window */}
-                  {!canRequestReturn && (
-                    <p style={{ fontSize: 11, color: 'var(--mu)', fontWeight: 300, fontStyle: 'italic' }}>
-                      Return window has closed (48 hours after completion).
-                    </p>
-                  )}
-                </div>
-              )}
+                  </div>
+                )
+              })()}
 
               {/* Refunded notice */}
               {order.status === 'refunded' && (

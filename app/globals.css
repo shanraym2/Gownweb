@@ -588,4 +588,8 @@ footer {
         .profile-page .btn-outline { background:transparent; color:var(--charcoal); border:1px solid rgba(44,36,32,0.25); }
         .profile-page .btn-outline:hover { border-color:var(--charcoal); background:rgba(44,36,32,0.04); }
 
-        
+        .conf-status--expired  { color: #721c24; background: #f8d7da; }
+.conf-status--none     { color: #6b3f2a; background: #f0e6d3; }
+.conf-status--pending  { color: #856404; background: #fff3cd; }
+.conf-status--verified { color: #155724; background: #d4edda; }
+.conf-status--rejected { color: #721c24; background: #f8d7da; }
