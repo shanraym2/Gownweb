@@ -13,6 +13,7 @@ import SizePanel  from './panels/SizePanel'
 import StylePanel from './panels/StylePanel'
 import TryOnPanel from './panels/TryOnPanel'
 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PANEL DEFINITIONS
 // ─────────────────────────────────────────────────────────────────────────────

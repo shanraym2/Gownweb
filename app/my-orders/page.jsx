@@ -144,16 +144,21 @@ function isWithinReturnWindow(order) {
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
 
+const BADGE_CLASS = {
+  placed:          'mo-badge mo-badge-placed',
+  pending_payment: 'mo-badge mo-badge-pending',
+  paid:            'mo-badge mo-badge-paid',
+  processing:      'mo-badge mo-badge-proc',
+  ready:           'mo-badge mo-badge-ready',
+  shipped:         'mo-badge mo-badge-shipped',
+  completed:       'mo-badge mo-badge-done',
+  cancelled:       'mo-badge mo-badge-cancel',
+  refunded:        'mo-badge mo-badge-refund',
+}
+
 function Badge({ status }) {
-  const c = STATUS_COLORS[status] || { bg: '#f0e6d3', color: '#6b3f2a' }
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      padding: '3px 10px', borderRadius: 20,
-      fontSize: 10, fontWeight: 600, letterSpacing: '.05em',
-      textTransform: 'uppercase', whiteSpace: 'nowrap',
-      background: c.bg, color: c.color,
-    }}>
+    <span className={BADGE_CLASS[status] || 'mo-badge mo-badge-placed'}>
       {STATUS_LABEL_SHORT[status] || status.replace(/_/g, ' ')}
     </span>
   )
@@ -361,42 +366,30 @@ function StatusTimeline({ history, status, deliveryMethod }) {
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
 function TabBar({ tab, setTab, ongoingCount, completedCount, returnsCount }) {
+  const tabs = [
+    { key: 'ongoing',   label: 'Active',   count: ongoingCount,  alert: false },
+    { key: 'completed', label: 'History',  count: completedCount, alert: false },
+    { key: 'returns',   label: 'Returns',  count: returnsCount,  alert: returnsCount > 0 },
+  ]
   return (
-    <div style={{ display: 'flex', borderBottom: '1px solid var(--ch)', marginBottom: 28, gap: 0 }}>
-      {[
-        { key: 'ongoing',   label: 'Active',   count: ongoingCount },
-        { key: 'completed', label: 'History',  count: completedCount },
-        { key: 'returns',   label: 'Returns',  count: returnsCount },
-      ].map(({ key, label, count }) => (
-        <button
-          key={key}
-          onClick={() => setTab(key)}
-          style={{
-            padding: '12px 0',
-            marginRight: 32,
-            fontSize: 10, letterSpacing: '.3em', textTransform: 'uppercase',
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontFamily: 'Jost, sans-serif',
-            color: tab === key ? 'var(--es)' : 'var(--mu)',
-            borderBottom: `2px solid ${tab === key ? 'var(--go)' : 'transparent'}`,
-            transition: 'color .15s, border-color .15s',
-            display: 'flex', alignItems: 'center', gap: 7,
-          }}
-        >
-          {label}
-          {count > 0 && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 18, height: 18, borderRadius: '50%',
-              background: tab === key ? 'var(--go)' : 'var(--ch)',
-              color: tab === key ? '#fff' : 'var(--mu)',
-              fontSize: 9, fontWeight: 700,
-            }}>
-              {count}
-            </span>
-          )}
-        </button>
-      ))}
+    <div className="mo-tabs">
+      {tabs.map(({ key, label, count, alert }) => {
+        const active = tab === key
+        return (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`mo-tab ${active ? 'mo-tab--active' : 'mo-tab--inactive'}`}
+          >
+            {label}
+            {count > 0 && (
+              <span className={`mo-tab-count ${alert ? 'mo-tab-count--alert' : active ? 'mo-tab-count--active' : 'mo-tab-count--inactive'}`}>
+                {count}
+              </span>
+            )}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -466,7 +459,13 @@ function ReturnCard({ ret }) {
         <div style={{ borderTop: '1px solid var(--ch)', padding: '20px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Status banner */}
-          <div style={{ padding: '12px 14px', borderRadius: 4, background: meta.bg, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        <div className={`mo-callout ${
+          ret.status === 'pending'   ? 'mo-callout--warn'    :
+          ret.status === 'approved'  ? 'mo-callout--success'  :
+          ret.status === 'rejected'  ? 'mo-callout--danger'   :
+          ret.status === 'completed' ? 'mo-callout--success'  :
+          'mo-callout--neutral'
+        }`}>
             <span style={{ fontSize: 18, flexShrink: 0 }}>{meta.icon}</span>
             <div>
               <p style={{ margin: '0 0 2px', fontSize: 12, fontWeight: 600, color: meta.color }}>{meta.label}</p>
@@ -557,53 +556,26 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestRetur
 
       {/* ── Pending payment warning strip ── */}
       {needsProof && (
-        <div style={{
-          background: '#fff3cd', borderBottom: '1px solid #ffe08a',
-          padding: '8px 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, flexWrap: 'wrap',
-        }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: '#856404', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>⚠</span> Proof of payment required within 24 hours
-          </span>
-          <Link href={`/order-confirmation/${order.id}`}
-            style={{ fontSize: 10, letterSpacing: '.2em', textTransform: 'uppercase', color: '#856404', textDecoration: 'underline', textUnderlineOffset: 3 }}
-          >
+        <div className="mo-proof-strip">
+          <span className="mo-proof-strip-msg">⚠ Proof of payment required within 24 hours</span>
+          <Link href={`/order-confirmation/${order.id}`} className="mo-proof-strip-link">
             Upload now →
           </Link>
         </div>
       )}
-
-      {/* ── Proof uploaded / under review strip ── */}
       {order.status === 'pending_payment' && order.proofStatus === 'pending' && (
-        <div style={{
-          background: '#e8f4fd', borderBottom: '1px solid #b8d9f0',
-          padding: '8px 20px',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <span style={{ fontSize: 13 }}>🕐</span>
-          <span style={{ fontSize: 11, fontWeight: 500, color: '#0a5276' }}>
-            Proof of payment uploaded — awaiting admin verification
-          </span>
+        <div className="mo-proof-review-strip">
+          <span>🕐</span> Proof uploaded — awaiting admin verification
         </div>
       )}
       {order.status === 'pending_payment' && order.proofStatus === 'rejected' && (
-        <div style={{
-          background: '#fdf0f0', borderBottom: '1px solid #f0b8b8',
-          padding: '8px 20px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, flexWrap: 'wrap',
-        }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: '#721c24', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>✕</span> Proof rejected — please upload a new screenshot
-          </span>
-          <Link href={`/order-confirmation/${order.id}`}
-      style={{ fontSize: 10, letterSpacing: '.2em', textTransform: 'uppercase', color: '#721c24', textDecoration: 'underline', textUnderlineOffset: 3 }}
-    >
-      Re-upload →
-    </Link>
-  </div>
-)}
+        <div className="mo-proof-rejected-strip">
+          <span>✕ Proof rejected — please re-upload a clear screenshot</span>
+          <Link href={`/order-confirmation/${order.id}`} className="mo-proof-strip-link" style={{ color: '#8a2c20' }}>
+            Re-upload →
+          </Link>
+        </div>
+      )}
 
       {/* ── Header row ── */}
       <div
@@ -827,25 +799,10 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestRetur
               
               {/* Confirm receipt */}
               {['ready', 'shipped'].includes(order.status) && (
-                <div style={{
-                  marginTop: 20, padding: '14px 16px',
-                  background: 'var(--ch)', borderRadius: 3,
-                }}>
-                  <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 500, color: 'var(--es)' }}>Received your order?</p>
-                  <p style={{ margin: '0 0 12px', fontSize: 11, color: 'var(--mu)', fontWeight: 300, lineHeight: 1.5 }}>
-                    Confirm once you have your gown in hand.
-                  </p>
-                  <button
-                    onClick={() => onConfirmReceipt(order.id)}
-                    style={{
-                      display: 'inline-block', padding: '10px 20px',
-                      background: 'var(--es)', color: 'var(--iv)',
-                      fontFamily: 'Jost, sans-serif',
-                      fontSize: 10, letterSpacing: '.3em', textTransform: 'uppercase',
-                      border: 'none', cursor: 'pointer',
-                      transition: 'background .2s',
-                    }}
-                  >
+                <div className="mo-callout mo-callout--neutral" style={{ marginTop: 20 }}>
+                  <p className="mo-callout-title" style={{ color: 'var(--es)' }}>Received your order?</p>
+                  <p className="mo-callout-body" style={{ marginBottom: 12 }}>Confirm once you have your gown in hand.</p>
+                  <button onClick={() => onConfirmReceipt(order.id)} className="mo-confirm-btn">
                     Yes, I've received my order
                   </button>
                 </div>
@@ -863,86 +820,46 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestRetur
                 return (
                   <div style={{ marginTop: 20 }}>
                     {/* Completion confirmation */}
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      fontSize: 12, color: '#155724', fontWeight: 300,
-                      marginBottom: 14,
-                    }}>
-                      <span style={{
-                        width: 20, height: 20, borderRadius: '50%',
-                        background: '#d4edda', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 10, flexShrink: 0,
-                      }}>✓</span>
+                    <div className="mo-completed-check">
+                      <span className="mo-completed-dot">✓</span>
                       Order completed — thank you for choosing JCE Bridal!
                     </div>
 
                     {/* Return window card */}
-                    <div style={{
-                      padding: '14px 16px',
-                      background: withinWindow ? '#fffdf0' : '#faf7f4',
-                      border: `1px solid ${withinWindow ? '#ffe08a' : 'var(--ch)'}`,
-                      borderLeft: `3px solid ${withinWindow ? '#856404' : '#c9b89a'}`,
-                      borderRadius: 3,
-                    }}>
-                      {withinWindow ? (
-                        <>
-                          <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 600, color: '#856404' }}>
-                            ↩ Return window open — {Math.floor(hoursLeft)}h {minsLeft}m remaining
-                          </p>
-                          <p style={{ margin: '0 0 12px', fontSize: 11, color: '#856404', fontWeight: 300, lineHeight: 1.5 }}>
-                            You may request a return, refund, or exchange for defective or incorrect items.
-                            Items must be unworn, unaltered, and have tags attached.
-                          </p>
-                          <button
-                            onClick={() => onRequestReturn(order)}
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 6,
-                              padding: '9px 18px',
-                              background: 'transparent',
-                              border: '1px solid #856404',
-                              color: '#856404',
-                              fontFamily: 'Jost, sans-serif',
-                              fontSize: 10, letterSpacing: '.25em', textTransform: 'uppercase',
-                              cursor: 'pointer',
-                              transition: 'background .15s, color .15s',
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.background = '#856404'; e.currentTarget.style.color = '#fff' }}
-                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#856404' }}
-                          >
-                            <span>↩</span> Request Return / Refund
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 500, color: 'var(--mu)' }}>
-                            Return window closed
-                          </p>
-                          <p style={{ margin: 0, fontSize: 11, color: 'var(--mu)', fontWeight: 300, lineHeight: 1.5 }}>
-                            The 48-hour return window has passed. Returns and refund requests are no longer
-                            accepted for this order.
-                          </p>
-                        </>
-                      )}
-                    </div>
+                   <div className={withinWindow ? 'mo-window-open' : 'mo-window-closed'}>
+                    {withinWindow ? (
+                      <>
+                        <p className="mo-window-open-title">
+                          ↩ Return window open — {Math.floor(hoursLeft)}h {minsLeft}m remaining
+                        </p>
+                        <p className="mo-window-open-body">
+                          You may request a return, refund, or exchange for defective or incorrect items.
+                          Items must be unworn, unaltered, and have tags attached.
+                        </p>
+                        <button onClick={() => onRequestReturn(order)} className="mo-return-btn">
+                          <span>↩</span> Request Return / Refund
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="mo-window-closed-title">Return window closed</p>
+                        <p className="mo-window-closed-body">
+                          The 48-hour return window has passed. Returns and refund requests are no longer accepted.
+                        </p>
+                      </>
+                    )}
+                  </div>
                   </div>
                 )
               })()}
 
               {/* Refunded notice */}
               {order.status === 'refunded' && (
-                <div style={{
-                  marginTop: 20, display: 'flex', alignItems: 'center', gap: 8,
-                  fontSize: 12, color: '#7a3608', fontWeight: 300,
-                }}>
-                  <span style={{
-                    width: 20, height: 20, borderRadius: '50%',
-                    background: '#fce8d4', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 10, flexShrink: 0,
-                  }}>↩</span>
+                <div className="mo-refunded-notice" style={{ marginTop: 20 }}>
+                  <span className="mo-refunded-dot">↩</span>
                   A refund has been issued for this order.
                 </div>
               )}
-
               {/* Links */}
               <div style={{ marginTop: 20, paddingTop: 14, borderTop: '1px solid var(--ch)' }}>
                 <Link
@@ -1103,7 +1020,7 @@ export default function MyOrdersPage() {
 
       <section className="mo-hero">
         <span className="mo-eyebrow">My Account</span>
-        <h1 className="mo-h1">{content.heading}</h1>
+        <h1 className="mo-h1">{content.heading || 'My Orders'}</h1>
         <p className="mo-sub">Track your orders and manage payment proofs.</p>
       </section>
 
@@ -1126,19 +1043,13 @@ export default function MyOrdersPage() {
 
             {/* Pending payment banner */}
             {tab === 'ongoing' && ongoing.filter(o => o.status === 'pending_payment').length > 0 && (
-              <div style={{
-                marginBottom: 20, padding: '12px 16px',
-                background: '#fff3cd', border: '1px solid #ffe08a', borderRadius: 3,
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}>
-                <span style={{ fontSize: 16 }}>⚠</span>
+              <div className="mo-pending-banner">
+                <span className="mo-pending-banner-icon">⚠</span>
                 <div>
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 500, color: '#856404' }}>
+                  <p className="mo-pending-banner-title">
                     {ongoing.filter(o => o.status === 'pending_payment').length} order{ongoing.filter(o => o.status === 'pending_payment').length > 1 ? 's' : ''} awaiting payment proof
                   </p>
-                  <p style={{ margin: '2px 0 0', fontSize: 11, fontWeight: 300, color: '#856404' }}>
-                    Upload within 24 hours to avoid cancellation.
-                  </p>
+                  <p className="mo-pending-banner-sub">Upload within 24 hours to avoid cancellation.</p>
                 </div>
               </div>
             )}
