@@ -49,23 +49,7 @@ export default function ProfileSidebar({ user, onSave, saving, saveMsg, open, on
         >
           {open ? '‹' : '›'}
         </button>
-        {/* Unit toggle — only visible when sidebar is open */}
-        {open && (
-          <button
-            onClick={toggleUnit}
-            style={{
-              fontSize: '11px', padding: '2px 8px', borderRadius: '10px', cursor: 'pointer',
-              border: '0.5px solid #e0ddd8',
-              background: '#f5f3ef',
-              color: '#888',
-              marginTop: '4px',
-              alignSelf: 'flex-start',
-            }}
-            aria-label={`Switch to ${unit === 'cm' ? 'inches' : 'centimetres'}`}
-          >
-            {unit === 'cm' ? 'cm' : 'in'}
-          </button>
-        )}
+        
       </div>
 
       {open && (
@@ -164,7 +148,19 @@ export default function ProfileSidebar({ user, onSave, saving, saveMsg, open, on
 
           {/* Override measurements — input boundary conversion */}
           <div className="fr-sidebar-section fr-sidebar-manual">
-            <p className="fr-sidebar-label">Override measurements</p>
+           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '7px' }}>
+              <p className="fr-sidebar-label" style={{ margin: 0 }}>Override measurements</p>
+              <button
+                onClick={toggleUnit}
+                style={{
+                  fontSize: '11px', padding: '2px 8px', borderRadius: '10px', cursor: 'pointer',
+                  border: '0.5px solid #e0ddd8', background: '#f5f3ef', color: '#888',
+                }}
+                aria-label={`Switch to ${unit === 'cm' ? 'inches' : 'centimetres'}`}
+              >
+                {unit === 'cm' ? 'cm' : 'in'}
+              </button>
+            </div>
             <div className="fr-manual-grid">
               {[
                 ['Bust',   'bust'  ],
@@ -172,12 +168,10 @@ export default function ProfileSidebar({ user, onSave, saving, saveMsg, open, on
                 ['Hips',   'hips'  ],
                 ['Height', 'height'],
               ].map(([l, k]) => {
-                // Display: convert stored cm → active unit for the input value
                 const storedCm   = profile[k]
                 const inputValue = unit === 'in' && storedCm != null
                   ? (cmToIn(storedCm) ?? '')
                   : (storedCm || '')
-
                 return (
                   <label key={k} className="fr-manual-field">
                     <span>{l} ({unit})</span>

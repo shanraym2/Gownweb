@@ -75,6 +75,18 @@ function MeasurementsCard({ userId }) {
   const [deleting,     setDeleting    ] = useState(false)
   const [msg,          setMsg         ] = useState(null)
   const [form, setForm] = useState({ bust: '', waist: '', hips: '', height: '', weight: '' })
+  const [unit, setUnit] = useState(() =>
+  typeof window !== 'undefined' ? (localStorage.getItem('fr_unit') || 'cm') : 'cm'
+  )
+  const toggleUnit = () => setUnit(u => {
+    const n = u === 'cm' ? 'in' : 'cm'
+    localStorage.setItem('fr_unit', n)
+    return n
+  })
+  const CM_PER_INCH = 2.54
+  const cmToIn = cm => cm != null ? Math.round((cm / CM_PER_INCH) * 10) / 10 : null
+  const inToCm = inches => inches != null ? Math.round(inches * CM_PER_INCH * 10) / 10 : null
+  const dispVal = (cm) => cm == null ? '—' : unit === 'in' ? `${cmToIn(cm)} in` : `${cm} cm`
 
   useEffect(() => {
     if (!userId) { setLoading(false); return }
@@ -125,13 +137,20 @@ function MeasurementsCard({ userId }) {
 
   const handleSave = async () => {
     setSaving(true); setMsg(null)
+    const toStoredCm = (key, val) => {
+      if (!val) return null
+      const n = Number(val)
+      if (!Number.isFinite(n)) return null
+      // weight is always kg, height/bust/waist/hips convert if unit is 'in'
+      return (unit === 'in' && key !== 'weight') ? Math.round(n * CM_PER_INCH * 10) / 10 : n
+    }
     try {
       const body = {
-        bust_cm:   form.bust   ? Number(form.bust)   : null,
-        waist_cm:  form.waist  ? Number(form.waist)  : null,
-        hips_cm:   form.hips   ? Number(form.hips)   : null,
-        height_cm: form.height ? Number(form.height) : null,
-        weight_kg: form.weight ? Number(form.weight) : null,
+        bust_cm:   toStoredCm('bust',   form.bust),
+        waist_cm:  toStoredCm('waist',  form.waist),
+        hips_cm:   toStoredCm('hips',   form.hips),
+        height_cm: toStoredCm('height', form.height),
+        weight_kg: toStoredCm('weight', form.weight),
         source:    'manual',
       }
       if (!body.bust_cm && !body.waist_cm && !body.hips_cm) {
@@ -234,15 +253,17 @@ function MeasurementsCard({ userId }) {
         <>
           <div className="profile-meas-grid">
             {[
-              { label: 'Bust',   val: meas.bust_cm,   unit: 'cm' },
-              { label: 'Waist',  val: meas.waist_cm,  unit: 'cm' },
-              { label: 'Hips',   val: meas.hips_cm,   unit: 'cm' },
-              { label: 'Height', val: meas.height_cm, unit: 'cm' },
-              { label: 'Weight', val: meas.weight_kg, unit: 'kg' },
+             { label: 'Bust',   val: meas.bust_cm,   isKg: false },
+             { label: 'Waist',  val: meas.waist_cm,  isKg: false },
+             { label: 'Hips',   val: meas.hips_cm,   isKg: false },
+             { label: 'Height', val: meas.height_cm, isKg: false },
+             { label: 'Weight', val: meas.weight_kg, isKg: true  },
             ].filter(f => f.val != null).map(f => (
               <div key={f.label} className="profile-meas-item">
                 <div className="profile-meas-label">{f.label}</div>
-                <div className="profile-meas-val">{f.val} <span className="profile-meas-unit">{f.unit}</span></div>
+                <div className="profile-meas-val">
+                  {f.isKg ? `${f.val} kg` : dispVal(f.val)}
+                </div>
               </div>
             ))}
             <div className="profile-meas-item profile-meas-item--source">
@@ -303,16 +324,26 @@ function MeasurementsCard({ userId }) {
       {/* ── Edit form ── */}
       {editing && (
         <div className="profile-meas-form">
-          <p className="profile-meas-form-note">
-            Enter measurements in centimetres (cm). At least one of bust, waist, or hips is required.
-          </p>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <p className="profile-meas-form-note" style={{ margin:0 }}>
+              Enter in {unit === 'in' ? 'inches' : 'centimetres'}. At least one of bust, waist, or hips is required.
+            </p>
+            <button
+              onClick={toggleUnit}
+              style={{ fontSize:'11px', padding:'2px 8px', borderRadius:'10px', cursor:'pointer',
+                border:'0.5px solid #e0ddd8', background:'#f5f3ef', color:'#888', flexShrink:0 }}
+              aria-label={`Switch to ${unit === 'cm' ? 'inches' : 'centimetres'}`}
+            >
+              {unit === 'cm' ? 'cm' : 'in'}
+            </button>
+          </div>
           <div className="profile-meas-form-grid">
             {[
-              { label: 'Bust / chest',     key: 'bust',   placeholder: 'e.g. 88',  min: 60,  max: 150, unit: 'cm' },
-              { label: 'Waist',            key: 'waist',  placeholder: 'e.g. 70',  min: 50,  max: 140, unit: 'cm' },
-              { label: 'Hips',             key: 'hips',   placeholder: 'e.g. 95',  min: 60,  max: 160, unit: 'cm' },
-              { label: 'Height',           key: 'height', placeholder: 'e.g. 162', min: 130, max: 220, unit: 'cm', optional: true },
-              { label: 'Weight',           key: 'weight', placeholder: 'e.g. 58',  min: 35,  max: 200, unit: 'kg', optional: true },
+              { label: 'Bust / chest', key: 'bust',   placeholder: unit==='in'?'e.g. 34.5':'e.g. 88',  unit: unit },
+              { label: 'Waist',        key: 'waist',  placeholder: unit==='in'?'e.g. 27.5':'e.g. 70',  unit: unit },
+              { label: 'Hips',         key: 'hips',   placeholder: unit==='in'?'e.g. 37.5':'e.g. 95',  unit: unit },
+              { label: 'Height',       key: 'height', placeholder: unit==='in'?'e.g. 64':'e.g. 162',   unit: unit, optional: true },
+              { label: 'Weight',       key: 'weight', placeholder: 'e.g. 58',  unit: 'kg', optional: true },
             ].map(f => (
               <div key={f.key} className="profile-field">
                 <label className="profile-field-label">
