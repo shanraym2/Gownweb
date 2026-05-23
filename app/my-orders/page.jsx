@@ -360,12 +360,13 @@ function StatusTimeline({ history, status, deliveryMethod }) {
 
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
-function TabBar({ tab, setTab, ongoingCount, completedCount }) {
+function TabBar({ tab, setTab, ongoingCount, completedCount, returnsCount }) {
   return (
     <div style={{ display: 'flex', borderBottom: '1px solid var(--ch)', marginBottom: 28, gap: 0 }}>
       {[
-        { key: 'ongoing',   label: 'Active',  count: ongoingCount },
-        { key: 'completed', label: 'History', count: completedCount },
+        { key: 'ongoing',   label: 'Active',   count: ongoingCount },
+        { key: 'completed', label: 'History',  count: completedCount },
+        { key: 'returns',   label: 'Returns',  count: returnsCount },
       ].map(({ key, label, count }) => (
         <button
           key={key}
@@ -399,14 +400,143 @@ function TabBar({ tab, setTab, ongoingCount, completedCount }) {
     </div>
   )
 }
+const RETURN_STATUS_META = {
+  pending:   { bg: '#fff3cd', color: '#856404', label: 'Pending Review', icon: '⏳' },
+  approved:  { bg: '#d4edda', color: '#155724', label: 'Approved',       icon: '✓'  },
+  rejected:  { bg: '#f8d7da', color: '#721c24', label: 'Rejected',       icon: '✕'  },
+  completed: { bg: '#d4edda', color: '#155724', label: 'Processed',      icon: '✓'  },
+  cancelled: { bg: '#f0e6d3', color: '#6b3f2a', label: 'Cancelled',      icon: '✕'  },
+}
 
+const RETURN_TYPE_LABEL = { return: 'Return', refund: 'Refund', exchange: 'Exchange' }
+
+function ReturnCard({ ret }) {
+  const [expanded, setExpanded] = useState(false)
+  const meta = RETURN_STATUS_META[ret.status] || { bg: '#f0e6d3', color: '#6b3f2a', label: ret.status, icon: '·' }
+
+  return (
+    <div style={{
+      border: '1px solid var(--ch)', borderRadius: 4, marginBottom: 10, overflow: 'hidden',
+      boxShadow: expanded ? '0 4px 24px rgba(44,26,16,.07)' : 'none',
+      transition: 'box-shadow .2s',
+    }}>
+      {/* Header */}
+      <div
+        onClick={() => setExpanded(p => !p)}
+        role="button" tabIndex={0}
+        onKeyDown={e => e.key === 'Enter' && setExpanded(p => !p)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 16,
+          padding: '18px 20px', cursor: 'pointer',
+          background: expanded ? 'rgba(240,230,211,.18)' : 'transparent',
+          transition: 'background .15s',
+        }}
+      >
+        <div style={{ width: 3, height: 36, borderRadius: 2, flexShrink: 0, background: meta.color }} />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 3, flexWrap: 'wrap' }}>
+            <p style={{ margin: 0, fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 400, color: 'var(--es)' }}>
+              {ret.orderNumber}
+            </p>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 10px', borderRadius: 20,
+              fontSize: 10, fontWeight: 600, letterSpacing: '.05em',
+              textTransform: 'uppercase', whiteSpace: 'nowrap',
+              background: meta.bg, color: meta.color,
+            }}>
+              {meta.icon} {meta.label}
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--mu)' }}>
+            {RETURN_TYPE_LABEL[ret.type] || ret.type} · {fmtDate(ret.createdAt)}
+          </p>
+        </div>
+
+        <span style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .2s', color: 'var(--mu)', flexShrink: 0 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </div>
+
+      {/* Body */}
+      {expanded && (
+        <div style={{ borderTop: '1px solid var(--ch)', padding: '20px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Status banner */}
+          <div style={{ padding: '12px 14px', borderRadius: 4, background: meta.bg, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>{meta.icon}</span>
+            <div>
+              <p style={{ margin: '0 0 2px', fontSize: 12, fontWeight: 600, color: meta.color }}>{meta.label}</p>
+              <p style={{ margin: 0, fontSize: 11, color: meta.color, opacity: 0.85, lineHeight: 1.5 }}>
+                {ret.status === 'pending'   && 'Our team will review your request within 1–2 business days.'}
+                {ret.status === 'approved'  && 'Your request has been approved. Please bring the item(s) to our store in original condition.'}
+                {ret.status === 'rejected'  && 'Unfortunately we could not process this request.'}
+                {ret.status === 'completed' && 'Your request has been fully processed.'}
+                {ret.status === 'cancelled' && 'This request was cancelled.'}
+              </p>
+              {ret.adminNote && (
+                <p style={{ margin: '6px 0 0', fontSize: 11, color: meta.color, fontStyle: 'italic' }}>
+                  Note from team: {ret.adminNote}
+                </p>
+              )}
+              {ret.refundAmount && (
+                <p style={{ margin: '4px 0 0', fontSize: 12, fontWeight: 600, color: meta.color }}>
+                  Refund amount: {fmtPhp(ret.refundAmount)}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Details */}
+          <div>
+            <p style={{ margin: '0 0 8px', fontSize: 9, letterSpacing: '.35em', textTransform: 'uppercase', color: 'var(--mu)' }}>Request Details</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {[
+                ['Type',   RETURN_TYPE_LABEL[ret.type] || ret.type],
+                ['Reason', ret.reason],
+                ...(ret.details ? [['Details', ret.details]] : []),
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', gap: 16, fontSize: 12 }}>
+                  <span style={{ fontSize: 10, letterSpacing: '.15em', textTransform: 'uppercase', color: 'var(--mu)', flexShrink: 0, width: 60 }}>{k}</span>
+                  <span style={{ color: 'var(--es)', fontWeight: 300, lineHeight: 1.5 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Items */}
+          {(ret.items || []).length > 0 && (
+            <div>
+              <p style={{ margin: '0 0 8px', fontSize: 9, letterSpacing: '.35em', textTransform: 'uppercase', color: 'var(--mu)' }}>Items</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {ret.items.map((item, i) => (
+                  <div key={i} style={{ fontSize: 12, fontWeight: 300, color: 'var(--es)' }}>
+                    {item.gownName}
+                    {item.sizeLabel ? <span style={{ color: 'var(--mu)' }}> · {item.sizeLabel}</span> : null}
+                    <span style={{ color: 'var(--mu)' }}> ×{item.quantity || 1}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 // ── Order card ────────────────────────────────────────────────────────────────
 
 function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestReturn, user }) {
   const isOngoing   = ONGOING_STATUSES.has(order.status)
   const isCancelled = order.status === 'cancelled' || order.status === 'refunded'
   const paymentMethod = order.payment || order.paymentMethod
-  const needsProof    = order.status === 'pending_payment' && paymentMethod !== 'cash'
+  const needsProof    = order.status === 'pending_payment'
+                   && paymentMethod !== 'cash'
+                   && order.proofStatus !== 'pending'
+                   && order.proofStatus !== 'verified'
 
   // Show return button only for completed orders within the 48-hour window
   const canRequestReturn = order.status === 'completed' && isWithinReturnWindow(order)
@@ -443,6 +573,37 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestRetur
           </Link>
         </div>
       )}
+
+      {/* ── Proof uploaded / under review strip ── */}
+      {order.status === 'pending_payment' && order.proofStatus === 'pending' && (
+        <div style={{
+          background: '#e8f4fd', borderBottom: '1px solid #b8d9f0',
+          padding: '8px 20px',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ fontSize: 13 }}>🕐</span>
+          <span style={{ fontSize: 11, fontWeight: 500, color: '#0a5276' }}>
+            Proof of payment uploaded — awaiting admin verification
+          </span>
+        </div>
+      )}
+      {order.status === 'pending_payment' && order.proofStatus === 'rejected' && (
+        <div style={{
+          background: '#fdf0f0', borderBottom: '1px solid #f0b8b8',
+          padding: '8px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 500, color: '#721c24', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>✕</span> Proof rejected — please upload a new screenshot
+          </span>
+          <Link href={`/order-confirmation/${order.id}`}
+      style={{ fontSize: 10, letterSpacing: '.2em', textTransform: 'uppercase', color: '#721c24', textDecoration: 'underline', textUnderlineOffset: 3 }}
+    >
+      Re-upload →
+    </Link>
+  </div>
+)}
 
       {/* ── Header row ── */}
       <div
@@ -836,6 +997,7 @@ export default function MyOrdersPage() {
   const [tab,         setTab        ] = useState('ongoing')
   const [expandedId,  setExpandedId ] = useState(null)
   const [returnOrder, setReturnOrder] = useState(null)   // ← NEW: order being returned
+  const [returns,     setReturns    ] = useState([])
 
   const [content, setContent] = useState({
     heading:     'My Orders',
@@ -860,13 +1022,16 @@ export default function MyOrdersPage() {
     setLoading(true)
     setError('')
     try {
-      const res  = await fetch('/api/my-orders', {
-        headers: { 'x-user-id': currentUser.id },
-      })
-      const data = await res.json()
-      if (!data.ok) throw new Error(data.error || 'Failed to load orders')
-      const list = data.orders || []
+      const [ordersRes, returnsRes] = await Promise.all([
+        fetch('/api/my-orders',  { headers: { 'x-user-id': currentUser.id } }),
+        fetch('/api/returns',    { headers: { 'x-user-id': currentUser.id } }),
+      ])
+      const ordersData  = await ordersRes.json()
+      const returnsData = await returnsRes.json()
+      if (!ordersData.ok) throw new Error(ordersData.error || 'Failed to load orders')
+      const list = ordersData.orders || []
       setOrders(list)
+      setReturns(returnsData.ok ? (returnsData.returns || []) : [])
       const firstOngoing = list.find(o => ONGOING_STATUSES.has(o.status))
       if (firstOngoing) setExpandedId(firstOngoing.id)
     } catch (e) {
@@ -894,12 +1059,13 @@ export default function MyOrdersPage() {
   // Called by ReturnModal on success — reload orders to reflect any status changes
   const handleReturnSuccess = useCallback(() => {
     setReturnOrder(null)
+    setTab('returns')
     loadOrders(user)
   }, [loadOrders, user])
 
   const ongoing   = orders.filter(o => ONGOING_STATUSES.has(o.status))
   const completed = orders.filter(o => TERMINAL_STATUSES.has(o.status))
-  const shown     = tab === 'ongoing' ? ongoing : completed
+  const pendingReturns = returns.filter(r => r.status === 'pending').length
 
   if (!authReady) return null
 
@@ -937,6 +1103,7 @@ export default function MyOrdersPage() {
               setTab={setTab}
               ongoingCount={ongoing.length}
               completedCount={completed.length}
+              returnsCount={pendingReturns}
             />
 
             {/* Pending payment banner */}
@@ -964,7 +1131,16 @@ export default function MyOrdersPage() {
               </div>
             ) : error ? (
               <p style={{ fontSize: 13, color: 'var(--ro)' }}>{error}</p>
-            ) : shown.length === 0 ? (
+            ) : tab === 'returns' ? (
+              returns.length === 0 ? (
+                <div className="mo-empty" style={{ padding: '60px 0' }}>
+                  <p className="mo-empty-title">No return requests</p>
+                  <p className="mo-empty-sub">Return and refund requests you submit will appear here.</p>
+                </div>
+              ) : (
+                returns.map(ret => <ReturnCard key={ret.id} ret={ret} />)
+              )
+            ) : (tab === 'ongoing' ? ongoing : completed).length === 0 ? (
               <div className="mo-empty" style={{ padding: '60px 0' }}>
                 <p className="mo-empty-title">
                   {tab === 'ongoing' ? 'No active orders' : content.empty_title}
@@ -979,15 +1155,15 @@ export default function MyOrdersPage() {
                 )}
               </div>
             ) : (
-              shown.map(order => (
+              (tab === 'ongoing' ? ongoing : completed).map(order => (
                 <OrderCard
                   key={order.id}
                   order={order}
                   expanded={expandedId === order.id}
                   onToggle={() => setExpandedId(p => p === order.id ? null : order.id)}
                   onConfirmReceipt={handleConfirmReceipt}
-                  onRequestReturn={setReturnOrder}   // ← NEW
-                  user={user}                         // ← NEW
+                  onRequestReturn={setReturnOrder}
+                  user={user}
                 />
               ))
             )}
