@@ -132,7 +132,7 @@ function FittingRoomInner() {
             weight_kg: profile.weight ?? null, source: profile.source ?? 'manual',
           }),
         }).then(r => r.json()),
-        fetch('/api/auth/save-style-prefs', {
+        fetch('/api/auth/style-prefs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
           body: JSON.stringify({
