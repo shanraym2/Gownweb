@@ -36,6 +36,86 @@ export function useFittingRoom() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SEGMENT KEYWORD FILTER TABLE
+// Defined at module level — no re-allocation on every render.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SEGMENT_KEYWORDS = {
+  women:    ['women', 'woman', 'ladies', 'bridal', 'gown', 'dress'],
+  men:      ['men', 'man', 'male', 'suit', 'barong'],
+  children: ['kids', 'children', 'junior', 'child'],
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADDITIVE SCORING LAYERS
+//
+// Pure functions — no side effects, no external state access, no mutation.
+// Every function returns 0 when required inputs are missing so the pipeline
+// degrades gracefully on incomplete gown data or partial profile state.
+//
+// Pattern:
+//   finalScore = scoreGown(gown, profile).score
+//              + silhouetteBonus(gown, profile)
+//              + colorHarmonyBonus(gown, profile)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Silhouette × body-shape affinity weights.
+// Values > 1.0 are a boost; values < 1.0 are a mild penalty.
+// Missing combinations return 0 (neutral — no effect on ranking).
+const SILHOUETTE_AFFINITY = {
+  hourglass:        { mermaid: 1.2, a_line: 1.0, sheath: 0.8 },
+  pear:             { a_line: 1.2, ballgown: 1.1, mermaid: 0.7 },
+  apple:            { empire: 1.2, a_line: 1.0 },
+  rectangle:        { sheath: 1.1, a_line: 1.0 },
+  invertedTriangle: { ballgown: 1.2, a_line: 1.0 },
+}
+
+/**
+ * silhouetteBonus(gown, profile)
+ * Returns the affinity weight for a gown silhouette given the detected body
+ * shape, or 0 if either field is absent or the combination is not in the table.
+ *
+ * @param {{ silhouette?: string }} gown
+ * @param {{ bodyShape?: string }}  profile
+ * @returns {number}
+ */
+function silhouetteBonus(gown, profile) {
+  if (!gown?.silhouette || !profile?.bodyShape) return 0
+  return SILHOUETTE_AFFINITY?.[profile.bodyShape]?.[gown.silhouette] ?? 0
+}
+
+// Skin-tone undertone → flattering gown color families.
+// Keys match profile.undertone values ('warm', 'cool', 'neutral').
+// Falls back on profile.skinTone when undertone is absent (see function below).
+const COLOR_HARMONY_MAP = {
+  warm:    ['gold', 'red', 'orange', 'coral', 'ivory', 'champagne'],
+  cool:    ['blue', 'silver', 'emerald', 'lavender', 'sage', 'white'],
+  neutral: ['black', 'white', 'beige', 'blush', 'navy', 'dusty rose'],
+}
+
+/**
+ * colorHarmonyBonus(gown, profile)
+ * Returns 0.8 when gown.dominantColor is in the harmony list for the
+ * profile's undertone (preferred) or skinTone (fallback), or 0 otherwise.
+ *
+ * Undertone is checked first because it is a more reliable aesthetic signal
+ * than raw skin tone brightness. Falls back to skinTone so that profiles
+ * where undertone has not yet been detected still receive color bonuses.
+ *
+ * @param {{ dominantColor?: string }} gown
+ * @param {{ undertone?: string, skinTone?: string }} profile
+ * @returns {number}
+ */
+function colorHarmonyBonus(gown, profile) {
+  if (!gown?.dominantColor) return 0
+  const toneKey = profile?.undertone || profile?.skinTone
+  if (!toneKey) return 0
+  const colors = COLOR_HARMONY_MAP?.[toneKey]
+  if (!colors) return 0
+  return colors.includes(String(gown.dominantColor).toLowerCase()) ? 0.8 : 0
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PROVIDER
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -58,10 +138,7 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
     setProfile(p => ({ ...p, ...patch }))
   }, [])
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SIZE CHART — reload when segment changes
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // Reload sizes when segment changes
   useEffect(() => {
     const seg = profile.segment ?? 'women'
     fetch(`/api/size-chart?segment=${seg}`)
@@ -70,10 +147,7 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
       .catch(() => {})
   }, [profile.segment])
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // SIZE SCORING
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // Size scoring
   useEffect(() => {
     if (!profile.bust && !profile.waist && !profile.hips) return
     if (!sizes?.length) return
@@ -81,13 +155,25 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
     const { bust, waist, hips, source } = profile
     let best = null, bestScore = Infinity
 
+    // ── WAIST-ANCHORED SCORING ─────────────────────────────────────────────
+    // Waist is the most accurate camera measurement (closest to tape) because
+    // it is computed as a conservative proxy from shoulder width rather than
+    // directly from hip KPs, which carry more correction uncertainty.
+    // Bust is the least reliable (shoulder span overestimates chest width).
+    //
+    // Weights: waist 3× · hips 2× · bust 1×
+    // This means waist agreement dominates size selection. Bust still
+    // participates but cannot override a strong waist+hip match.
+    // ──────────────────────────────────────────────────────────────────────
+    const W = { bust: 1, waist: 3, hips: 2 }
+
     for (const sz of sizes) {
-      let score = 0, hits = 0
-      if (bust  && sz.bust_min  != null) { score += Math.abs(bust  - (sz.bust_min  + sz.bust_max)  / 2); hits++ }
-      if (waist && sz.waist_min != null) { score += Math.abs(waist - (sz.waist_min + sz.waist_max) / 2); hits++ }
-      if (hips  && sz.hip_min   != null) { score += Math.abs(hips  - (sz.hip_min   + sz.hip_max)   / 2); hits++ }
-      if (hits === 0) continue
-      score /= hits
+      let score = 0, totalW = 0
+      if (bust  && sz.bust_min  != null) { score += W.bust  * Math.abs(bust  - (sz.bust_min  + sz.bust_max)  / 2); totalW += W.bust  }
+      if (waist && sz.waist_min != null) { score += W.waist * Math.abs(waist - (sz.waist_min + sz.waist_max) / 2); totalW += W.waist }
+      if (hips  && sz.hip_min   != null) { score += W.hips  * Math.abs(hips  - (sz.hip_min   + sz.hip_max)   / 2); totalW += W.hips  }
+      if (totalW === 0) continue
+      score /= totalW
       if (score < bestScore) { bestScore = score; best = sz }
     }
 
@@ -108,78 +194,45 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
     setSizeResult({ size: best, score: bestScore, adjacent })
   }, [profile.bust, profile.waist, profile.hips, profile.source, sizes])
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STYLE SCORING
-  //
-  // Segment filter: match on the gown's explicit `segment` field (from DB/API).
-  //
-  // The `segment` field is set in the DB (CHECK segment IN ('women','men',
-  // 'children') DEFAULT 'women') and must be returned by /api/gowns in the
-  // mapped response — see the route file for the required SQL SELECT and
-  // rows.map() changes.
-  //
-  // Safe-mode fallback: when g.segment is absent (undefined/null), the gown
-  // passes through so legacy JSON flat-file gowns without the field are never
-  // silently hidden. The /api/gowns JSON branch also normalises this to
-  // 'women' so in practice the fallback is rarely hit.
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // Style scoring
   useEffect(() => {
     if (!gowns?.length || !profile.bodyShape) return
 
-    const seg = profile.segment ?? 'women'
+    const seg      = profile.segment ?? 'women'
+    const keywords = SEGMENT_KEYWORDS[seg] ?? SEGMENT_KEYWORDS.women
 
-    // ── Dev diagnostic — remove before shipping ───────────────────────────
-    if (process.env.NODE_ENV === 'development') {
-      const missing = gowns.filter(g => !g.segment).length
-      if (missing > 0) {
-        console.warn(
-          `[FittingRoomProvider] ${missing}/${gowns.length} gowns have no segment field. ` +
-          `Ensure /api/gowns returns segment in the mapped response. ` +
-          `These gowns will pass the segment filter (safe-mode fallback).`
-        )
-      }
-      console.log(
-        `[FittingRoomProvider] Scoring for segment="${seg}". ` +
-        `Gowns with matching segment: ${
-          gowns.filter(
-            g => g.segment &&
-            String(g.segment).toLowerCase() === String(seg).toLowerCase()
-          ).length
-        }/${gowns.length}.`
-      )
-    }
-    // ── End dev diagnostic ────────────────────────────────────────────────
-
-    // Segment filter: keep gown when g.segment matches the active segment,
-    // or when g.segment is absent (safe-mode for JSON flat-file gowns that
-    // predate the segment column).
+    // Pre-filter: keep gown when any searchable field contains a segment keyword.
+    // Falls through (keeps item) when no category or tags are present at all.
     const segmentFiltered = gowns.filter(g => {
-      if (!g.segment) return true
+      const hasMeta = g.category || g.tags?.length
+      if (!hasMeta) return true  // safe-mode: no metadata → keep
 
-      return String(g.segment).toLowerCase() === String(seg).toLowerCase()
+      const fields = [
+        g.category ?? '',
+        g.name     ?? '',
+        ...(Array.isArray(g.tags) ? g.tags : [g.tags ?? '']),
+      ].map(f => String(f).toLowerCase())
+
+      return keywords.some(kw => fields.some(f => f.includes(kw)))
     })
 
     const scored = segmentFiltered
       .map(g => {
         const { score, reasons } = scoreGown(g, profile)
-        return { ...g, _score: score, _reasons: reasons }
+        const finalScore = score
+                         + silhouetteBonus(g, profile)
+                         + colorHarmonyBonus(g, profile)
+        return { ...g, _score: finalScore, _reasons: reasons }
       })
       .filter(g => g._score > 0)
       .sort((a, b) => b._score - a._score)
       .slice(0, 8)
-
     setStyleResults(scored)
-  }, [
-    profile.bodyShape, profile.skinTone, profile.undertone, profile.occasion,
-    profile.colors, profile.fabrics, profile.budget, profile.height,
-    profile.segment, gowns,
-  ])
+  }, [profile.bodyShape, profile.skinTone, profile.undertone, profile.occasion,
+      profile.colors, profile.fabrics, profile.budget, profile.height,
+      profile.segment, gowns])
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // MODEL LOADING
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // Model loading
   useEffect(() => {
     if (detectorRef.current || modelState === 'loading' || modelState === 'ready') return
     setModelState('loading')

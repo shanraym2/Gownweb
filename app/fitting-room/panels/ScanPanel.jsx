@@ -513,7 +513,7 @@ export default function ScanPanel() {
   const confColor = confidence >= 70 ? '#1D9E75' : confidence >= 50 ? '#EF9F27' : '#E24B4A'
   const issue     = poseFound ? null : (poseIssues[0] ? GUIDANCE_MAP[poseIssues[0]] : null)
   const canScan   = modelState === 'ready'
-  const canLock   = confidence >= 65
+  const canLock   = true
   const toneHex   = detectedTone ? SKIN_TONES.find(t => t.id === detectedTone.skinTone)?.hex : null
   const segLabel  = SEGMENTS.find(s => s.id === (profile.segment ?? 'women'))?.label || 'Women'
   const hasHeight = !!profile.height
@@ -696,7 +696,6 @@ export default function ScanPanel() {
                       <button
                         className="fr-btn fr-btn--primary"
                         onClick={lockMeasurement}
-                        disabled={!canLock}
                         title={!canLock ? `Build more confidence (${confidence}% / 65% needed)` : ''}
                       >
                         {canLock ? `Lock measurements (${confidence}%)` : `Need ${65 - confidence}% more…`}
@@ -804,11 +803,10 @@ export default function ScanPanel() {
                   <div className="scan-conf-bar-wrap">
                     <div className="scan-conf-track">
                       <div className="scan-conf-fill" style={{ width: `${confidence}%`, background: confColor }}/>
-                      <div className="scan-conf-threshold" style={{ left: '65%' }} title="Lock threshold"/>
                     </div>
                     <span className="scan-conf-label" style={{ color: confColor }}>{confidence}%</span>
                   </div>
-                  <p className="scan-conf-hint">Lock available at 65%</p>
+                  <p className="scan-conf-hint">Lock available at any time. best frame is saved automatically.</p>
                 </div>
               )}
 
