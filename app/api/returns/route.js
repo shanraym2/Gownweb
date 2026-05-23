@@ -5,8 +5,9 @@ import path from 'path'
 import fs   from 'fs'
 
 const USE_DB   = process.env.USE_DB === 'true'
-const dataFile = path.join(process.cwd(), 'data', 'orders.json')
-const retFile  = path.join(process.cwd(), 'data', 'returns.json')
+const DATA_DIR = path.join(process.cwd(), 'data')
+const dataFile = path.join(DATA_DIR, 'orders.json')
+const retFile  = path.join(DATA_DIR, 'returns.json')
 
 const RETURN_WINDOW_HOURS = 48
 const VALID_TYPES = ['return', 'exchange', 'refund']
@@ -24,11 +25,17 @@ const VALID_REASONS = [
 
 function loadOrders() {
   if (!fs.existsSync(dataFile)) return []
-  try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')) } catch { return [] }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(dataFile, 'utf8'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch { return [] }
 }
 function loadReturns() {
   if (!fs.existsSync(retFile)) return []
-  try { return JSON.parse(fs.readFileSync(retFile, 'utf8')) } catch { return [] }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(retFile, 'utf8'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch { return [] }
 }
 function saveReturns(data) {
   fs.mkdirSync(path.dirname(retFile), { recursive: true })
@@ -90,6 +97,7 @@ export async function GET(request) {
 // ── POST ──────────────────────────────────────────────────────────────────────
 
 export async function POST(request) {
+  console.log('[returns POST] cwd:', process.cwd(), '| retFile:', retFile)
   const userId = request.headers.get('x-user-id')
   if (!userId)
     return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })

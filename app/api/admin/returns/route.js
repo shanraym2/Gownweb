@@ -16,7 +16,7 @@ function loadReturns() {
   try { return JSON.parse(fs.readFileSync(retFile, 'utf8')) } catch { return [] }
 }
 function saveReturns(data) {
-  fs.mkdirSync(path.dirname(retFile), { recursive: true })
+  fs.mkdirSync(DATA_DIR, { recursive: true })
   fs.writeFileSync(retFile, JSON.stringify(data, null, 2))
 }
 function loadOrders() {
