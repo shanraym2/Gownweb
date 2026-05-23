@@ -876,3 +876,18 @@
   .mo-card-foot { padding: 0.75rem 1.2rem; }
 }
 
+/* Vehicle selector */
+            .ck-vehicle-hint { font-size:11px; color:#9a8880; margin:0 0 8px; line-height:1.5; }
+            .ck-vehicle-options { display:flex; gap:8px; flex-wrap:wrap; }
+            .ck-vehicle-opt { flex:1; min-width:140px; display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:10px 12px; border:1px solid var(--ch,#e8e0da); border-radius:6px; background:transparent; cursor:pointer; text-align:left; transition:all .15s; font-family:Jost,sans-serif; }
+            .ck-vehicle-opt--on { border-color:#7a5a44; background:rgba(122,90,68,.06); }
+            .ck-vehicle-top { display:flex; align-items:center; gap:6px; width:100%; justify-content:space-between; }
+            .ck-vehicle-icon { font-size:16px; }
+            .ck-vehicle-label { font-size:12px; font-weight:500; color:#2c2420; }
+            .ck-vehicle-sub { font-size:10px; color:#9a8880; line-height:1.4; }
+            .ck-vehicle-fee { font-size:11px; color:#2c6e3f; font-weight:600; margin-top:2px; }
+            .ck-vehicle-tag { font-size:9px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; padding:2px 6px; border-radius:3px; white-space:nowrap; }
+            .ck-vehicle-tag--good    { background:#d4edda; color:#155724; }
+            .ck-vehicle-tag--warn    { background:#fff3cd; color:#856404; }
+            .ck-vehicle-tag--neutral { background:#e8f0ff; color:#2d5be3; }
+            .ck-vehicle-warn-box { margin-top:8px; padding:10px 12px; background:#fff3cd; border:1px solid #ffe08a; border-radius:4px; font-size:11px; color:#856404; line-height:1.6; }

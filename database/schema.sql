@@ -939,3 +939,40 @@ CREATE INDEX IF NOT EXISTS idx_audit_entity
 
 CREATE INDEX IF NOT EXISTS idx_audit_action
   ON public.admin_audit_log (action);
+
+
+ CREATE TABLE IF NOT EXISTS public.return_requests (
+   id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+   order_id      uuid        NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+   request_type  text        NOT NULL CHECK (request_type IN ('return','refund','exchange')),
+   reason        text        NOT NULL,
+   details       text,
+   items         jsonb       NOT NULL DEFAULT '[]',
+   status        text        NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending','approved','rejected','completed','cancelled')),
+   admin_note    text,
+   refund_amount numeric(12,2),
+   resolved_at   timestamptz,
+   created_at    timestamptz NOT NULL DEFAULT now()
+ );
+CREATE TABLE
+ CREATE INDEX IF NOT EXISTS idx_return_requests_order
+   ON public.return_requests(order_id);
+CREATE INDEX
+ CREATE INDEX IF NOT EXISTS idx_return_requests_status
+  ON public.return_requests(status, created_at DESC);`
+
+
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS lalamove_vehicle TEXT
+  CHECK (lalamove_vehicle IN ('motorcycle', 'sedan', 'suv'));
+
+UPDATE orders
+SET lalamove_vehicle = 'sedan'
+WHERE delivery_method = 'lalamove'
+  AND lalamove_vehicle IS NULL;
+
+  ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS lalamove_tracking_url  TEXT,
+  ADD COLUMN IF NOT EXISTS lalamove_eta            TEXT,        -- free text, e.g. "2:00–3:00 PM"
+  ADD COLUMN IF NOT EXISTS shipment_photo_url      TEXT;        -- uploaded via existing Spaces/disk

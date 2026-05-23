@@ -5,6 +5,7 @@ import Link from 'next/link'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { getCurrentUser } from '../utils/authClient'
+import ReturnModal from './ReturnModal'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -82,13 +83,26 @@ const STATUS_COLOR_HEX = {
 
 const ONGOING_STATUSES  = new Set(['placed', 'pending_payment', 'paid', 'processing', 'ready', 'shipped'])
 const TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'refunded'])
-const DELIVERY_LABEL    = { pickup: 'Store Pickup', lalamove: 'Lalamove Delivery' }
+const DELIVERY_LABEL = {
+  pickup:       'Store Pickup',
+  lalamove:     'Lalamove Delivery',
+  'lalamove-sedan': 'Lalamove · Sedan',
+  'lalamove-mpv':   'Lalamove · MPV/Van',
+}
+
+function lalamoveLabel(order) {
+  const v = order.lalamoveVehicle
+  if (!v) return 'Lalamove Delivery'
+  return `Lalamove · ${v.charAt(0).toUpperCase() + v.slice(1)}`
+}
 const PAYMENT_LABEL     = { gcash: 'GCash', bdo: 'BDO Transfer', cash: 'Cash on Pickup' }
 
 const PROGRESS_STEPS = {
   pickup:   ['placed', 'pending_payment', 'paid', 'processing', 'ready', 'completed'],
   lalamove: ['placed', 'pending_payment', 'paid', 'processing', 'ready', 'shipped', 'completed'],
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtPhp(n) {
   return '₱' + Number(n || 0).toLocaleString('en-PH')
@@ -115,6 +129,17 @@ function fmtDateRelative(iso) {
   if (hours < 24) return `${hours}h ago`
   if (days < 7)   return `${days}d ago`
   return fmtDate(iso)
+}
+
+/**
+ * Check whether a completed order is still within the 48-hour return window.
+ * Uses updatedAt if available (most recent status change), falls back to createdAt.
+ */
+function isWithinReturnWindow(order) {
+  if (order.status !== 'completed') return false
+  const completedAt = new Date(order.updatedAt || order.createdAt || order.placedAt)
+  const diffHours   = (Date.now() - completedAt.getTime()) / 1000 / 3600
+  return diffHours <= 48
 }
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
@@ -156,7 +181,6 @@ function ProgressSteps({ status, deliveryMethod }) {
 
   return (
     <div style={{ margin: '4px 0' }}>
-      {/* Step dots */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 6 }}>
         {steps.map((step, i) => {
           const done    = i < curIdx
@@ -188,7 +212,6 @@ function ProgressSteps({ status, deliveryMethod }) {
           )
         })}
       </div>
-      {/* Current label */}
       <div style={{
         fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase',
         color: STATUS_COLOR_HEX[status] || '#c9a96e',
@@ -205,13 +228,9 @@ function ProgressSteps({ status, deliveryMethod }) {
 // ── Status Timeline ───────────────────────────────────────────────────────────
 
 function StatusTimeline({ history, status, deliveryMethod }) {
-  // Full ordered list of steps for this delivery method
   const steps = PROGRESS_STEPS[deliveryMethod] || PROGRESS_STEPS.lalamove
-
-  // For cancelled / refunded: show logged history + terminal entry
   const isBad = status === 'cancelled' || status === 'refunded'
 
-  // Build a map of status → logged event (most recent wins if dupes)
   const logMap = {}
   ;(history || []).forEach(entry => {
     if (!logMap[entry.status] || new Date(entry.changedAt) > new Date(logMap[entry.status].changedAt)) {
@@ -383,11 +402,14 @@ function TabBar({ tab, setTab, ongoingCount, completedCount }) {
 
 // ── Order card ────────────────────────────────────────────────────────────────
 
-function OrderCard({ order, expanded, onToggle, onConfirmReceipt }) {
+function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestReturn, user }) {
   const isOngoing   = ONGOING_STATUSES.has(order.status)
   const isCancelled = order.status === 'cancelled' || order.status === 'refunded'
   const paymentMethod = order.payment || order.paymentMethod
   const needsProof    = order.status === 'pending_payment' && paymentMethod !== 'cash'
+
+  // Show return button only for completed orders within the 48-hour window
+  const canRequestReturn = order.status === 'completed' && isWithinReturnWindow(order)
 
   return (
     <div
@@ -561,7 +583,11 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt }) {
               <p style={{ margin: '0 0 10px', fontSize: 9, letterSpacing: '.35em', textTransform: 'uppercase', color: 'var(--mu)' }}>Delivery & Payment</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  ['Method',  DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod],
+                  ['Method',
+                    order.deliveryMethod === 'lalamove'
+                      ? lalamoveLabel(order)
+                      : (DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod)
+                  ],
                   ['Payment', PAYMENT_LABEL[paymentMethod] || paymentMethod],
                   ...(order.delivery?.address || order.deliveryAddress
                     ? [['Address', order.delivery?.address || order.deliveryAddress]]
@@ -583,7 +609,61 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt }) {
                   </p>
                 </div>
               )}
+              {order.status === 'shipped' && (order.lalamoveTrackingUrl || order.lalamoveEta || order.shipmentPhotoUrl) && (
+                <div style={{
+                  marginBottom: 16, padding: '14px 16px',
+                  background: '#f0f7ff', border: '1px solid #bdd7f5',
+                  borderRadius: 4, display: 'flex', flexDirection: 'column', gap: 10,
+                }}>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 500, color: '#0c5460' }}>
+                    🚚 Your order is on its way
+                  </p>
 
+                  {order.lalamoveEta && (
+                    <p style={{ margin: 0, fontSize: 12, color: '#0c5460', fontWeight: 300 }}>
+                      <span style={{ fontWeight: 500 }}>Estimated arrival:</span> {order.lalamoveEta}
+                    </p>
+                  )}
+
+                  {order.lalamoveTrackingUrl && (
+  
+                      <a href={order.lalamoveTrackingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: 11, letterSpacing: '.15em', textTransform: 'uppercase',
+                        color: '#0c5460', textDecoration: 'underline', textUnderlineOffset: 3,
+                        alignSelf: 'flex-start',
+                      }}
+                    >
+                      Track your Lalamove delivery →
+                    </a>
+                  )}
+
+                  {order.shipmentPhotoUrl && (
+                    <div>
+                      <p style={{ margin: '0 0 6px', fontSize: 11, color: '#0a5276', fontWeight: 500 }}>
+                        Photo of your packed gown:
+                      </p>
+                      <a href={order.shipmentPhotoUrl} target="_blank" rel="noopener noreferrer">
+                        <img
+                          src={order.shipmentPhotoUrl}
+                          alt="Your packed order"
+                          style={{
+                            width: '100%', maxHeight: 220,
+                            objectFit: 'cover', borderRadius: 4,
+                            border: '1px solid #bdd7f5', cursor: 'zoom-in',
+                          }}
+                        />
+                      </a>
+                      <p style={{ margin: '4px 0 0', fontSize: 10, color: '#0a5276', opacity: .7 }}>
+                        Click to view full image
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+              
               {/* Confirm receipt */}
               {['ready', 'shipped'].includes(order.status) && (
                 <div style={{
@@ -610,18 +690,77 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt }) {
                 </div>
               )}
 
-              {/* Completed */}
+              {/* Completed: show confirmation + return CTA if within window */}
               {order.status === 'completed' && (
+                <div style={{ marginTop: 20 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    fontSize: 12, color: '#155724', fontWeight: 300,
+                    marginBottom: canRequestReturn ? 16 : 0,
+                  }}>
+                    <span style={{
+                      width: 20, height: 20, borderRadius: '50%',
+                      background: '#d4edda', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 10, flexShrink: 0,
+                    }}>✓</span>
+                    Order completed — thank you for choosing JCE Bridal!
+                  </div>
+
+                  {canRequestReturn && (
+                    <div style={{
+                      padding: '14px 16px',
+                      background: '#faf7f4',
+                      border: '1px solid var(--ch)',
+                      borderRadius: 3,
+                    }}>
+                      <p style={{ margin: '0 0 3px', fontSize: 12, fontWeight: 500, color: 'var(--es)' }}>
+                        Issue with your order?
+                      </p>
+                      <p style={{ margin: '0 0 12px', fontSize: 11, color: 'var(--mu)', fontWeight: 300, lineHeight: 1.5 }}>
+                        Returns and refund requests accepted within 48 hours of completion for defective or incorrect items.
+                      </p>
+                      <button
+                        onClick={() => onRequestReturn(order)}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          padding: '9px 18px',
+                          background: 'transparent',
+                          border: '1px solid var(--wb, #7a5a44)',
+                          color: 'var(--wb, #7a5a44)',
+                          fontFamily: 'Jost, sans-serif',
+                          fontSize: 10, letterSpacing: '.25em', textTransform: 'uppercase',
+                          cursor: 'pointer',
+                          transition: 'background .15s, color .15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--wb, #7a5a44)'; e.currentTarget.style.color = 'var(--iv, #faf7f4)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--wb, #7a5a44)' }}
+                      >
+                        <span>↩</span> Request Return / Refund
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Order is completed but past return window */}
+                  {!canRequestReturn && (
+                    <p style={{ fontSize: 11, color: 'var(--mu)', fontWeight: 300, fontStyle: 'italic' }}>
+                      Return window has closed (48 hours after completion).
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Refunded notice */}
+              {order.status === 'refunded' && (
                 <div style={{
                   marginTop: 20, display: 'flex', alignItems: 'center', gap: 8,
-                  fontSize: 12, color: '#155724', fontWeight: 300,
+                  fontSize: 12, color: '#7a3608', fontWeight: 300,
                 }}>
                   <span style={{
                     width: 20, height: 20, borderRadius: '50%',
-                    background: '#d4edda', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#fce8d4', display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 10, flexShrink: 0,
-                  }}>✓</span>
-                  Order completed — thank you for choosing JCE Bridal!
+                  }}>↩</span>
+                  A refund has been issued for this order.
                 </div>
               )}
 
@@ -689,13 +828,14 @@ function OrderCard({ order, expanded, onToggle, onConfirmReceipt }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function MyOrdersPage() {
-  const [user,       setUser      ] = useState(null)
-  const [authReady,  setAuthReady ] = useState(false)
-  const [orders,     setOrders    ] = useState([])
-  const [loading,    setLoading   ] = useState(true)
-  const [error,      setError     ] = useState('')
-  const [tab,        setTab       ] = useState('ongoing')
-  const [expandedId, setExpandedId] = useState(null)
+  const [user,        setUser       ] = useState(null)
+  const [authReady,   setAuthReady  ] = useState(false)
+  const [orders,      setOrders     ] = useState([])
+  const [loading,     setLoading    ] = useState(true)
+  const [error,       setError      ] = useState('')
+  const [tab,         setTab        ] = useState('ongoing')
+  const [expandedId,  setExpandedId ] = useState(null)
+  const [returnOrder, setReturnOrder] = useState(null)   // ← NEW: order being returned
 
   const [content, setContent] = useState({
     heading:     'My Orders',
@@ -751,6 +891,12 @@ export default function MyOrdersPage() {
     if (data.ok) setOrders(p => p.map(o => o.id === orderId ? { ...o, status: 'completed' } : o))
   }
 
+  // Called by ReturnModal on success — reload orders to reflect any status changes
+  const handleReturnSuccess = useCallback(() => {
+    setReturnOrder(null)
+    loadOrders(user)
+  }, [loadOrders, user])
+
   const ongoing   = orders.filter(o => ONGOING_STATUSES.has(o.status))
   const completed = orders.filter(o => TERMINAL_STATUSES.has(o.status))
   const shown     = tab === 'ongoing' ? ongoing : completed
@@ -761,6 +907,15 @@ export default function MyOrdersPage() {
     <main className="mo-page">
       <Header solid />
       <div className="mo-spacer" />
+
+      {/* ── Return Modal ── */}
+      {returnOrder && (
+        <ReturnModal
+          order={{ ...returnOrder, userId: user?.id }}
+          onClose={() => setReturnOrder(null)}
+          onSuccess={handleReturnSuccess}
+        />
+      )}
 
       <section className="mo-hero">
         <span className="mo-eyebrow">My Account</span>
@@ -831,6 +986,8 @@ export default function MyOrdersPage() {
                   expanded={expandedId === order.id}
                   onToggle={() => setExpandedId(p => p === order.id ? null : order.id)}
                   onConfirmReceipt={handleConfirmReceipt}
+                  onRequestReturn={setReturnOrder}   // ← NEW
+                  user={user}                         // ← NEW
                 />
               ))
             )}

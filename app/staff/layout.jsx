@@ -25,7 +25,7 @@ export function clearAdminSecret() {
 
 const STAFF_NAV_LINKS = [
   { href: '/staff',           label: 'Dashboard', exact: true },
-  { href: '/admin/gowns',     label: 'Products'              },
+  { href: '/admin/gowns',     label: 'Catalogue'              },
   { href: '/admin/orders',    label: 'Orders'                },
   { href: '/admin/dashboard', label: 'Sales'                 },
   { href: '/admin/users',     label: 'Customers'             },

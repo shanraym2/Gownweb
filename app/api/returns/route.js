@@ -1,0 +1,272 @@
+// app/api/returns/route.js
+
+import { NextResponse } from 'next/server'
+import path from 'path'
+import fs   from 'fs'
+
+const USE_DB   = process.env.USE_DB === 'true'
+const dataFile = path.join(process.cwd(), 'data', 'orders.json')
+const retFile  = path.join(process.cwd(), 'data', 'returns.json')
+
+const RETURN_WINDOW_HOURS = 48
+const VALID_TYPES = ['return', 'exchange', 'refund']
+
+// FIX 1: reasons are now the exact human-readable strings the modal sends.
+// The old snake_case list ('defective_item' etc.) never matched what the
+// modal's <select> options sent ('Item is defective or damaged' etc.).
+const VALID_REASONS = [
+  'Item is defective or damaged',
+  'Item differs significantly from description',
+  'Wrong size received',
+  'Wrong item received',
+  'Other',
+]
+
+function loadOrders() {
+  if (!fs.existsSync(dataFile)) return []
+  try { return JSON.parse(fs.readFileSync(dataFile, 'utf8')) } catch { return [] }
+}
+function loadReturns() {
+  if (!fs.existsSync(retFile)) return []
+  try { return JSON.parse(fs.readFileSync(retFile, 'utf8')) } catch { return [] }
+}
+function saveReturns(data) {
+  fs.mkdirSync(path.dirname(retFile), { recursive: true })
+  fs.writeFileSync(retFile, JSON.stringify(data, null, 2))
+}
+
+function isWithinReturnWindow(order) {
+  const baseDate = order.updatedAt || order.updated_at || order.placedAt || order.placed_at
+  if (!baseDate) return false
+  const elapsed = (Date.now() - new Date(baseDate).getTime()) / 3600000
+  return elapsed <= RETURN_WINDOW_HOURS
+}
+
+// ── GET ───────────────────────────────────────────────────────────────────────
+
+export async function GET(request) {
+  const userId = request.headers.get('x-user-id')
+  if (!userId)
+    return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
+
+  if (!USE_DB) {
+    const returns = loadReturns()
+      .filter(r => String(r.userId) === String(userId))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    return NextResponse.json({ ok: true, returns })
+  }
+
+  try {
+    const { query } = await import('@/lib/db')
+    const rows = await query(`
+      SELECT r.*
+      FROM   return_requests r
+      JOIN   orders o ON o.id = r.order_id
+      WHERE  o.user_id = $1
+      ORDER  BY r.created_at DESC
+    `, [userId])
+
+    const returns = rows.map(r => ({
+      id:           r.id,
+      orderId:      r.order_id,
+      orderNumber:  r.order_number,
+      type:         r.request_type,
+      reason:       r.reason,
+      details:      r.details,
+      status:       r.status,
+      adminNote:    r.admin_note    || null,
+      refundAmount: r.refund_amount != null ? Number(r.refund_amount) : null,
+      createdAt:    r.created_at,
+      resolvedAt:   r.resolved_at   || null,
+    }))
+
+    return NextResponse.json({ ok: true, returns })
+  } catch (err) {
+    console.error('GET /api/returns error:', err)
+    return NextResponse.json({ ok: false, error: 'Failed to fetch returns' }, { status: 500 })
+  }
+}
+
+// ── POST ──────────────────────────────────────────────────────────────────────
+
+export async function POST(request) {
+  const userId = request.headers.get('x-user-id')
+  if (!userId)
+    return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
+
+  let body
+  try { body = await request.json() }
+  catch { return NextResponse.json({ ok: false, error: 'Invalid request body' }, { status: 400 }) }
+
+  const { orderId, type, reason, details, items } = body
+
+  if (!orderId)
+    return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
+  if (!type || !VALID_TYPES.includes(type))
+    return NextResponse.json({ ok: false, error: 'Invalid request type. Must be: return, exchange, or refund.' }, { status: 400 })
+
+  // FIX 1: validate against human-readable strings, not snake_case
+  if (!reason || !VALID_REASONS.includes(reason))
+    return NextResponse.json({ ok: false, error: 'Please select a valid reason.' }, { status: 400 })
+
+  if (!items?.length)
+    return NextResponse.json({ ok: false, error: 'Select at least one item.' }, { status: 400 })
+
+  // FIX 2: details is optional — remove the 20-char minimum that wasn't
+  // communicated to the user and blocked all submissions with short notes.
+  // The modal already marks it as optional; we just trim and allow empty.
+  const cleanDetails = (details || '').trim()
+
+  // ── JSON path ──────────────────────────────────────────────────────────────
+
+  if (!USE_DB) {
+    const orders = loadOrders()
+    const order  = orders.find(o => String(o.id) === String(orderId))
+
+    if (!order)
+      return NextResponse.json({ ok: false, error: 'Order not found.' }, { status: 404 })
+    if (String(order.userId) !== String(userId))
+      return NextResponse.json({ ok: false, error: 'Access denied.' }, { status: 403 })
+    if (order.status !== 'completed')
+      return NextResponse.json({ ok: false, error: 'Only completed orders can be returned.' }, { status: 400 })
+    if (!isWithinReturnWindow(order))
+      return NextResponse.json({
+        ok: false,
+        error: `Return window has closed. Requests must be submitted within ${RETURN_WINDOW_HOURS} hours of order completion.`,
+        windowClosed: true,
+      }, { status: 400 })
+
+    const existing = loadReturns()
+    const dupe = existing.find(
+      r => String(r.orderId) === String(orderId) && !['rejected', 'cancelled'].includes(r.status)
+    )
+    if (dupe)
+      return NextResponse.json({ ok: false, error: 'A return request for this order is already open.' }, { status: 409 })
+
+    const newReturn = {
+      id:           Date.now(),
+      userId:       String(userId),
+      orderId:      String(orderId),
+      orderNumber:  order.orderNumber || order.order_number || '',
+      type,
+      reason,
+      details:      cleanDetails,
+      items:        items || [],
+      status:       'pending',
+      adminNote:    null,
+      refundAmount: null,
+      createdAt:    new Date().toISOString(),
+      resolvedAt:   null,
+      // snapshot for admin display
+      customerName:  order.customerName  || order.customer_name  || '',
+      customerEmail: order.customerEmail || order.customer_email || '',
+      orderTotal:    Number(order.total  || 0),
+      paymentMethod: order.paymentMethod || order.payment_method || '',
+    }
+    saveReturns([newReturn, ...existing])
+    sendConfirmationEmail(newReturn, order).catch(console.error)
+    return NextResponse.json({ ok: true, returnId: newReturn.id })
+  }
+
+  // ── DB path ────────────────────────────────────────────────────────────────
+
+  try {
+    const { query } = await import('@/lib/db')
+
+    const orderRows = await query(
+      `SELECT * FROM orders WHERE id=$1 AND user_id=$2 LIMIT 1`,
+      [orderId, userId]
+    )
+    if (!orderRows.length)
+      return NextResponse.json({ ok: false, error: 'Order not found.' }, { status: 404 })
+
+    const order = orderRows[0]
+
+    if (order.status !== 'completed')
+      return NextResponse.json({ ok: false, error: 'Only completed orders can be returned.' }, { status: 400 })
+
+    if (!isWithinReturnWindow(order))
+      return NextResponse.json({
+        ok: false,
+        error: `Return window has closed. Requests must be submitted within ${RETURN_WINDOW_HOURS} hours of order completion.`,
+        windowClosed: true,
+      }, { status: 400 })
+
+    const dupeRows = await query(
+      `SELECT id FROM return_requests
+       WHERE  order_id=$1 AND status NOT IN ('rejected','cancelled')
+       LIMIT  1`,
+      [orderId]
+    )
+    if (dupeRows.length)
+      return NextResponse.json({ ok: false, error: 'A return request for this order is already open.' }, { status: 409 })
+
+    const result = await query(`
+      INSERT INTO return_requests
+        (order_id, order_number, user_id, request_type, reason, details, items, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+      RETURNING id
+    `, [
+      orderId,
+      order.order_number,
+      userId,
+      type,
+      reason,
+      cleanDetails,
+      JSON.stringify(items || []),
+    ])
+
+    sendConfirmationEmail(
+      { ...order, orderNumber: order.order_number, customerEmail: order.customer_email, customerName: order.customer_name, type, reason, details: cleanDetails, items },
+      order
+    ).catch(console.error)
+
+    return NextResponse.json({ ok: true, returnId: result[0].id })
+  } catch (err) {
+    console.error('POST /api/returns error:', err)
+    return NextResponse.json({ ok: false, error: 'Failed to submit return request.' }, { status: 500 })
+  }
+}
+
+// ── Email ─────────────────────────────────────────────────────────────────────
+
+async function sendConfirmationEmail(ret, order) {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return
+  const email = ret.customerEmail || order?.customer_email
+  if (!email) return
+  const name  = ret.customerName  || order?.customer_name || 'there'
+  const num   = ret.orderNumber   || order?.order_number  || ''
+  const label = { return: 'Return', refund: 'Refund', exchange: 'Exchange' }[ret.type] || ret.type
+  try {
+    const { default: nodemailer } = await import('nodemailer')
+    const t = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    })
+    await t.sendMail({
+      from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
+      to:      email,
+      subject: `${label} request received — ${num}`,
+      text: `Hi ${name},
+
+We've received your ${label.toLowerCase()} request for order ${num}.
+
+Reason: ${ret.reason}
+${ret.details ? `Details: ${ret.details}\n` : ''}
+Items:
+${(ret.items || []).map(i => `  • ${i.gownName}${i.sizeLabel ? ` (${i.sizeLabel})` : ''} ×${i.quantity || 1}`).join('\n')}
+
+Our team will review your request within 1–2 business days and notify you by email.
+
+Policy reminder:
+• Returns accepted within 48 hours of order completion only
+• Items must be unworn, unaltered, and in original condition with tags attached
+• Refunds processed within 7–14 business days via original payment method
+
+Thank you,
+JCE Bridal Boutique`.trim(),
+    })
+  } catch (e) {
+    console.warn('Return confirmation email failed:', e.message)
+  }
+}

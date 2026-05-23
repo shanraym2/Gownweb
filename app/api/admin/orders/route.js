@@ -40,6 +40,10 @@ export async function GET(request) {
       paymentStatus:    o.paymentStatus,
       deliveryMethod:   o.deliveryMethod,
       deliveryAddress:  o.deliveryAddress,
+      lalamoveVehicle:  o.lalamoveVehicle  || null,
+      lalamoveTrackingUrl: o.lalamoveTrackingUrl || null,
+      lalamoveEta:         o.lalamoveEta         || null,
+      shipmentPhotoUrl:    o.shipmentPhotoUrl     || null,
       customerName:     o.customerName,
       customerEmail:    o.customerEmail,
       customerPhone:    o.customerPhone    || null,
@@ -94,6 +98,10 @@ export async function GET(request) {
       paymentStatus:    r.payment_status,
       deliveryMethod:   r.delivery_method,
       deliveryAddress:  r.delivery_address,
+      lalamoveVehicle:  r.lalamove_vehicle  || null,
+      lalamoveTrackingUrl: r.lalamove_tracking_url || null,
+      lalamoveEta:         r.lalamove_eta          || null,
+      shipmentPhotoUrl:    r.shipment_photo_url     || null,
       customerName:     r.customer_name,
       customerEmail:    r.customer_email,
       customerPhone:    r.customer_phone   || null,
@@ -128,7 +136,7 @@ export async function PATCH(request) {
   try { body = await request.json() }
   catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }) }
 
-  const { action, orderId, status, note, referenceNo, reason } = body
+  const { action, orderId, status, note, referenceNo, reason, trackingUrl, eta, shipmentPhotoUrl } = body
   if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
   if (!action)  return NextResponse.json({ ok: false, error: 'action required' },  { status: 400 })
 
@@ -145,6 +153,9 @@ export async function PATCH(request) {
 
       const prevStatus = all[idx].status
       all[idx].status  = status
+      if (trackingUrl      !== undefined) all[idx].lalamoveTrackingUrl  = trackingUrl      || null
+      if (eta              !== undefined) all[idx].lalamoveEta           = eta              || null
+      if (shipmentPhotoUrl !== undefined) all[idx].shipmentPhotoUrl      = shipmentPhotoUrl || null
 
       const isCashPickup = all[idx].deliveryMethod === 'pickup' && all[idx].paymentMethod === 'cash'
       if (
@@ -261,18 +272,21 @@ export async function PATCH(request) {
       const rows = await query(
         `UPDATE orders
          SET
-           status         = $1,
-           payment_status = CASE
+           status                = $1,
+           lalamove_tracking_url = COALESCE($3, lalamove_tracking_url),
+           lalamove_eta          = COALESCE($4, lalamove_eta),
+           shipment_photo_url    = COALESCE($5, shipment_photo_url),
+           payment_status        = CASE
              WHEN $1 IN ('paid', 'completed') THEN 'paid'
              WHEN $1 = 'processing'
               AND delivery_method = 'pickup'
               AND payment_method  = 'cash'   THEN 'paid'
              ELSE payment_status
            END,
-           updated_at     = NOW()
+           updated_at            = NOW()
          WHERE id = $2
          RETURNING *`,
-        [status, orderId]
+        [status, orderId, trackingUrl || null, eta || null, shipmentPhotoUrl || null]
       )
 
       if (!rows.length)

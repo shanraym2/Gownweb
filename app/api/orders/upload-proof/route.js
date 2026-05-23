@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server'
+import { checkAdminAuth } from '@/lib/adminAuth'   // ← consistent with every other admin route
 
-const USE_DB   = process.env.USE_DB === 'true'
+const USE_DB = process.env.USE_DB === 'true'
 
-// ── Helpers (mirrors upload-tryon-image/route.js) ─────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function uploadToSpaces(buffer, filename, mimeType) {
   const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3')
 
-  const region = process.env.DO_SPACES_REGION
-  const bucket = process.env.DO_SPACES_BUCKET
-  const cdnUrl = process.env.DO_SPACES_CDN_URL?.replace(/\/$/, '')
+  const region    = process.env.DO_SPACES_REGION
+  const bucket    = process.env.DO_SPACES_BUCKET
+  const cdnUrl    = process.env.DO_SPACES_CDN_URL?.replace(/\/$/, '')
   const accessKey = process.env.DO_SPACES_KEY
   const secretKey = process.env.DO_SPACES_SECRET
 
@@ -23,29 +24,24 @@ async function uploadToSpaces(buffer, filename, mimeType) {
     forcePathStyle: false,
   })
 
-  const key = `uploads/${filename}`
-
   await client.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    Body: buffer,
+    Bucket:      bucket,
+    Key:         `uploads/${filename}`,
+    Body:        buffer,
     ContentType: mimeType,
-    ACL: 'public-read',
+    ACL:         'public-read',
   }))
 
-  return `${cdnUrl}/${key}`
+  return `${cdnUrl}/uploads/${filename}`
 }
 
 function base64ToBuffer(dataUrl) {
   const [header, base64] = dataUrl.split(',')
   const mimeType = header.match(/data:([^;]+)/)?.[1] || 'image/jpeg'
-  const isPng    = mimeType.includes('png')
-  const ext      = isPng ? '.png' : '.jpg'
+  const ext      = mimeType.includes('png') ? '.png' : '.jpg'
   const buffer   = Buffer.from(base64, 'base64')
   return { buffer, mimeType, ext }
 }
-
-// ── JSON store helpers (unchanged) ───────────────────────────────────────────
 
 import path from 'path'
 import fs   from 'fs'
@@ -61,7 +57,7 @@ function saveJson(o) {
   fs.writeFileSync(dataFile, JSON.stringify(o, null, 2))
 }
 
-// ── POST /api/orders/upload-proof ─────────────────────────────────────────────
+// ── POST /api/orders/upload-proof — customer uploads their payment proof ──────
 
 export async function POST(request) {
   const userId = request.headers.get('x-user-id')
@@ -74,26 +70,22 @@ export async function POST(request) {
 
   const { orderId, image, referenceNo } = body
 
-  if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' },  { status: 400 })
-  if (!image)   return NextResponse.json({ ok: false, error: 'image required' },    { status: 400 })
-
+  if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' },           { status: 400 })
+  if (!image)   return NextResponse.json({ ok: false, error: 'image required' },             { status: 400 })
   if (!String(image).startsWith('data:image/'))
     return NextResponse.json({ ok: false, error: 'Invalid image format. Use JPEG or PNG.' }, { status: 400 })
-
   if (image.length > 7_000_000)
-    return NextResponse.json({ ok: false, error: 'Image too large. Max 5MB.' }, { status: 400 })
+    return NextResponse.json({ ok: false, error: 'Image too large. Max 5MB.' },              { status: 400 })
 
   const cleanRef = referenceNo
     ? String(referenceNo).replace(/[<>"']/g, '').trim().slice(0, 100)
     : null
 
-  // ── Convert base64 → buffer & build filename ─────────────────────────────
   const { buffer, mimeType, ext } = base64ToBuffer(image)
   const filename = `proof-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`
 
-  // ── Upload to Spaces (or fall back to keeping the data URL for local dev) ─
   const hasSpacesConfig = !!(
-    process.env.DO_SPACES_KEY &&
+    process.env.DO_SPACES_KEY    &&
     process.env.DO_SPACES_SECRET &&
     process.env.DO_SPACES_BUCKET &&
     process.env.DO_SPACES_REGION &&
@@ -104,18 +96,19 @@ export async function POST(request) {
   try {
     proofImageUrl = hasSpacesConfig
       ? await uploadToSpaces(buffer, filename, mimeType)
-      : image   // local dev: keep data URL as-is (same behaviour as before)
+      : image   // local dev: keep data URL in-memory
   } catch (err) {
     console.error('upload-proof: Spaces upload failed', err)
     return NextResponse.json({ ok: false, error: 'Failed to upload image.' }, { status: 500 })
   }
 
-  // ── Persist ──────────────────────────────────────────────────────────────
+  // ── JSON path ─────────────────────────────────────────────────────────────
 
   if (!USE_DB) {
     const all = loadJson()
     const idx = all.findIndex(o => String(o.id) === String(orderId))
-    if (idx === -1) return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
+    if (idx === -1)
+      return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
     if (String(all[idx].userId) !== String(userId))
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 403 })
     if (all[idx].paymentMethod === 'cash')
@@ -123,19 +116,22 @@ export async function POST(request) {
     if (['paid', 'refunded', 'cancelled'].includes(all[idx].paymentStatus))
       return NextResponse.json({ ok: false, error: 'Payment already verified or cancelled' }, { status: 400 })
 
+    all[idx].proofStatus      = 'pending'
     all[idx].paymentStatus    = 'pending'
-    all[idx].proofImage       = proofImageUrl   // now a CDN URL in prod, data URL in dev
+    all[idx].proofImage       = proofImageUrl
     all[idx].proofReferenceNo = cleanRef
     all[idx].proofUploadedAt  = new Date().toISOString()
     saveJson(all)
     return NextResponse.json({ ok: true, proofImageUrl })
   }
 
+  // ── DB path ───────────────────────────────────────────────────────────────
+
   try {
     const { query } = await import('@/lib/db')
 
     const orders = await query(
-      'SELECT id,user_id,payment_method,payment_status,status FROM orders WHERE id=$1',
+      'SELECT id, user_id, payment_method, payment_status FROM orders WHERE id=$1',
       [orderId]
     )
     if (!orders.length)
@@ -159,11 +155,13 @@ export async function POST(request) {
        )
        ON CONFLICT (order_id) DO UPDATE
          SET proof_image_url=$2, reference_no=$3, status='pending', created_at=NOW()`,
-      [orderId, proofImageUrl, cleanRef]   // stores CDN URL, not base64
+      [orderId, proofImageUrl, cleanRef]
     )
 
     await query(
-      `UPDATE orders SET payment_status='pending', status='pending_payment', updated_at=NOW() WHERE id=$1`,
+      `UPDATE orders
+       SET payment_status='pending', status='pending_payment', updated_at=NOW()
+       WHERE id=$1`,
       [orderId]
     )
 
@@ -174,26 +172,42 @@ export async function POST(request) {
   }
 }
 
-// ── GET /api/orders/upload-proof?orderId=xxx  — admin only ───────────────────
+// ── GET /api/orders/upload-proof?orderId=xxx — admin fetches proof image ──────
+//
+// BUG FIXED: the original used a hand-rolled env-var check:
+//   const adminSecret = request.headers.get('x-admin-secret')
+//   if (!process.env.ADMIN_SECRET || adminSecret !== process.env.ADMIN_SECRET)
+//
+// This bypassed checkAdminAuth(), which first checks the admin_config DB table
+// before falling back to process.env.ADMIN_SECRET.  When the secret is stored
+// in the DB (not in env), the check always failed → "Unauthorized".
+//
+// Fix: use checkAdminAuth() consistently, exactly like every other admin route.
 
 export async function GET(request) {
-  const adminSecret = request.headers.get('x-admin-secret')
-  if (!process.env.ADMIN_SECRET || adminSecret !== process.env.ADMIN_SECRET)
+  // ↓ was: manual process.env.ADMIN_SECRET comparison — now consistent with all other admin routes
+  if (!await checkAdminAuth(request))
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
 
   const orderId = new URL(request.url).searchParams.get('orderId')
-  if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
+  if (!orderId)
+    return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
+
+  // ── JSON path ─────────────────────────────────────────────────────────────
 
   if (!USE_DB) {
     const order = loadJson().find(o => String(o.id) === String(orderId))
-    if (!order) return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
+    if (!order)
+      return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
     return NextResponse.json({
-      ok: true,
+      ok:          true,
       proofImage:  order.proofImage       || null,
       referenceNo: order.proofReferenceNo || null,
       uploadedAt:  order.proofUploadedAt  || null,
     })
   }
+
+  // ── DB path ───────────────────────────────────────────────────────────────
 
   try {
     const { query } = await import('@/lib/db')
@@ -201,15 +215,17 @@ export async function GET(request) {
       'SELECT proof_image_url, reference_no, created_at FROM payments WHERE order_id=$1',
       [orderId]
     )
-    if (!rows.length) return NextResponse.json({ ok: false, error: 'No proof found' }, { status: 404 })
+    if (!rows.length)
+      return NextResponse.json({ ok: false, error: 'No proof found' }, { status: 404 })
+
     return NextResponse.json({
-      ok: true,
-      proofImage:  rows[0].proof_image_url,
-      referenceNo: rows[0].reference_no,
-      uploadedAt:  rows[0].created_at,
+      ok:          true,
+      proofImage:  rows[0].proof_image_url || null,
+      referenceNo: rows[0].reference_no    || null,
+      uploadedAt:  rows[0].created_at      || null,
     })
   } catch (err) {
-    console.error('GET upload-proof error:', err)
+    console.error('GET /api/orders/upload-proof error:', err)
     return NextResponse.json({ ok: false, error: 'Failed to fetch proof' }, { status: 500 })
   }
 }

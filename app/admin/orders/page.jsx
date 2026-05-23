@@ -127,7 +127,15 @@ const PAYMENT_STATUS_META = {
 }
 
 const PAYMENT_METHOD_LABEL = { gcash: 'GCash', bdo: 'BDO', cash: 'Cash' }
-const DELIVERY_LABEL       = { pickup: 'Store Pickup', lalamove: 'Lalamove' }
+const DELIVERY_LABEL = { pickup: 'Store Pickup', lalamove: 'Lalamove' }
+
+const VEHICLE_LABEL = { motorcycle: 'Motorcycle', sedan: '200kg Sedan', suv: '300kg Crossover SUV' }
+
+function lalamoveLabel(order) {
+  const v = order.lalamoveVehicle
+  if (!v) return 'Lalamove'
+  return `Lalamove · ${VEHICLE_LABEL[v] || v}`
+}
 
 function fmtPhp(n) {
   return '₱' + Number(n || 0).toLocaleString('en-PH')
@@ -364,10 +372,14 @@ function ProofModal({ order, onVerify, onReject, onClose }) {
 
 // ── StatusControls ────────────────────────────────────────────────────────────
 
-function StatusControls({ order, onAction, onRefresh }) {
+function StatusControls({ order, onAction, onRefresh, onToast }) {
   const [note,    setNote   ] = useState('')
   const [confirm, setConfirm] = useState(null)
   const [saving,  setSaving ] = useState(false)
+  const [trackingUrl,      setTrackingUrl     ] = useState('')
+  const [eta,              setEta             ] = useState('')
+  const [shipmentPhotoUrl, setShipmentPhotoUrl] = useState('')
+  const [photoUploading,   setPhotoUploading  ] = useState(false)
 
   const {
     next,
@@ -410,8 +422,17 @@ function StatusControls({ order, onAction, onRefresh }) {
     if (!confirm) return
     setSaving(true)
     setConfirm(null)
-    await onAction(order.id, 'status', { status: confirm.toStatus, note: note.trim() || undefined })
+    await onAction(order.id, 'status', {
+        status:          confirm.toStatus,
+        note:            note.trim()            || undefined,
+        trackingUrl:     trackingUrl.trim()     || undefined,
+        eta:             eta.trim()             || undefined,
+        shipmentPhotoUrl: shipmentPhotoUrl      || undefined,
+      })
     setNote('')
+    setTrackingUrl('')
+    setEta('')
+    setShipmentPhotoUrl('')
     setSaving(false)
     onRefresh()
   }
@@ -428,13 +449,102 @@ function StatusControls({ order, onAction, onRefresh }) {
           onClose={() => setConfirm(null)}
         >
           {!confirm.danger && (
-            <input
-              className="adm-input"
-              placeholder="Internal note (optional)"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              style={{ marginBottom: 16 }}
-            />
+            <>
+              <input
+                className="adm-input"
+                placeholder="Internal note (optional)"
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                style={{ marginBottom: 10 }}
+              />
+              {confirm.toStatus === 'shipped' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--adm-text-3)', letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                    Shipment details (optional — shown to customer)
+                  </p>
+
+                  {/* Tracking link */}
+                  <input
+                    className="adm-input"
+                    placeholder="Lalamove share link — e.g. https://share.lalamove.com/..."
+                    value={trackingUrl}
+                    onChange={e => setTrackingUrl(e.target.value)}
+                  />
+
+                  {/* ETA */}
+                  <input
+                    className="adm-input"
+                    placeholder="Estimated arrival — e.g. Today 2:00–3:00 PM"
+                    value={eta}
+                    onChange={e => setEta(e.target.value)}
+                  />
+
+                  {/* Photo upload */}
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--adm-text-3)', display: 'block', marginBottom: 4 }}>
+                      Shipment photo (packed gown / handover)
+                    </label>
+                    {shipmentPhotoUrl ? (
+                      <div style={{ position: 'relative', display: 'inline-block' }}>
+                        <img
+                          src={shipmentPhotoUrl}
+                          alt="Shipment"
+                          style={{ width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--adm-border)' }}
+                        />
+                        <button
+                          onClick={() => setShipmentPhotoUrl('')}
+                          style={{
+                            position: 'absolute', top: 4, right: 4,
+                            background: 'rgba(0,0,0,.55)', color: '#fff',
+                            border: 'none', borderRadius: '50%',
+                            width: 22, height: 22, fontSize: 12,
+                            cursor: 'pointer', lineHeight: 1,
+                          }}
+                        >✕</button>
+                      </div>
+                    ) : (
+                      <label style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: 8, padding: '10px 0',
+                        border: '1px dashed var(--adm-border)', borderRadius: 4,
+                        cursor: photoUploading ? 'wait' : 'pointer',
+                        fontSize: 12, color: 'var(--adm-text-3)',
+                      }}>
+                        {photoUploading ? 'Uploading…' : '📷 Click to upload photo'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          disabled={photoUploading}
+                          onChange={async e => {
+                            const file = e.target.files?.[0]
+                            if (!file) return
+                            setPhotoUploading(true)
+                            try {
+                              const fd = new FormData()
+                              fd.append('file', file)
+                              const res  = await fetch('/api/admin/upload', {
+                                method:  'POST',
+                                headers: { 'X-Admin-Secret': getAdminSecret() || '' },
+                                body:    fd,
+                              })
+                              const data = await res.json()
+                              if (data.url) setShipmentPhotoUrl(data.url)
+                              else onToast('Photo upload failed', 'error')
+                            } catch {
+                              onToast('Photo upload failed', 'error')
+                            } finally {
+                              setPhotoUploading(false)
+                              e.target.value = ''
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </ConfirmModal>
       )}
@@ -564,7 +674,7 @@ function ProgressBar({ order }) {
 
 // ── OrderDrawer ───────────────────────────────────────────────────────────────
 
-function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
+function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh, onToast }) {
   useModalEscape(onClose)
 
   const totalItems = (order.items || []).reduce((s, i) => s + (i.quantity || 1), 0)
@@ -662,7 +772,11 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
             <div className="adm-drawer-rows">
               <div className="adm-drawer-row">
                 <span>Method</span>
-                <span>{DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod}</span>
+                <span>
+                  {order.deliveryMethod === 'lalamove'
+                    ? lalamoveLabel(order)
+                    : (DELIVERY_LABEL[order.deliveryMethod] || order.deliveryMethod)}
+                </span>
               </div>
               {order.deliveryAddress && (
                 <div className="adm-drawer-row adm-drawer-row--col">
@@ -670,7 +784,39 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
                   <span>{order.deliveryAddress}</span>
                 </div>
               )}
+              {order.lalamoveEta && (
+                <div className="adm-drawer-row">
+                  <span>Est. arrival</span>
+                  <span>{order.lalamoveEta}</span>
+                </div>
+              )}
             </div>
+            {order.lalamoveTrackingUrl && (
+              <div style={{ marginTop: 8 }}>
+                
+                 <a href={order.lalamoveTrackingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 12, color: 'var(--adm-accent,#2d5be3)', textDecoration: 'underline' }}
+                >
+                  Track on Lalamove →
+                </a>
+              </div>
+            )}
+            {order.shipmentPhotoUrl && (
+              <div style={{ marginTop: 10 }}>
+                <p style={{ margin: '0 0 6px', fontSize: 11, color: 'var(--adm-text-3)', letterSpacing: '.1em', textTransform: 'uppercase' }}>
+                  Shipment photo
+                </p>
+                <a href={order.shipmentPhotoUrl} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={order.shipmentPhotoUrl}
+                    alt="Shipment"
+                    style={{ width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--adm-border)' }}
+                  />
+                </a>
+              </div>
+            )}
           </div>
 
           {/* Payment */}
@@ -717,6 +863,7 @@ function OrderDrawer({ order, onAction, onOpenProof, onClose, onRefresh }) {
               order={order}
               onAction={onAction}
               onRefresh={onRefresh}
+              onToast={onToast}
             />
           </div>
         </div>
@@ -930,6 +1077,7 @@ export default function AdminOrdersPage() {
           onAction={handleAction}
           onOpenProof={o => { setDrawerOrder(null); setProofOrder(o) }}
           onClose={() => setDrawerOrder(null)}
+          onToast={showToast}
           onRefresh={async () => {
             const fresh = await loadOrders(filterStatusRef.current)
             setDrawerOrder(prev =>

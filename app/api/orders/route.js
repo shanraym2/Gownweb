@@ -107,6 +107,7 @@ export async function POST(request) {
   const {
     customerEmail, customerName,
     paymentMethod, deliveryMethod, deliveryAddress,
+    lalamoveVehicle,
     items, subtotal, shippingFee, tax, total, notes,
   } = body
 
@@ -124,6 +125,9 @@ export async function POST(request) {
   if (deliveryMethod === 'lalamove' && !deliveryAddress?.trim()) {
     return NextResponse.json({ ok: false, error: 'Delivery address required for Lalamove' }, { status: 400 })
   }
+  if (deliveryMethod === 'lalamove' && lalamoveVehicle && !['motorcycle', 'sedan', 'suv'].includes(lalamoveVehicle)) {
+    return NextResponse.json({ ok: false, error: 'Invalid Lalamove vehicle type' }, { status: 400 })
+  }
 
   // ── JSON path ─────────────────────────────────────────────────────────────
   if (!USE_DB) {
@@ -140,6 +144,7 @@ export async function POST(request) {
       paymentStatus:   'unpaid',
       deliveryMethod,
       deliveryAddress: (deliveryAddress || '').trim() || null,
+      lalamoveVehicle: deliveryMethod === 'lalamove' ? (lalamoveVehicle || 'sedan') : null,
       subtotal:        Number(subtotal)    || 0,
       discountTotal:   0,
       shippingFee:     Number(shippingFee) || 0,
@@ -175,21 +180,26 @@ export async function POST(request) {
       const { rows: [order] } = await conn.query(
         `INSERT INTO orders
           (order_number, user_id, customer_email, customer_name,
-          status, payment_method, payment_status,
-          delivery_method, delivery_address,
-          subtotal, discount_total, shipping_fee, tax, total, notes)
-        VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,0,$9,$10,$11,$12)
-        RETURNING *`,
+           status, payment_method, payment_status,
+           delivery_method, delivery_address, lalamove_vehicle,
+           subtotal, discount_total, shipping_fee, tax, total, notes)
+         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,$9,0,$10,$11,$12,$13)
+         RETURNING *`,
         [
-          orderNumber, userId,
-          customerEmail.trim().toLowerCase(), (customerName || '').trim(),
-          paymentMethod,
-          deliveryMethod, (deliveryAddress || '').trim() || null,
-          Number(subtotal)    || 0,
-          Number(shippingFee) || 0,
-          Number(tax)         || 0,
-          Number(total)       || 0,
-          (notes || '').trim(),   // $12
+          orderNumber,                                          // $1
+          userId,                                               // $2
+          customerEmail.trim().toLowerCase(),                   // $3
+          (customerName || '').trim(),                          // $4
+          paymentMethod,                                        // $5
+          deliveryMethod,                                       // $6
+          (deliveryAddress || '').trim() || null,               // $7
+          deliveryMethod === 'lalamove'
+            ? (lalamoveVehicle || 'sedan') : null,              // $8
+          Number(subtotal)    || 0,                             // $9
+          Number(shippingFee) || 0,                             // $10
+          Number(tax)         || 0,                             // $11
+          Number(total)       || 0,                             // $12
+          (notes || '').trim(),                                 // $13
         ]
       )
 

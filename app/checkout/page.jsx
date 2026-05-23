@@ -68,7 +68,8 @@ const TNC_TEXT = `TERMS AND CONDITIONS — JCE BRIDAL BOUTIQUE
   Upload a clear screenshot of your payment confirmation showing the reference number, amount, and date. Tampered or fraudulent proof of payment will result in immediate order cancellation and may be reported to authorities.
 
 3. DELIVERY
-  Store pickup orders must be collected within 7 days of the ready notification. For Lalamove deliveries, the delivery fee shown is an estimate based on distance; the final fee may vary slightly. JCE Bridal Boutique is not responsible for delays caused by the courier.
+  Store pickup orders must be collected within 7 days of the ready notification.
+  For Lalamove deliveries, you select a vehicle type (Sedan or MPV) and the fee shown is a distance-based estimate; the final fare confirmed by Lalamove before dispatch may vary due to traffic, surcharges, or tolls. JCE Bridal Boutique is not responsible for delays caused by the courier. Motorcycle delivery is not available for gown orders.
 
 4. SIZING & ALTERATIONS
   All gowns are ready-to-wear. Sizes are as listed per item. Alteration services are available upon request and at additional cost. We recommend selecting your correct size using our FitMatcher tool before ordering.
@@ -77,7 +78,11 @@ const TNC_TEXT = `TERMS AND CONDITIONS — JCE BRIDAL BOUTIQUE
   Orders may be cancelled before payment is confirmed. Once payment is verified, cancellations are subject to our return and refund policy.
 
 6. RETURNS & REFUNDS
-  Returns are accepted within 48 hours of receipt only if the item is defective or significantly different from what was ordered. Items must be unworn, unaltered, and in original condition with tags attached. Refunds will be processed within 7–14 business days via the original payment method.
+  Return, exchange, or refund requests must be submitted within 48 hours of order completion through the My Orders page. Items must be unworn, unaltered, and in original condition with tags attached. Eligible reasons are: item is defective or damaged, item differs significantly from description, wrong size received, or wrong item received.
+  — Returns: the item must be sent back to the boutique before a refund or exchange is processed.
+  — Exchanges: subject to stock availability; size or style swaps only.
+  — Refunds: processed within 7–14 business days via the original payment method.
+  Requests outside the 48-hour window will not be accepted.
 
 7. TAXES
   Prices shown are inclusive of 3% business tax, itemised in your order summary. JCE Bridal Boutique is not VAT-registered (annual gross sales below ₱3,000,000).
@@ -119,11 +124,58 @@ function computeItemsSubtotal(items, gowns) {
 
 // ── Shipping helpers ───────────────────────────────────────────────────────────
 
-const SHIPPING_BASE_KM  = 3
-const SHIPPING_BASE_FEE = 98
-const SHIPPING_PER_KM   = 20
-const SHIPPING_BUFFER   = 15
-const SHIPPING_MIN      = 98
+// NEW — replace with vehicle-aware rate table:
+// ── Lalamove vehicle catalogue (PH, Manila/NCR) ────────────────────────────
+// Rates from official Lalamove PH pricing page (verified May 2026).
+// Dynamic pricing applies; the formula here uses:
+//   road_km = haversine_km × ROAD_MULTIPLIER (accounts for actual road routing)
+//   daytime surge (6am–10pm) multiplier baked into DAYTIME_FACTOR
+//   night surge (10pm–6am) adds an extra 20%
+// Calibrated against a real booking: Recto → Pateros sedan = ₱402 at 7:28am.
+const ROAD_MULTIPLIER  = 1.60   // haversine → estimated road distance
+const DAYTIME_FACTOR   = 1.25   // Lalamove dynamic pricing uplift during day
+
+const LALAMOVE_VEHICLES = [
+  {
+    id:          'motorcycle',
+    label:       'Motorcycle',
+    sub:         'Up to 20 kg · small parcels only',
+    icon:        '🛵',
+    baseFare:    24,
+    rate0to3:    0,      // base covers first 3 km
+    rate3to5:    9,      // per km from 3–5 km
+    rateAfter:   5,      // per km after 5 km
+    minFee:      50,
+    maxItems:    1,      // show warning if order > 1 item
+    warning:     'Motorcycle can only carry lightweight parcels (up to 20 kg). Suitable for a single light accessory — not recommended for gowns.',
+  },
+  {
+    id:          'sedan',
+    label:       '200kg Sedan',
+    label_short: 'Sedan',
+    sub:         'Up to 200 kg · recommended for gown orders',
+    icon:        '🚗',
+    baseFare:    100,
+    rate0to3:    0,      // base covers first 3 km (aligns with PH published schedule)
+    rate3to5:    18,
+    rateAfter:   15,
+    minFee:      118,
+    maxItems:    5,      // recommend SUV above this
+  },
+  {
+    id:          'suv',
+    label:       '300kg Small Crossover SUV',
+    label_short: 'Crossover SUV',
+    sub:         'Up to 300 kg · bulk or 5+ gown orders',
+    icon:        '🚙',
+    baseFare:    150,
+    rate0to3:    0,
+    rate3to5:    22,
+    rateAfter:   18,
+    minFee:      172,
+  },
+]
+const DEFAULT_VEHICLE = 'sedan'
 
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R    = 6371
@@ -135,12 +187,25 @@ function haversineKm(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-function estimateShippingFee(distanceKm) {
-  const hour = new Date().getHours()
-  const nightSurcharge = (hour >= 22 || hour < 6) ? 1.20 : 1.00
-  const extraKm = Math.max(0, distanceKm - SHIPPING_BASE_KM)
-  const raw     = (SHIPPING_BASE_FEE + extraKm * SHIPPING_PER_KM + SHIPPING_BUFFER) * nightSurcharge
-  return Math.max(SHIPPING_MIN, Math.ceil(raw / 5) * 5)
+function estimateShippingFee(distanceKm, vehicleId = DEFAULT_VEHICLE) {
+  const v       = LALAMOVE_VEHICLES.find(x => x.id === vehicleId) || LALAMOVE_VEHICLES[1]
+  const roadKm  = distanceKm * ROAD_MULTIPLIER        // straight-line → road distance
+  const hour    = new Date().getHours()
+  const isNight = hour >= 22 || hour < 6
+  const surge   = isNight ? 1.20 : DAYTIME_FACTOR     // night = +20% on top of base, day = calibrated factor
+
+  // 3-band rate schedule matching Lalamove PH published rates
+  const km0to3  = Math.min(roadKm, 3)                 // covered by base fare
+  const km3to5  = Math.max(0, Math.min(roadKm - 3, 2))
+  const kmAfter = Math.max(0, roadKm - 5)
+
+  const raw = (
+    v.baseFare
+    + km3to5  * v.rate3to5
+    + kmAfter * v.rateAfter
+  ) * surge
+
+  return Math.max(v.minFee, Math.ceil(raw / 5) * 5)
 }
 
 async function geocodeAddress(address) {
@@ -311,7 +376,9 @@ function StepReview({ items, gowns, onNext, onRemove }) {
 // ─── Step 2: Delivery ─────────────────────────────────────────────────────────
 
 function StepDelivery({
+  items,
   delivery, setDelivery,
+  lalamoveVehicle, setLalamoveVehicle,
   addrStreet, setAddrStreet,
   addrCity, setAddrCity,
   addrProvince, setAddrProvince,
@@ -324,28 +391,33 @@ function StepDelivery({
   const [fieldErrors, setFieldErrors] = useState({})
   const [formError,   setFormError  ] = useState('')
 
-  const estimateShipping = useCallback(async ({ street, city, province, zip }) => {
+  const estimateShipping = useCallback(async ({ street, city, province, zip, vehicleId }) => {
     const full = buildAddressString({ street, city, province, zip })
     if (!full.trim()) return
+    const vid = vehicleId || lalamoveVehicle   // explicit arg wins over closure
     setShippingLoading(true)
     setShippingError('')
     try {
       const coords = await geocodeAddress(full)
       if (!coords) {
-        setShippingFee(150)
-        setShippingError('Could not geocode address — using flat estimate of ₱150.')
+        const flatFee = { motorcycle: 100, sedan: 250, suv: 300 }
+        const fee     = flatFee[vid] ?? 250
+        setShippingFee(fee)
+        setShippingError(`Could not locate address — using flat estimate of ${formatPrice(fee)}. Final fare set by Lalamove.`)
         return
       }
       const distKm = haversineKm(STORE_LAT, STORE_LNG, coords.lat, coords.lng)
-      setShippingFee(estimateShippingFee(distKm))
+      setShippingFee(estimateShippingFee(distKm, vid))
     } catch {
-      setShippingFee(150)
-      setShippingError('Shipping estimate unavailable — ₱150 flat used.')
+      const flatFee = { motorcycle: 100, sedan: 250, suv: 300 }
+      const fee     = flatFee[vid] ?? 250
+      setShippingFee(fee)
+      setShippingError(`Estimate unavailable — using flat rate of ${formatPrice(fee)}.`)
     } finally {
       setShippingLoading(false)
     }
-  }, [setShippingFee, setShippingLoading, setShippingError])
-
+  }, [lalamoveVehicle, setShippingFee, setShippingLoading, setShippingError])
+  
   useEffect(() => {
     if (delivery !== 'lalamove') return
     if (!addrStreet && !addrCity && !addrProvince) return
@@ -353,7 +425,7 @@ function StepDelivery({
       street: addrStreet, city: addrCity, province: addrProvince, zip: addrZip,
     }), 900)
     return () => clearTimeout(t)
-  }, [addrStreet, addrCity, addrProvince, addrZip, delivery, estimateShipping])
+ }, [addrStreet, addrCity, addrProvince, addrZip, delivery, lalamoveVehicle, estimateShipping])
 
   const handleNext = () => {
     setFormError('')
@@ -403,6 +475,68 @@ function StepDelivery({
       {delivery === 'lalamove' && (
         <div className="ck-addr-form">
           <p className="ck-addr-form-title">Delivery address</p>
+          {/* ── Vehicle selector with smart recommendation ── */}
+          {(() => {
+            const itemCount = items.length
+            const getTag = (v) => {
+              if (itemCount <= 1 && v.id === 'motorcycle') return { label: 'Available', style: 'neutral' }
+              if (itemCount <= 5 && v.id === 'sedan')      return { label: 'Recommended', style: 'good' }
+              if (itemCount > 5  && v.id === 'suv')        return { label: 'Recommended', style: 'good' }
+              if (itemCount > 1  && v.id === 'motorcycle') return { label: 'Not recommended', style: 'warn' }
+              return null
+            }
+            return (
+              <div className="ck-field">
+                <label className="ck-label">Vehicle type</label>
+                <p className="ck-vehicle-hint">
+                  {itemCount > 5
+                    ? `You have ${itemCount} items — a Crossover SUV is recommended.`
+                    : itemCount === 1
+                      ? 'Single item — Sedan is recommended. Motorcycle available for lightweight accessories only.'
+                      : `${itemCount} items — Sedan is recommended.`}
+                </p>
+                <div className="ck-vehicle-options">
+                  {LALAMOVE_VEHICLES.map(v => {
+                    const tag = getTag(v)
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className={`ck-vehicle-opt${lalamoveVehicle === v.id ? ' ck-vehicle-opt--on' : ''}`}
+                        onClick={() => {
+                          setLalamoveVehicle(v.id)
+                          if (addrCity) estimateShipping({
+                            street: addrStreet, city: addrCity, province: addrProvince, zip: addrZip,
+                            vehicleId: v.id,   // pass new id directly — state update is async
+                          })
+                        }}
+                      >
+                        <div className="ck-vehicle-top">
+                          <span className="ck-vehicle-icon">{v.icon}</span>
+                          {tag && (
+                            <span className={`ck-vehicle-tag ck-vehicle-tag--${tag.style}`}>
+                              {tag.label}
+                            </span>
+                          )}
+                        </div>
+                        <span className="ck-vehicle-label">{v.label}</span>
+                        <span className="ck-vehicle-sub">{v.sub}</span>
+                        {shippingFee > 0 && lalamoveVehicle === v.id && (
+                          <span className="ck-vehicle-fee">~{formatPrice(shippingFee)}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Motorcycle warning */}
+                {lalamoveVehicle === 'motorcycle' && (
+                  <div className="ck-vehicle-warn-box">
+                    ⚠ {LALAMOVE_VEHICLES.find(v => v.id === 'motorcycle').warning}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           <div className={`ck-field${fieldErrors.street ? ' ck-field--error' : ''}`}>
             <label className="ck-label">Street / Barangay <span className="ck-required">*</span></label>
@@ -445,8 +579,9 @@ function StepDelivery({
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
                 </svg>
-                Estimated Lalamove fee: <strong>{formatPrice(shippingFee)}</strong>
-                <span className="ck-shipping-note"> · Final fee confirmed before dispatch</span>
+                {LALAMOVE_VEHICLES.find(v => v.id === lalamoveVehicle)?.label_short ?? 'Sedan'} estimate:{' '}
+                <strong>{formatPrice(shippingFee)}</strong>
+                <span className="ck-shipping-note"> · Dynamic pricing — final fare set by Lalamove at booking</span>
               </span>
             )}
             {shippingError && <span className="ck-shipping-warn">⚠ {shippingError}</span>}
@@ -541,6 +676,7 @@ function StepPayment({ paymentMethod, setPaymentMethod, delivery, onNext, onBack
 
 function StepConfirm({
   items, gowns, delivery,
+  lalamoveVehicle,
   addrStreet, addrCity, addrProvince, addrZip,
   paymentMethod, shippingFee,
   tncAccepted, setTncAccepted,
@@ -593,6 +729,11 @@ function StepConfirm({
         <div className="ck-confirm-section">
           <p className="ck-confirm-label">Delivery</p>
           <p className="ck-confirm-value">{deliveryOpt?.label ?? '—'}</p>
+          {delivery === 'lalamove' && (
+            <p className="ck-confirm-sub">
+              {LALAMOVE_VEHICLES.find(v => v.id === lalamoveVehicle)?.label ?? 'Sedan'} vehicle
+            </p>
+          )}
           {addressDisplay && <p className="ck-confirm-sub">{addressDisplay}</p>}
           {delivery === 'lalamove' && (
             <p className="ck-confirm-sub ck-confirm-note">
@@ -748,6 +889,7 @@ export default function CheckoutPage() {
   const [loadingGowns,   setLoadingGowns  ] = useState(true)
 
   const [delivery,        setDelivery       ] = useState('pickup')
+  const [lalamoveVehicle, setLalamoveVehicle] = useState(DEFAULT_VEHICLE)
   const [addrStreet,      setAddrStreet     ] = useState('')
   const [addrCity,        setAddrCity       ] = useState('')
   const [addrProvince,    setAddrProvince   ] = useState('')
@@ -806,6 +948,12 @@ export default function CheckoutPage() {
 
     setItems(normalised)
     if (!normalised.length) { setLoadingGowns(false); return }
+
+    // Auto-select vehicle based on item count
+    const count = normalised.length
+    if (count > 5)       setLalamoveVehicle('suv')
+    else if (count === 1) setLalamoveVehicle('sedan')  // sedan still recommended; motorcycle not auto-selected
+    else                  setLalamoveVehicle('sedan')
 
     setLoadingGowns(true)
     fetch('/api/gowns')
@@ -926,7 +1074,9 @@ export default function CheckoutPage() {
                   )}
                   {step === 1 && (
                     <StepDelivery
-                      delivery={delivery}         setDelivery={setDelivery}
+                      items={items}
+                      delivery={delivery}                     setDelivery={setDelivery}
+                      lalamoveVehicle={lalamoveVehicle}       setLalamoveVehicle={setLalamoveVehicle}
                       addrStreet={addrStreet}     setAddrStreet={setAddrStreet}
                       addrCity={addrCity}         setAddrCity={setAddrCity}
                       addrProvince={addrProvince} setAddrProvince={setAddrProvince}
@@ -941,6 +1091,7 @@ export default function CheckoutPage() {
                     <StepPayment
                       paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}
                       delivery={delivery}
+                      addrStreet={addrStreet} addrCity={addrCity}
                       onNext={() => setStep(3)} onBack={() => setStep(1)}
                     />
                   )}
@@ -965,7 +1116,7 @@ export default function CheckoutPage() {
             {showSidebar && (
               <OrderSummarySidebar
                 items={items} gowns={gowns}
-                delivery={delivery} shippingFee={shippingFee}
+                delivery={delivery} shippingFee={shippingFee} lalamoveVehicle={lalamoveVehicle}
               />
             )}
           </div>
