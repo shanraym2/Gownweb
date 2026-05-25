@@ -300,7 +300,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
                     <span className="drop-label">Signed in as {currentUser.name}</span>
                     <Link href="/profile"   className="drop-item" onClick={() => setIsProfileOpen(false)}>My Profile</Link>
                     <Link href="/my-orders"  className="drop-item" onClick={() => setIsProfileOpen(false)}>My Orders</Link>
-                    <Link href="/favorites"  className="drop-item" onClick={() => setIsProfileOpen(false)}>Saved Gowns</Link>
+                    <Link href="/favorites"  className="drop-item" onClick={() => setIsProfileOpen(false)}>Favorites</Link>
                     {dashboardLink && (
                       <Link href={dashboardLink.href} className="drop-item" onClick={() => setIsProfileOpen(false)}>
                         {dashboardLink.label} Dashboard
@@ -419,7 +419,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
               <p className="mobile-user-label">Signed in as {currentUser.name}</p>
               <Link href="/profile"   className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>My Profile</Link>
               <Link href="/my-orders"  className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>My Orders</Link>
-              <Link href="/favorites"  className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Saved Gowns</Link>
+              <Link href="/favorites"  className="mobile-nav-link" onClick={() => setIsMobileOpen(false)}>Favorites</Link>
               <button className="mobile-nav-btn" style={{ color: 'var(--rose)' }} onClick={handleLogout}>
                 Logout
               </button>

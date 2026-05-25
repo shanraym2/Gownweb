@@ -822,7 +822,7 @@ export default function ProfilePage() {
               <div className="profile-links">
                 {[
                   { href: '/my-orders',       label: 'My orders'         },
-                  { href: '/favorites',        label: 'Saved gowns'       },
+                  { href: '/favorites',        label: 'Favorites'       },
                   { href: '/fitting-room',     label: 'Size recommender'  },
                   { href: '/fitting-room',     label: 'Virtual try-on'    },
                   { href: '/gowns',            label: 'Browse collection' },
