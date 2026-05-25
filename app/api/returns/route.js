@@ -1,4 +1,7 @@
 // app/api/returns/route.js
+// Changes vs original:
+//   POST — accepts optional `evidenceUrls` array and persists it on the record
+//   GET  — returns `evidenceUrls` field so the customer can see what they uploaded
 
 import { NextResponse } from 'next/server'
 import path from 'path'
@@ -12,9 +15,6 @@ const retFile  = path.join(DATA_DIR, 'returns.json')
 const RETURN_WINDOW_HOURS = 48
 const VALID_TYPES = ['return', 'exchange', 'refund']
 
-// FIX 1: reasons are now the exact human-readable strings the modal sends.
-// The old snake_case list ('defective_item' etc.) never matched what the
-// modal's <select> options sent ('Item is defective or damaged' etc.).
 const VALID_REASONS = [
   'Item is defective or damaged',
   'Item differs significantly from description',
@@ -66,7 +66,7 @@ export async function GET(request) {
   try {
     const { query } = await import('@/lib/db')
     const rows = await query(`
-      SELECT r.*
+      SELECT r.*, o.order_number
       FROM   return_requests r
       JOIN   orders o ON o.id = r.order_id
       WHERE  o.user_id = $1
@@ -83,6 +83,9 @@ export async function GET(request) {
       status:       r.status,
       adminNote:    r.admin_note    || null,
       refundAmount: r.refund_amount != null ? Number(r.refund_amount) : null,
+      evidenceUrls: typeof r.evidence_urls === 'string'
+        ? JSON.parse(r.evidence_urls)
+        : (r.evidence_urls || []),
       createdAt:    r.created_at,
       resolvedAt:   r.resolved_at   || null,
     }))
@@ -106,24 +109,22 @@ export async function POST(request) {
   try { body = await request.json() }
   catch { return NextResponse.json({ ok: false, error: 'Invalid request body' }, { status: 400 }) }
 
-  const { orderId, type, reason, details, items } = body
+  const { orderId, type, reason, details, items, evidenceUrls } = body
 
   if (!orderId)
     return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
   if (!type || !VALID_TYPES.includes(type))
     return NextResponse.json({ ok: false, error: 'Invalid request type. Must be: return, exchange, or refund.' }, { status: 400 })
-
-  // FIX 1: validate against human-readable strings, not snake_case
   if (!reason || !VALID_REASONS.includes(reason))
     return NextResponse.json({ ok: false, error: 'Please select a valid reason.' }, { status: 400 })
-
   if (!items?.length)
     return NextResponse.json({ ok: false, error: 'Select at least one item.' }, { status: 400 })
 
-  // FIX 2: details is optional — remove the 20-char minimum that wasn't
-  // communicated to the user and blocked all submissions with short notes.
-  // The modal already marks it as optional; we just trim and allow empty.
-  const cleanDetails = (details || '').trim()
+  const cleanDetails      = (details || '').trim()
+  // evidenceUrls is an array of { url, name, type } objects from /api/returns/upload
+  const cleanEvidenceUrls = Array.isArray(evidenceUrls)
+    ? evidenceUrls.slice(0, 5).filter(f => f?.url)
+    : []
 
   // ── JSON path ──────────────────────────────────────────────────────────────
 
@@ -152,19 +153,20 @@ export async function POST(request) {
       return NextResponse.json({ ok: false, error: 'A return request for this order is already open.' }, { status: 409 })
 
     const newReturn = {
-      id:           Date.now(),
-      userId:       String(userId),
-      orderId:      String(orderId),
-      orderNumber:  order.orderNumber || order.order_number || '',
+      id:            Date.now(),
+      userId:        String(userId),
+      orderId:       String(orderId),
+      orderNumber:   order.orderNumber || order.order_number || '',
       type,
       reason,
-      details:      cleanDetails,
-      items:        items || [],
-      status:       'pending',
-      adminNote:    null,
-      refundAmount: null,
-      createdAt:    new Date().toISOString(),
-      resolvedAt:   null,
+      details:       cleanDetails,
+      items:         items || [],
+      evidenceUrls:  cleanEvidenceUrls,
+      status:        'pending',
+      adminNote:     null,
+      refundAmount:  null,
+      createdAt:     new Date().toISOString(),
+      resolvedAt:    null,
       // snapshot for admin display
       customerName:  order.customerName  || order.customer_name  || '',
       customerEmail: order.customerEmail || order.customer_email || '',
@@ -192,7 +194,6 @@ export async function POST(request) {
 
     if (order.status !== 'completed')
       return NextResponse.json({ ok: false, error: 'Only completed orders can be returned.' }, { status: 400 })
-
     if (!isWithinReturnWindow(order))
       return NextResponse.json({
         ok: false,
@@ -211,21 +212,30 @@ export async function POST(request) {
 
     const result = await query(`
       INSERT INTO return_requests
-        (order_id, order_number, user_id, request_type, reason, details, items, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+        (order_id, request_type, reason, details, items, evidence_urls, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'pending')
       RETURNING id
     `, [
       orderId,
-      order.order_number,
-      userId,
       type,
       reason,
       cleanDetails,
       JSON.stringify(items || []),
+      JSON.stringify(cleanEvidenceUrls),
     ])
 
     sendConfirmationEmail(
-      { ...order, orderNumber: order.order_number, customerEmail: order.customer_email, customerName: order.customer_name, type, reason, details: cleanDetails, items },
+      {
+        ...order,
+        orderNumber:   order.order_number,
+        customerEmail: order.customer_email,
+        customerName:  order.customer_name,
+        type,
+        reason,
+        details:       cleanDetails,
+        items,
+        evidenceUrls:  cleanEvidenceUrls,
+      },
       order
     ).catch(console.error)
 
@@ -242,9 +252,10 @@ async function sendConfirmationEmail(ret, order) {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return
   const email = ret.customerEmail || order?.customer_email
   if (!email) return
-  const name  = ret.customerName  || order?.customer_name || 'there'
-  const num   = ret.orderNumber   || order?.order_number  || ''
-  const label = { return: 'Return', refund: 'Refund', exchange: 'Exchange' }[ret.type] || ret.type
+  const name    = ret.customerName || order?.customer_name || 'there'
+  const num     = ret.orderNumber  || order?.order_number  || ''
+  const label   = { return: 'Return', refund: 'Refund', exchange: 'Exchange' }[ret.type] || ret.type
+  const hasEvidence = (ret.evidenceUrls || []).length > 0
   try {
     const { default: nodemailer } = await import('nodemailer')
     const t = nodemailer.createTransport({
@@ -263,7 +274,7 @@ Reason: ${ret.reason}
 ${ret.details ? `Details: ${ret.details}\n` : ''}
 Items:
 ${(ret.items || []).map(i => `  • ${i.gownName}${i.sizeLabel ? ` (${i.sizeLabel})` : ''} ×${i.quantity || 1}`).join('\n')}
-
+${hasEvidence ? `\nEvidence attached: ${(ret.evidenceUrls || []).length} file(s) submitted.\n` : ''}
 Our team will review your request within 1–2 business days and notify you by email.
 
 Policy reminder:

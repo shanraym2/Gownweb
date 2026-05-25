@@ -1,5 +1,7 @@
 // app/api/admin/returns/route.js
-// Admin API for listing and resolving return/refund/exchange requests.
+// Changes vs original:
+//   GET  — maps evidence_urls / evidenceUrls field so the admin drawer can display it
+//   PATCH — no changes; evidence is read-only after submission
 
 import { NextResponse } from 'next/server'
 import path from 'path'
@@ -16,7 +18,7 @@ function loadReturns() {
   try { return JSON.parse(fs.readFileSync(retFile, 'utf8')) } catch { return [] }
 }
 function saveReturns(data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync(path.dirname(retFile), { recursive: true })
   fs.writeFileSync(retFile, JSON.stringify(data, null, 2))
 }
 function loadOrders() {
@@ -44,6 +46,7 @@ export async function GET(request) {
     let returns = loadReturns()
     if (filterStatus) returns = returns.filter(r => r.status === filterStatus)
     returns = returns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    // evidenceUrls is stored directly on the JSON object — pass it through as-is
     return NextResponse.json({ ok: true, returns })
   }
 
@@ -71,6 +74,10 @@ export async function GET(request) {
       reason:         r.reason,
       details:        r.details,
       items:          typeof r.items === 'string' ? JSON.parse(r.items) : (r.items || []),
+      // evidence_urls column added by migration — safe fallback to empty array
+      evidenceUrls:   typeof r.evidence_urls === 'string'
+                        ? JSON.parse(r.evidence_urls)
+                        : (r.evidence_urls || []),
       status:         r.status,
       adminNote:      r.admin_note    || null,
       refundAmount:   r.refund_amount != null ? Number(r.refund_amount) : null,

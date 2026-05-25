@@ -1,8 +1,10 @@
 'use client'
 
 // app/admin/returns/page.jsx
-// Admin dashboard for reviewing and resolving return / refund / exchange requests.
-// Matches the style and patterns of app/admin/orders/page.jsx.
+// Changes vs original:
+//   • ReturnDrawer: new "Evidence" section that renders uploaded photos/videos
+//   • GET response now includes evidenceUrls — displayed as a thumbnail grid
+//     with lightbox-style full-size links
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
@@ -62,6 +64,10 @@ function fmtRelative(iso) {
   if (hours < 24)  return `${hours}h ago`
   if (days  < 7)   return `${days}d ago`
   return fmtDate(iso)
+}
+
+function isVideo(type) {
+  return (type || '').startsWith('video/')
 }
 
 // ── Shared hook ───────────────────────────────────────────────────────────────
@@ -135,6 +141,78 @@ function ConfirmModal({ title, message, confirmLabel, danger, onConfirm, onClose
   )
 }
 
+// ── EvidenceGallery (admin read-only view) ────────────────────────────────────
+
+function EvidenceGallery({ evidenceUrls }) {
+  if (!evidenceUrls?.length) return null
+
+  return (
+    <div className="adm-drawer-section">
+      <p className="adm-drawer-section-title">
+        Evidence ({evidenceUrls.length} file{evidenceUrls.length !== 1 ? 's' : ''})
+      </p>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))',
+        gap: 8,
+      }}>
+        {evidenceUrls.map((f, i) => (
+          <a
+            key={i}
+            href={f.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={f.name || `File ${i + 1}`}
+            style={{
+              display: 'block', position: 'relative',
+              borderRadius: 4, overflow: 'hidden',
+              border: '1px solid var(--adm-border)',
+              aspectRatio: '1',
+              background: '#f5f5f5',
+            }}
+          >
+            {isVideo(f.type) ? (
+              <>
+                <video
+                  src={f.url}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  muted
+                  preload="metadata"
+                />
+                <span style={{
+                  position: 'absolute', bottom: 4, left: 4,
+                  fontSize: 9, background: 'rgba(0,0,0,.6)', color: '#fff',
+                  borderRadius: 2, padding: '1px 4px',
+                }}>
+                  VIDEO
+                </span>
+              </>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={f.url}
+                alt={f.name || `Evidence ${i + 1}`}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
+            )}
+            {/* Open icon overlay */}
+            <span style={{
+              position: 'absolute', top: 4, right: 4,
+              fontSize: 10, background: 'rgba(0,0,0,.45)', color: '#fff',
+              borderRadius: 2, padding: '2px 4px', lineHeight: 1,
+            }}>
+              ↗
+            </span>
+          </a>
+        ))}
+      </div>
+      <p style={{ fontSize: 11, color: 'var(--adm-text-3)', marginTop: 6 }}>
+        Click any file to open full size in a new tab.
+      </p>
+    </div>
+  )
+}
+
 // ── ReturnDrawer ──────────────────────────────────────────────────────────────
 
 function ReturnDrawer({ ret, onAction, onClose, onRefresh }) {
@@ -147,7 +225,7 @@ function ReturnDrawer({ ret, onAction, onClose, onRefresh }) {
   const allowedActions = VALID_ACTIONS[ret.status] || []
 
   function requestAction(action) {
-    const meta    = ACTION_META[action]
+    const meta     = ACTION_META[action]
     const needsAmt = action === 'complete' && ['return', 'refund'].includes(ret.type)
     setConfirm({ action, meta, needsAmt })
   }
@@ -163,8 +241,6 @@ function ReturnDrawer({ ret, onAction, onClose, onRefresh }) {
     setSaving(false)
     onRefresh()
   }
-
-  const typeMeta = TYPE_META[ret.type] || {}
 
   return (
     <div
@@ -294,6 +370,9 @@ function ReturnDrawer({ ret, onAction, onClose, onRefresh }) {
             )}
           </div>
 
+          {/* ── Evidence gallery (NEW) ── */}
+          <EvidenceGallery evidenceUrls={ret.evidenceUrls} />
+
           {/* Admin note / refund amount (resolved) */}
           {(ret.adminNote || ret.refundAmount != null) && (
             <div className="adm-drawer-section">
@@ -323,7 +402,6 @@ function ReturnDrawer({ ret, onAction, onClose, onRefresh }) {
               <p className="adm-drawer-section-title">Actions</p>
               <p className="adm-drawer-section-hint">Customer receives an email on every change.</p>
 
-              {/* Note field (shown inline for non-confirm flow) */}
               <div style={{ marginBottom: 12 }}>
                 <input
                   className="adm-input"
@@ -621,7 +699,6 @@ export default function AdminReturnsPage() {
           aria-label="Search returns"
         />
         <div className="adm-filter-status" style={{ flexWrap: 'wrap', gap: 6 }}>
-          {/* Status filters */}
           <button className={`adm-filter-pill${!filterStatus ? ' active' : ''}`} onClick={() => setFilterStatus('')}>All</button>
           {Object.entries(STATUS_META).map(([key, m]) => (
             <button
@@ -632,11 +709,7 @@ export default function AdminReturnsPage() {
               {m.label}{key === 'pending' && stats?.pending > 0 ? ` (${stats.pending})` : ''}
             </button>
           ))}
-
-          {/* Divider */}
           <span style={{ width: 1, height: 20, background: 'var(--adm-border)', margin: '0 4px', alignSelf: 'center' }} />
-
-          {/* Type filters */}
           {Object.entries(TYPE_META).map(([key, m]) => (
             <button
               key={key}
@@ -658,7 +731,6 @@ export default function AdminReturnsPage() {
         <p className="adm-muted">No return requests found.</p>
       ) : (
         <div>
-          {/* Header row */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: '160px 1fr 110px 120px 80px 100px',
@@ -694,6 +766,19 @@ export default function AdminReturnsPage() {
                     NEW
                   </span>
                 )}
+                {/* Evidence indicator */}
+                {(ret.evidenceUrls?.length > 0) && (
+                  <span style={{
+                    marginLeft: 5, fontSize: 9,
+                    background: '#e8f0ff', color: '#2d5be3',
+                    padding: '1px 5px', borderRadius: 3,
+                    fontWeight: 600, letterSpacing: '0.04em',
+                  }}
+                    title={`${ret.evidenceUrls.length} evidence file(s) attached`}
+                  >
+                    📎 {ret.evidenceUrls.length}
+                  </span>
+                )}
               </div>
               <div className="adm-order-customer">
                 <div className="adm-order-customer-name">{ret.customerName}</div>
@@ -717,8 +802,6 @@ export default function AdminReturnsPage() {
           ))}
         </div>
       )}
-
-      
 
       <Link href="/admin" className="adm-back-link">← Dashboard</Link>
     </div>

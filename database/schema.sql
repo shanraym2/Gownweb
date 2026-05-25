@@ -976,3 +976,11 @@ WHERE delivery_method = 'lalamove'
   ADD COLUMN IF NOT EXISTS lalamove_tracking_url  TEXT,
   ADD COLUMN IF NOT EXISTS lalamove_eta            TEXT,        -- free text, e.g. "2:00–3:00 PM"
   ADD COLUMN IF NOT EXISTS shipment_photo_url      TEXT;        -- uploaded via existing Spaces/disk
+
+  ALTER TABLE public.return_requests
+  ADD COLUMN IF NOT EXISTS evidence_urls jsonb NOT NULL DEFAULT '[]';
+ 
+-- Optional: index so you can query requests that have evidence
+CREATE INDEX IF NOT EXISTS idx_return_requests_has_evidence
+  ON public.return_requests ((jsonb_array_length(evidence_urls) > 0));
+ 

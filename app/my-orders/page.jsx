@@ -521,12 +521,69 @@ function ReturnCard({ ret }) {
               </div>
             </div>
           )}
+          {/* Evidence photos / videos */}
+          {(ret.evidenceUrls || []).length > 0 && (
+            <div>
+              <p style={{ margin: '0 0 8px', fontSize: 9, letterSpacing: '.35em', textTransform: 'uppercase', color: 'var(--mu)' }}>
+                Evidence ({ret.evidenceUrls.length} file{ret.evidenceUrls.length !== 1 ? 's' : ''})
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 8 }}>
+                {ret.evidenceUrls.map((f, i) => (
+                  
+                   <a key={i}
+                     href={f.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={f.name || `File ${i + 1}`}
+                    style={{
+                      display: 'block', position: 'relative',
+                      aspectRatio: '1', borderRadius: 4, overflow: 'hidden',
+                      border: '1px solid var(--ch)', background: '#f5f5f5',
+                    }}
+                  >
+                    {(f.type || '').startsWith('video/') ? (
+                      <>
+                        <video
+                          src={f.url}
+                          muted
+                          preload="metadata"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                        <span style={{
+                          position: 'absolute', bottom: 3, left: 3,
+                          fontSize: 8, background: 'rgba(0,0,0,.55)', color: '#fff',
+                          borderRadius: 2, padding: '1px 4px',
+                        }}>VIDEO</span>
+                      </>
+                    ) : (
+                      <img
+                        src={f.url}
+                        alt={f.name || `Evidence ${i + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      />
+                    )}
+                    <span style={{
+                      position: 'absolute', top: 3, right: 3,
+                      fontSize: 9, background: 'rgba(0,0,0,.4)', color: '#fff',
+                      borderRadius: 2, padding: '1px 3px', lineHeight: 1,
+                    }}>↗</span>
+                  </a>
+                ))}
+              </div>
+              <p style={{ margin: '5px 0 0', fontSize: 10, color: 'var(--mu)' }}>
+                Tap any file to view full size.
+              </p>
+            </div>
+          )}
+          
         </div>
       )}
     </div>
   )
 }
 // ── Order card ────────────────────────────────────────────────────────────────
+
+
 
 function OrderCard({ order, expanded, onToggle, onConfirmReceipt, onRequestReturn, user }) {
   const isOngoing   = ONGOING_STATUSES.has(order.status)
