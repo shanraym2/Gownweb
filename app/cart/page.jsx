@@ -278,8 +278,7 @@ export default function CartPage() {
 
               <div className="cart-col-head">
                 <span />
-                <span>Product</span>
-                <span style={{ gridColumn: '3', textAlign: 'right' }}>Subtotal</span>
+                <span>Product</span> 
               </div>
 
               <ul className="cart-item-list">

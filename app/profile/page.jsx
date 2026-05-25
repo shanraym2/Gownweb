@@ -7,6 +7,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { getCurrentUser, logoutUser, updateUser, resetUserPassword, loadUsers } from '../utils/authClient'
 import { getPasswordRuleChecks, passwordMeetsRules } from '../utils/authValidation'
+import '../profile.css'
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -882,60 +883,7 @@ export default function ProfilePage() {
 
       <Footer />
 
-      <style>{`
-        /* ── Measurements card ── */
-        .profile-meas-card .profile-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-        .profile-meas-edit-btn { font-size: 12px; padding: 5px 12px; }
-        .profile-meas-delete-btn { background: none; border: none; cursor: pointer; color: #ccc; font-size: 14px; padding: 4px 6px; border-radius: 4px; transition: color .15s; }
-        .profile-meas-delete-btn:hover { color: #E24B4A; }
-
-        .profile-meas-msg { font-size: 12px; padding: 8px 12px; border-radius: 7px; margin-bottom: 12px; }
-        .profile-meas-msg--success { background: #EAF3DE; color: #27500A; border: 0.5px solid #97C459; }
-        .profile-meas-msg--error   { background: #FCEBEB; color: #501313; border: 0.5px solid #F09595; }
-
-        .profile-meas-empty { display: flex; flex-direction: column; gap: 12px; }
-        .profile-meas-empty-text { font-size: 13px; color: #666; line-height: 1.5; }
-        .profile-meas-cta-btn { font-size: 13px; }
-
-        .profile-meas-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-bottom: 1rem; }
-        .profile-meas-item { background: #f9f9f9; border-radius: 8px; padding: 10px 12px; }
-        .profile-meas-item--source { background: transparent; border: 0.5px solid #eee; }
-        .profile-meas-label { font-size: 10px; color: #aaa; margin-bottom: 3px; }
-        .profile-meas-val { font-size: 15px; font-weight: 500; color: #222; }
-        .profile-meas-val--src { font-size: 12px; color: #7F77DD; font-weight: 400; }
-        .profile-meas-unit { font-size: 11px; font-weight: 400; color: #999; }
-
-        .profile-meas-rec { background: linear-gradient(135deg,#f5f0ff 0%,#eef8f3 100%); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; border: 0.5px solid #AFA9EC; }
-        .profile-meas-rec-row { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 8px; }
-        .profile-meas-rec-label { font-size: 10px; color: #7F77DD; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
-        .profile-meas-rec-size  { font-size: 2rem; font-weight: 400; color: #3C3489; line-height: 1; }
-        .profile-meas-rec-conf  { font-size: 1rem; font-weight: 500; line-height: 1; }
-        .profile-meas-conf-track { height: 3px; background: rgba(0,0,0,.08); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
-        .profile-meas-conf-fill  { height: 100%; border-radius: 2px; transition: width .5s; }
-        .profile-meas-pills      { display: flex; gap: 5px; }
-        .profile-meas-pill       { padding: 3px 10px; border-radius: 20px; font-size: 12px; border: 0.5px solid #ddd; color: #888; background: #fff; }
-        .profile-meas-pill--match { background: #EEEDFE; border-color: #AFA9EC; color: #3C3489; font-weight: 500; }
-        .profile-meas-border-note { font-size: 11px; color: #7A5200; background: #FDF3DC; border: 0.5px solid #F5CC79; border-radius: 6px; padding: 7px 10px; margin-top: 8px; }
-
-        .profile-meas-footer { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #aaa; }
-        .profile-meas-footer-sep { color: #ddd; }
-        .profile-meas-date { font-size: 11px; }
-
-        .profile-meas-form { display: flex; flex-direction: column; gap: 14px; }
-        .profile-meas-form-note { font-size: 12px; color: #777; line-height: 1.4; }
-        .profile-meas-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .profile-meas-opt  { font-size: 11px; color: #aaa; font-weight: 400; }
-        .profile-meas-input-wrap { position: relative; }
-        .profile-meas-input-wrap .profile-field-input { padding-right: 36px; }
-        .profile-meas-unit-label { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #aaa; pointer-events: none; }
-        .profile-meas-tip { font-size: 11px; color: #aaa; }
-
-        /* ── Profile completion compact (sidebar) ── */
-        .profile-completion--compact { margin-top: 14px; padding-top: 14px; border-top: 0.5px solid #f0f0f0; }
-        .profile-completion--compact .profile-completion-label { display: flex; justify-content: space-between; font-size: 11px; color: #aaa; margin-bottom: 5px; }
-        .profile-completion--compact .profile-completion-track { height: 3px; background: #f0f0f0; border-radius: 2px; overflow: hidden; }
-        .profile-completion--compact .profile-completion-fill { height: 100%; background: #7F77DD; border-radius: 2px; transition: width .4s; }
-      `}</style>
+     
     </main>
   )
 }

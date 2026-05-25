@@ -162,7 +162,7 @@ export default function Header({ solid = false, cmsTheme = null }) {
   const isActive = isScrolled || solid
 
   // ── Resolved theme values: prop cmsTheme wins, then CMS fetch, then hardcoded defaults
-  const resolvedNavBg  = cmsTheme?.colors?.navBg  || cmsTheme?.colors?.secondary || theme.colors.navBg  || '#1a1a2e'
+  const resolvedNavBg  = cmsTheme?.colors?.navBg  || cmsTheme?.colors?.secondary || theme.colors.navBg  || '#1e1008'
   const resolvedPrimary = cmsTheme?.colors?.primary || theme.colors.primary || '#c8a96e'
   const resolvedFont   = cmsTheme?.fonts?.body     || theme.fonts.body      || "'Jost', sans-serif"
 

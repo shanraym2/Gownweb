@@ -300,7 +300,7 @@ export default function GownDetailPage() {
 
   const [content, setContent] = useState({
     enquiry_prompt:    'Interested in this gown? Book a fitting appointment with us.',
-    add_to_cart_label: 'Add to Cart',
+    add_to_cart_label: '  Add to Cart',
     sizing_note:       'All gowns are sample sizes. Alterations are available upon request.',
     share_label:       'Share this look',
   })
@@ -730,61 +730,7 @@ export default function GownDetailPage() {
 
       <Footer />
 
-      <style>{`
-        .dp-fm--result {
-          background: linear-gradient(135deg, #f5f0ff 0%, #eef8f3 100%);
-          border: 0.5px solid #AFA9EC;
-        }
-        .dp-fm--loading { opacity: .6; }
-        .dp-fm-skeleton { color: #bbb; animation: shimmer 1.2s ease-in-out infinite; }
-        @keyframes shimmer { 0%,100% { opacity:1 } 50% { opacity:.4 } }
 
-        .dp-fm-result-row {
-          display: flex; align-items: flex-end; justify-content: space-between;
-          margin-bottom: 10px;
-        }
-        .dp-fm-result-label { font-size: 10px; color: #7F77DD; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 2px; }
-        .dp-fm-result-size  { font-size: 2.2rem; font-weight: 400; color: #3C3489; line-height: 1; }
-        .dp-fm-result-conf  { font-size: 1.1rem; font-weight: 500; line-height: 1; }
-
-        .dp-fm-conf-track { height: 3px; background: rgba(0,0,0,.08); border-radius: 2px; overflow: hidden; margin-bottom: 12px; }
-        .dp-fm-conf-fill  { height: 100%; border-radius: 2px; transition: width .5s ease; }
-
-        .dp-fm-pills { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
-        .dp-fm-pill  { padding: 3px 12px; border-radius: 20px; font-size: 12px; border: 0.5px solid #ddd; color: #888; background: #fff; }
-        .dp-fm-pill--match { background: #EEEDFE; border-color: #AFA9EC; color: #3C3489; font-weight: 500; }
-
-        .dp-fm-meas-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-        .dp-fm-meas-chip { font-size: 11px; padding: 3px 9px; background: rgba(255,255,255,.7); border-radius: 20px; color: #555; border: 0.5px solid rgba(0,0,0,.08); }
-
-        .dp-fm-border-note {
-          font-size: 11px; color: #7A5200; background: #FDF3DC;
-          border: 0.5px solid #F5CC79; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;
-        }
-        .dp-fm-actions { display: flex; gap: 8px; }
-        .dp-fm-btn--ghost {
-          background: transparent; border-color: #AFA9EC; color: #534AB7;
-          font-size: 12px; padding: 7px 14px;
-        }
-        .dp-fm-btn--ghost:hover { background: rgba(127,119,221,.08); }
-
-        /* ── Stock limit styles ── */
-        .dp-qty-max-note {
-          font-size: 11px;
-          color: #92400E;
-          background: #FEF3C7;
-          border: 0.5px solid #FCD34D;
-          border-radius: 6px;
-          padding: 6px 12px;
-          margin-top: 8px;
-          font-family: 'Jost', sans-serif;
-          line-height: 1.5;
-        }
-        .dp-qty-btn:disabled {
-          opacity: 0.35;
-          cursor: not-allowed;
-        }
-      `}</style>
     </main>
   )
 }
