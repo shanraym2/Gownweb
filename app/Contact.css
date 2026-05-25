@@ -1,18 +1,15 @@
 /* ============================================================
    JCE BRIDAL — CONTACT PAGE
-   Tokens: Cormorant Garamond + Jost · ivory / charcoal / gold / rose
    ============================================================ */
 
-/* ── Page shell ── */
 .contact-page {
   min-height: 100svh;
-  background: var(--ivory);
-  font-family: var(--font-sans);
+  background: #faf7f4;
+  font-family: 'Jost', sans-serif;
+  color: #1e1008;
 }
 
-.contact-header-spacer {
-  height: 80px; /* matches fixed header height */
-}
+.contact-header-spacer { height: 80px; }
 
 /* ── Two-column section ── */
 .contact-section {
@@ -22,33 +19,22 @@
 }
 
 /* ============================================================
-   LEFT COLUMN — brand copy + contact details
+   LEFT COLUMN
    ============================================================ */
 .contact-left {
-  background:#2c1a0e;
+  background: #1e1008;
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: center;
 }
 
-/* Grain texture (matches hero) */
-.contact-left::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
-  pointer-events: none;
-  opacity: 0.35;
-}
-
-/* Giant decorative numeral / glyph behind copy */
 .contact-left::after {
   content: 'JCE';
   position: absolute;
   bottom: -2rem;
   right: -1rem;
-  font-family: var(--font-serif);
+  font-family: 'Cormorant Garamond', serif;
   font-weight: 300;
   font-size: 11rem;
   line-height: 1;
@@ -66,15 +52,15 @@
 
 /* Eyebrow */
 .contact-eyebrow {
-  display: inline-block;
-  font-weight: 300;
-  font-size: 0.68rem;
-  letter-spacing: 0.38em;
-  color: var(--gold);
-  margin-bottom: 1.4rem;
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.44em;
+  color: #c9a96e;
+  margin-bottom: 1.2rem;
+  text-transform: uppercase;
   position: relative;
   padding-left: 2.2rem;
-  text-transform: uppercase;
 }
 .contact-eyebrow::before {
   content: '';
@@ -83,31 +69,33 @@
   top: 50%;
   width: 1.5rem;
   height: 1px;
-  background: var(--gold);
+  background: #c9a96e;
 }
 
 /* Heading */
 .contact-heading {
-  font-family: var(--font-serif);
+  font-family: 'Cormorant Garamond', serif;
   font-weight: 300;
-  font-size: clamp(2.6rem, 4.5vw, 4rem);
-  line-height: 1.1;
-  color: var(--ivory);
-  margin-bottom: 1.4rem;
+  font-size: clamp(2.6rem, 4.5vw, 4.2rem);
+  line-height: 1.04;
+  color: #faf7f4;
+  margin-bottom: 1.2rem;
+  letter-spacing: .01em;
 }
 .contact-heading em {
   font-style: italic;
-  color: var(--blush);
+  color: rgba(201,169,110,.82);
 }
 
-/* Intro paragraph */
+/* Intro */
 .contact-intro {
-  font-size: 0.92rem;
+  font-size: 12px;
   font-weight: 300;
-  line-height: 1.8;
-  color: rgba(250,247,244,0.6);
+  line-height: 1.85;
+  color: rgba(250,247,244,0.35);
   max-width: 380px;
-  margin-bottom: 2.8rem;
+  margin-bottom: 2.4rem;
+  letter-spacing: .02em;
 }
 
 /* Details list */
@@ -115,7 +103,7 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 1.6rem;
+  gap: 1.4rem;
 }
 
 .contact-detail-item {
@@ -126,48 +114,47 @@
 
 .contact-detail-icon {
   flex-shrink: 0;
-  width: 2.4rem;
-  height: 2.4rem;
+  width: 2.2rem;
+  height: 2.2rem;
   border: 1px solid rgba(201,169,110,0.3);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--gold);
+  color: #c9a96e;
   margin-top: 0.1rem;
 }
 
 .contact-detail-label {
   display: block;
-  font-size: 0.65rem;
-  font-weight: 300;
-  letter-spacing: 0.3em;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.38em;
   text-transform: uppercase;
-  color: var(--gold);
+  color: #c9a96e;
   margin-bottom: 0.3rem;
 }
 
 .contact-detail-value {
   display: block;
-  font-size: 0.9rem;
+  font-size: 12px;
   font-weight: 300;
-  line-height: 1.6;
-  color: rgba(250,247,244,0.78);
+  line-height: 1.8;
+  color: rgba(250,247,244,0.6);
   white-space: pre-line;
+  letter-spacing: .02em;
 }
 
 .contact-detail-link {
   text-decoration: none;
-  transition: color 0.25s ease;
+  transition: color 0.2s;
 }
-.contact-detail-link:hover {
-  color: var(--blush);
-}
+.contact-detail-link:hover { color: #c4a090; }
 
 /* ============================================================
    RIGHT COLUMN — form
    ============================================================ */
 .contact-right {
-  background: var(--ivory);
+  background: #faf7f4;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -180,16 +167,15 @@
 }
 
 .contact-form-lead {
-  font-family: var(--font-serif);
+  font-family: 'Cormorant Garamond', serif;
   font-weight: 300;
   font-size: 1.5rem;
-  color: var(--charcoal);
-  margin-bottom: 2rem;
-  padding-bottom: 1.2rem;
-  border-bottom: 1px solid rgba(44,36,32,0.1);
+  color: #1e1008;
+  margin-bottom: 1.8rem;
+  padding-bottom: 1.1rem;
+  border-bottom: 1px solid #ede4da;
 }
 
-/* Side-by-side name + email on wider screens */
 .contact-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -205,50 +191,49 @@
 }
 
 .contact-field label {
-  font-size: 0.68rem;
-  font-weight: 300;
-  letter-spacing: 0.25em;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.34em;
   text-transform: uppercase;
-  color: rgba(44,36,32,0.55);
+  color: #8a7468;
 }
 
 .contact-field input,
 .contact-field textarea {
-  font-family: var(--font-sans);
-  font-size: 0.9rem;
+  font-family: 'Jost', sans-serif;
+  font-size: 12px;
   font-weight: 300;
-  color: var(--charcoal);
+  color: #1e1008;
   background: transparent;
   border: none;
-  border-bottom: 1px solid rgba(44,36,32,0.2);
+  border-bottom: 1px solid #ede4da;
   padding: 0.6rem 0;
   outline: none;
-  transition: border-color 0.25s ease;
+  transition: border-color 0.25s;
   resize: none;
   width: 100%;
+  letter-spacing: .02em;
 }
 
 .contact-field input::placeholder,
 .contact-field textarea::placeholder {
-  color: rgba(44,36,32,0.28);
+  color: rgba(30,16,8,0.28);
 }
 
 .contact-field input:focus,
 .contact-field textarea:focus {
-  border-bottom-color: var(--gold);
+  border-bottom-color: #c9a96e;
 }
 
-/* Error state */
 .contact-field.has-error input,
 .contact-field.has-error textarea {
-  border-bottom-color: var(--rose);
+  border-bottom-color: #b87060;
 }
 
 .field-error {
-  font-size: 0.72rem;
-  color: var(--rose);
-  letter-spacing: 0.02em;
-  margin-top: -0.1rem;
+  font-size: 10px;
+  color: #b87060;
+  letter-spacing: .04em;
 }
 
 /* ── Submit button ── */
@@ -259,24 +244,23 @@
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-
-  font-family: var(--font-sans);
-  font-size: 0.72rem;
-  font-weight: 300;
-  letter-spacing: 0.28em;
+  font-family: 'Jost', sans-serif;
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.34em;
   text-transform: uppercase;
-
-  padding: 1rem 2rem;
-  background:#2c1a0e;
-  color: var(--ivory);
-  border: 1px solid var(--charcoal);
+  padding: 15px 24px;
+  background: #1e1008;
+  color: #faf7f4;
+  border: 1px solid #1e1008;
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  border-radius: 2px;
 }
 
 .btn-contact-submit:hover:not(:disabled) {
-  background: transparent;
-  color: var(--charcoal);
+  background: #5a3220;
+  border-color: #5a3220;
 }
 
 .btn-contact-submit:disabled {
@@ -287,35 +271,32 @@
 /* Spinner */
 .btn-spinner {
   display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid rgba(250,247,244,0.35);
-  border-top-color: var(--ivory);
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid rgba(250,247,244,0.3);
+  border-top-color: #faf7f4;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* ── Ghost button (reset after sent) ── */
+/* Ghost reset button */
 .btn-contact-ghost {
-  margin-top: 1.6rem;
-  font-family: var(--font-sans);
-  font-size: 0.7rem;
-  font-weight: 300;
-  letter-spacing: 0.25em;
+  margin-top: 1.4rem;
+  font-family: 'Jost', sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(44,36,32,0.5);
+  color: #8a7468;
   background: none;
   border: none;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
-  transition: color 0.25s ease;
+  transition: color 0.2s;
 }
-.btn-contact-ghost:hover { color: var(--charcoal); }
+.btn-contact-ghost:hover { color: #1e1008; }
 
 /* ── Success state ── */
 .contact-success {
@@ -325,30 +306,31 @@
 }
 
 .contact-success-icon {
-  width: 3rem;
-  height: 3rem;
-  border: 1px solid rgba(44,36,32,0.12);
+  width: 2.8rem;
+  height: 2.8rem;
+  border: 1px solid #ede4da;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--gold);
-  margin-bottom: 1.6rem;
+  color: #c9a96e;
+  margin-bottom: 1.4rem;
 }
 
 .contact-success-title {
-  font-family: var(--font-serif);
+  font-family: 'Cormorant Garamond', serif;
   font-weight: 300;
   font-size: 2rem;
-  color: var(--charcoal);
-  margin-bottom: 0.8rem;
+  color: #1e1008;
+  margin-bottom: 0.7rem;
 }
 
 .contact-success-body {
-  font-size: 0.9rem;
+  font-size: 12px;
   font-weight: 300;
-  line-height: 1.8;
-  color: rgba(44,36,32,0.62);
+  line-height: 1.85;
+  color: rgba(30,16,8,0.5);
   max-width: 340px;
+  letter-spacing: .02em;
 }
 
 /* ============================================================
@@ -359,17 +341,14 @@
     grid-template-columns: 1fr;
     min-height: auto;
   }
-
   .contact-row {
     grid-template-columns: 1fr;
     gap: 0;
   }
-
   .contact-left::after { font-size: 7rem; }
 }
 
 @media (max-width: 480px) {
-  .contact-right {
-    padding: 2.5rem 1.5rem;
-  }
+  .contact-right { padding: 2.5rem 1.5rem; }
+  .contact-left-inner { padding: 2.5rem 1.5rem; }
 }
