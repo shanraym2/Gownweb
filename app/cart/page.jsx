@@ -6,7 +6,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns, getGownById } from '@/hooks/useGowns'
 import {
-  loadCart, syncCartFromBackend, setQuantity, removeItem, loadCartNote, saveCartNote,
+  loadCart, syncCartFromBackend, addToCart, setQuantity, removeItem, loadCartNote, saveCartNote,
 } from '../utils/cartClient'
 
 function parsePrice(priceStr) {
@@ -177,7 +177,84 @@ export default function CartPage() {
       )
     )
   }
+  // ADD BEFORE that line:
+  const handleSizeChange = (item, newSize) => {
+    if (newSize === item.size) return
+    const gown = getGownById(gowns, item.id)
+    if (!gown) return
 
+    // Check new size has stock
+    const newSizeObj = gown.sizeStock?.find(s => s.size === newSize)
+    const newAvail = newSizeObj
+      ? Math.max(0, (newSizeObj.stock ?? newSizeObj.stock_qty ?? 0) - (newSizeObj.reserved ?? newSizeObj.reserved_qty ?? 0))
+      : null
+    const maxQty = newAvail !== null ? newAvail : null
+    const newQty = maxQty !== null ? Math.min(item.qty, maxQty) : item.qty
+
+    // Remove old line, add new line with new size
+    removeItem(item.id, item.size)
+    if (newQty > 0) addToCart(item.id, newQty, { size: newSize, maxQty })
+
+    // Rebuild cart state
+    setCartItems(prev => {
+      const newLineKey = `${item.id}__${newSize ?? ''}`
+      return prev.map(i => {
+        if (i.lineKey !== item.lineKey) return i          // keep others as-is
+        if (newQty <= 0) return null                      // mark for removal
+        return { ...item, size: newSize, lineKey: newLineKey, qty: newQty, subtotal: item.priceNum * newQty }
+      }).filter(Boolean)
+    })
+    setSelectedKeys(prev => {
+      const next = new Set(prev)
+      const newLineKey = `${item.id}__${newSize ?? ''}`
+      next.delete(item.lineKey)
+      if (newQty > 0) next.add(newLineKey)
+      return next
+    })
+  }
+  const handleAddSize = (item, newSize) => {
+    if (!newSize) return
+    const gown = getGownById(gowns, item.id)
+    if (!gown) return
+
+    const newLineKey = `${item.id}__${newSize}`
+    // If that size is already in cart, just bump its qty
+    const existing = cartItems.find(i => i.lineKey === newLineKey)
+    if (existing) {
+      handleQtyChange(existing.id, existing.size, existing.qty + 1)
+      return
+    }
+
+    const sizeObj = gown.sizeStock?.find(s => s.size === newSize)
+    const avail = sizeObj
+      ? Math.max(0, (sizeObj.stock ?? sizeObj.stock_qty ?? 0) - (sizeObj.reserved ?? sizeObj.reserved_qty ?? 0))
+      : null
+
+    addToCart(item.id, 1, { size: newSize, maxQty: avail })
+
+    const priceNum = item.priceNum
+    const newRow = {
+      lineKey:  newLineKey,
+      id:       item.id,
+      size:     newSize,
+      name:     item.name,
+      image:    item.image,
+      alt:      item.alt,
+      price:    item.price,
+      priceNum,
+      qty:      1,
+      subtotal: priceNum,
+    }
+
+    // Insert the new row directly below the current one
+    setCartItems(prev => {
+      const idx = prev.findIndex(i => i.lineKey === item.lineKey)
+      const next = [...prev]
+      next.splice(idx + 1, 0, newRow)
+      return next
+    })
+    setSelectedKeys(prev => new Set([...prev, newLineKey]))
+  }
   const handleRemove = (id, size) => {
     removeItem(id, size)
     const lineKey = `${id}__${size ?? ''}`
@@ -220,8 +297,9 @@ export default function CartPage() {
       <div className="cart-spacer" />
 
       <div className="cart-hero">
-        <p className="cart-hero-eyebrow">Your Selection</p>
-        <h1>{content.heading}</h1>
+        <span className="cart-hero-eyebrow">The Fitting Room</span>
+        <h1 className="cart-hero-h1">{content.heading || 'Your Curated Selection'}</h1>
+        <p className="cart-hero-sub">Review your chosen pieces before we begin the fitting process.</p>
       </div>
 
       <div className="cart-body">
@@ -326,7 +404,69 @@ export default function CartPage() {
 
                       <div className="cart-row-info">
                         <p className="cart-row-name">{item.name}</p>
-                        {item.size && <p className="cart-row-size">Size: {item.size}</p>}
+                        {item.size && (() => {
+                          const gown = getGownById(gowns, item.id)
+                          const availSizes = gown?.sizeStock ?? []
+                          if (availSizes.length <= 1) {
+                            return <p className="cart-row-size">Size: {item.size}</p>
+                          }
+                          return (
+                            <div className="cart-size-change">
+                              <span className="cart-size-change-label">Size</span>
+                              <div className="cart-size-chips">
+                                {availSizes.map(({ size, stock, reserved }) => {
+                                  const avail = Math.max(0, (stock ?? 0) - (reserved ?? 0))
+                                  const isCurrent = size === item.size
+                                  const isOos = avail === 0 && !isCurrent
+                                  return (
+                                    <button
+                                      key={size}
+                                      type="button"
+                                      disabled={isOos}
+                                      onClick={() => !isOos && !isCurrent && handleSizeChange(item, size)}
+                                      className={[
+                                        'cart-size-chip',
+                                        isCurrent ? 'cart-size-chip--on' : '',
+                                        isOos     ? 'cart-size-chip--oos' : '',
+                                      ].filter(Boolean).join(' ')}
+                                      title={isOos ? 'Out of stock' : `Switch to size ${size}`}
+                                    >
+                                      {size}
+                                      {avail > 0 && avail <= 2 && !isCurrent && (
+                                        <span className="cart-size-chip-stock">{avail}</span>
+                                      )}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )
+                        })()}
+                        {/* Add another size */}
+                        {(() => {
+                          const gown = getGownById(gowns, item.id)
+                          const availSizes = gown?.sizeStock ?? []
+                          const otherSizes = availSizes.filter(s => {
+                            const avail = Math.max(0, (s.stock ?? 0) - (s.reserved ?? 0))
+                            const alreadyInCart = cartItems.some(i => i.id === item.id && i.size === s.size)
+                            return avail > 0 && !alreadyInCart
+                          })
+                          if (otherSizes.length === 0) return null
+                          return (
+                            <div className="cart-add-size">
+                              <select
+                                defaultValue=""
+                                onChange={e => { handleAddSize(item, e.target.value); e.target.value = '' }}
+                                className="cart-add-size-select"
+                              >
+                                <option value="" disabled>+ Add another size</option>
+                                {otherSizes.map(s => (
+                                  <option key={s.size} value={s.size}>{s.size}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )
+                        })()}
                         <p className="cart-row-unit">{item.price} per gown</p>
 
                         {/* Stock status badge */}
@@ -589,6 +729,92 @@ export default function CartPage() {
         }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         .cb-wrap--disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* ADD AFTER that line, before the closing backtick: */
+        .cart-size-change {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 6px 0 8px;
+          flex-wrap: wrap;
+        }
+        .cart-size-change-label {
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: .12em;
+          text-transform: uppercase;
+          color: #9a8880;
+          flex-shrink: 0;
+          font-family: 'Jost', sans-serif;
+        }
+        .cart-size-chips {
+          display: flex;
+          gap: 5px;
+          flex-wrap: wrap;
+        }
+        .cart-size-chip {
+          padding: 4px 10px;
+          border-radius: 6px;
+          border: 1px solid #e8ddd6;
+          background: #faf7f4;
+          font-family: 'Jost', sans-serif;
+          font-size: 11px;
+          font-weight: 500;
+          color: #2c2420;
+          cursor: pointer;
+          transition: border-color .15s, background .15s, color .15s;
+          position: relative;
+        }
+        .cart-size-chip:hover:not(.cart-size-chip--on):not(.cart-size-chip--oos) {
+          border-color: #2c2420;
+          background: #f0ebe6;
+        }
+        .cart-size-chip--on {
+          border-color: #2c2420;
+          background: #2c2420;
+          color: #faf7f4;
+          cursor: default;
+        }
+        .cart-size-chip--oos {
+          opacity: 0.35;
+          cursor: not-allowed;
+          text-decoration: line-through;
+        }
+        .cart-size-chip-stock {
+          position: absolute;
+          top: -5px;
+          right: -5px;
+          background: #c9a96e;
+          color: #fff;
+          font-size: 8px;
+          font-weight: 700;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          line-height: 1;
+        }
+          .cart-add-size {
+          margin-top: 8px;
+        }
+        .cart-add-size-select {
+          font-family: 'Jost', sans-serif;
+          font-size: 11px;
+          letter-spacing: .08em;
+          color: #2c2420;
+          border: 1px dashed #c9b8ae;
+          background: transparent;
+          border-radius: 6px;
+          padding: 4px 10px;
+          cursor: pointer;
+          outline: none;
+          transition: border-color .15s;
+        }
+        .cart-add-size-select:hover {
+          border-color: #2c2420;
+        }
       `}</style>
 
       <Footer />
