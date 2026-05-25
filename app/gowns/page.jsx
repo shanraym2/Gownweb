@@ -7,6 +7,7 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns } from '@/hooks/useGowns'
 import { getCurrentUser } from '../utils/authClient'
+import HeartButton from '../components/HeartButton'
 
 function parsePrice(s) {
   if (!s || typeof s !== 'string') return 0
@@ -114,7 +115,10 @@ function GownCard({ g, score }) {
 
   return (
     <Link href={`/gowns/${g.id}`} className={`gc${unavailable ? ' gc--soldout' : ''}`}>
-      <div className="gc-img-w">
+      <div className="gc-img-w" style={{ position: 'relative' }}>
+        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
+          <HeartButton gownId={g.id} size="sm" redirectPath="/gowns" />
+        </div>
         <img
           src={g.image}
           alt={g.alt || g.name}

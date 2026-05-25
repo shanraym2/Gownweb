@@ -10,7 +10,7 @@ import ProductCard from '../../components/ProductCard'
 import { addToCart, loadCart } from '../../utils/cartClient'
 import { getCurrentUser } from '../../utils/authClient'
 import { useSizeRecommender } from '@/hooks/useSizeRecommender'
-
+import HeartButton from '../../components/HeartButton'
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function isInCart(cart, id, size) {
@@ -509,7 +509,10 @@ export default function GownDetailPage() {
 
           <div className="dp-info-head">
             <p className="dp-overline">{gown.category || gown.type || 'Bridal Collection'}</p>
-            <h1 className="dp-name">{gown.name}</h1>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <h1 className="dp-name" style={{ flex: 1 }}>{gown.name}</h1>
+              <HeartButton gownId={gown.id} size="md" redirectPath={`/gowns/${gown.id}`} />
+            </div>
             <p className="dp-price">{gown.price}</p>
           </div>
 
