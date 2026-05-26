@@ -25,7 +25,8 @@ function formatPrice(num) {
 function getAvailable(inventoryMap, gownId, size) {
   const gownInv = inventoryMap?.[String(gownId)]
   if (!gownInv) return null
-  const sizeKey = size ?? Object.keys(gownInv)[0]
+  const sizeKey = size ?? (Object.keys(gownInv).length === 1 ? Object.keys(gownInv)[0] : null)
+  if (!sizeKey) return null
   const row = gownInv?.[sizeKey]
   if (!row) return null
   return Math.max(0, (row.stock_qty ?? 0) - (row.reserved_qty ?? 0))
@@ -42,6 +43,26 @@ function StockBadge({ available }) {
   return null
 }
 
+function CartNote() {
+  const [note, setNote] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return loadCartNote()
+  })
+  return (
+    <div className="cart-note-section">
+      <label htmlFor="cart-note">Order Notes</label>
+      <textarea
+        id="cart-note"
+        className="cart-note-ta"
+        placeholder="Special requests, delivery notes…"
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        onBlur={() => saveCartNote(note)}
+      />
+    </div>
+  )
+}
+
 export default function CartPage() {
   const { gowns } = useGowns()
   const [cartItems,    setCartItems   ] = useState([])
@@ -52,6 +73,7 @@ export default function CartPage() {
   // Live inventory: { [gownId]: { [sizeLabel]: { stock_qty, reserved_qty } } }
   const [inventoryMap, setInventoryMap] = useState({})
   const [stockLoading, setStockLoading] = useState(false)
+  const [addSizeSelections, setAddSizeSelections] = useState({})
 
   const [content, setContent] = useState({
     heading:        'Your Fitting Room',
@@ -70,15 +92,12 @@ export default function CartPage() {
   
   useEffect(() => { setMounted(true) }, [])
 
-  // ── Fetch live inventory for all items in cart ─────────────────────────────
+// ── Fetch live inventory for all items in cart ─────────────────────────────
   const fetchInventory = useCallback(async (items) => {
     if (!items.length) return
     const gownIds = [...new Set(items.map(i => i.id))]
     setStockLoading(true)
     try {
-      // Fetch inventory for each gown; /api/gowns returns sizeStock per gown
-      // which already includes stock data. If your API exposes a dedicated
-      // inventory endpoint use that instead.
       const res = await fetch(`/api/gowns?ids=${gownIds.join(',')}`)
       if (!res.ok) return
       const data = await res.json()
@@ -100,6 +119,14 @@ export default function CartPage() {
       setStockLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (cartItems.length > 0) fetchInventory(cartItems)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [cartItems, fetchInventory])
 
   // ── Build cart items from localStorage + gown data ─────────────────────────
   useEffect(() => {
@@ -136,8 +163,12 @@ export default function CartPage() {
     setNote(loadCartNote())
   }, [mounted])
 
-  const allSelected  = cartItems.length > 0 && selectedKeys.size === cartItems.length
-  const someSelected = selectedKeys.size > 0 && selectedKeys.size < cartItems.length
+  const selectableItems = cartItems.filter(i => {
+    const avail = getAvailable(inventoryMap, i.id, i.size)
+    return avail === null || avail > 0
+  })
+  const allSelected  = selectableItems.length > 0 && selectedKeys.size === selectableItems.length
+  const someSelected = selectedKeys.size > 0 && selectedKeys.size < selectableItems.length
 
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -177,41 +208,74 @@ export default function CartPage() {
       )
     )
   }
-  // ADD BEFORE that line:
+
   const handleSizeChange = (item, newSize) => {
     if (newSize === item.size) return
     const gown = getGownById(gowns, item.id)
     if (!gown) return
 
-    // Check new size has stock
-    const newSizeObj = gown.sizeStock?.find(s => s.size === newSize)
-    const newAvail = newSizeObj
-      ? Math.max(0, (newSizeObj.stock ?? newSizeObj.stock_qty ?? 0) - (newSizeObj.reserved ?? newSizeObj.reserved_qty ?? 0))
-      : null
-    const maxQty = newAvail !== null ? newAvail : null
-    const newQty = maxQty !== null ? Math.min(item.qty, maxQty) : item.qty
+    const newLineKey = `${item.id}__${newSize ?? ''}`
+    const existingLine = cartItems.find(i => i.lineKey === newLineKey)
 
-    // Remove old line, add new line with new size
-    removeItem(item.id, item.size)
-    if (newQty > 0) addToCart(item.id, newQty, { size: newSize, maxQty })
+    if (existingLine) {
+      // Target size already has its own row — merge quantities
+      const available = getAvailable(inventoryMap, item.id, newSize)
+      const mergedQty = available !== null
+        ? Math.min(existingLine.qty + item.qty, available)
+        : existingLine.qty + item.qty
 
-    // Rebuild cart state
-    setCartItems(prev => {
-      const newLineKey = `${item.id}__${newSize ?? ''}`
-      return prev.map(i => {
-        if (i.lineKey !== item.lineKey) return i          // keep others as-is
-        if (newQty <= 0) return null                      // mark for removal
-        return { ...item, size: newSize, lineKey: newLineKey, qty: newQty, subtotal: item.priceNum * newQty }
-      }).filter(Boolean)
-    })
-    setSelectedKeys(prev => {
-      const next = new Set(prev)
-      const newLineKey = `${item.id}__${newSize ?? ''}`
-      next.delete(item.lineKey)
-      if (newQty > 0) next.add(newLineKey)
-      return next
-    })
+      setQuantity(existingLine.id, mergedQty, newSize, available)
+     // AFTER (else branch, replace the two lines)
+      try {
+        removeItem(item.id, item.size)
+        if (newQty > 0) addToCart(item.id, newQty, { size: newSize, maxQty })
+      } catch (err) {
+        console.error('Cart storage error during size change:', err)
+        return // abort state update — UI stays consistent with storage
+      }
+
+      setCartItems(prev =>
+        prev
+          .filter(i => i.lineKey !== item.lineKey)
+          .map(i =>
+            i.lineKey === newLineKey
+              ? { ...i, qty: mergedQty, subtotal: i.priceNum * mergedQty }
+              : i
+          )
+      )
+      setSelectedKeys(prev => {
+        const next = new Set(prev)
+        next.delete(item.lineKey)
+        next.add(newLineKey)
+        return next
+      })
+    } else {
+      const newSizeObj = gown.sizeStock?.find(s => s.size === newSize)
+      const newAvail = newSizeObj
+        ? Math.max(0, (newSizeObj.stock ?? newSizeObj.stock_qty ?? 0) - (newSizeObj.reserved ?? newSizeObj.reserved_qty ?? 0))
+        : null
+      const maxQty = newAvail !== null ? newAvail : null
+      const newQty = maxQty !== null ? Math.min(item.qty, maxQty) : item.qty
+
+      removeItem(item.id, item.size)
+      if (newQty > 0) addToCart(item.id, newQty, { size: newSize, maxQty })
+
+      setCartItems(prev =>
+        prev.map(i => {
+          if (i.lineKey !== item.lineKey) return i
+          if (newQty <= 0) return null
+          return { ...item, size: newSize, lineKey: newLineKey, qty: newQty, subtotal: item.priceNum * newQty }
+        }).filter(Boolean)
+      )
+      setSelectedKeys(prev => {
+        const next = new Set(prev)
+        next.delete(item.lineKey)
+        if (newQty > 0) next.add(newLineKey)
+        return next
+      })
+    }
   }
+
   const handleAddSize = (item, newSize) => {
     if (!newSize) return
     const gown = getGownById(gowns, item.id)
@@ -278,7 +342,8 @@ export default function CartPage() {
   })
   const canCheckout = selectedItems.length > 0 && selectedOutOfStock.length === 0
 
-  const checkoutHref = `/checkout?items=${selectedItems.map(i => i.id).join(',')}`
+  const checkoutHref = `/checkout?items=${selectedItems.map(i => `${i.id}:${encodeURIComponent(i.size ?? '')}`).join(',')}`
+  
 
   if (!mounted) return (
     <main>
@@ -455,8 +520,11 @@ export default function CartPage() {
                           return (
                             <div className="cart-add-size">
                               <select
-                                defaultValue=""
-                                onChange={e => { handleAddSize(item, e.target.value); e.target.value = '' }}
+                                value={addSizeSelections[item.lineKey] ?? ''}
+                                onChange={e => {
+                                  handleAddSize(item, e.target.value)
+                                  setAddSizeSelections(prev => ({ ...prev, [item.lineKey]: '' }))
+                                }}
                                 className="cart-add-size-select"
                               >
                                 <option value="" disabled>+ Add another size</option>
@@ -588,17 +656,7 @@ export default function CartPage() {
                 <span className="cart-summary-total-amt">{formatPrice(subtotal)}</span>
               </div>
 
-              <div className="cart-note-section">
-                <label htmlFor="cart-note">Order Notes</label>
-                <textarea
-                  id="cart-note"
-                  className="cart-note-ta"
-                  placeholder="Special requests, delivery notes…"
-                  value={note}
-                  onChange={e => setNote(e.target.value)}
-                  onBlur={() => saveCartNote(note)}
-                />
-              </div>
+              <CartNote />
 
               {canCheckout ? (
                 <Link href={checkoutHref} className="btn-checkout">

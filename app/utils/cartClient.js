@@ -46,10 +46,11 @@ export function loadCart() {
 }
 
 // Load cart from backend and sync with local storage
+// REPLACE ENTIRE FUNCTION
 export async function syncCartFromBackend() {
   const userEmail = getCurrentUserEmail()
-  if (!userEmail) return loadCart() // Fallback to local for guests
-  
+  if (!userEmail) return loadCart()
+
   try {
     const res = await fetch('/api/mobile/cart', {
       method: 'GET',
@@ -58,31 +59,45 @@ export async function syncCartFromBackend() {
         'X-User-Email': userEmail,
       },
     })
-    
-    if (!res.ok) {
-      console.warn('Failed to sync cart from backend:', res.status)
-      return loadCart()
-    }
-    
+
+    if (!res.ok) return loadCart()
+
     const data = await res.json()
-    const items = data.items || []
-    
-    // Update local storage with backend data
-    saveCart(items)
-    return items
-  } catch (err) {
-    console.warn('Error syncing cart from backend:', err)
+    const backendItems = data.items || []
+    const backendUpdatedAt = data.lastUpdated ? new Date(data.lastUpdated) : null
+
+    const localRaw = safeGetItem('jce_cart_updated_at__' + userEmail)
+    const localUpdatedAt = localRaw ? new Date(localRaw) : null
+
+    // If local is newer or same age, push local to backend instead
+    if (localUpdatedAt && backendUpdatedAt && localUpdatedAt >= backendUpdatedAt) {
+      const localItems = loadCart()
+      syncCartToBackend(userEmail, localItems).catch(() => {})
+      return localItems
+    }
+
+    // Backend is newer — overwrite local
+    saveCartSilent(backendItems, userEmail)
+    return backendItems
+  } catch {
     return loadCart()
   }
 }
 
+function saveCartSilent(items, email) {
+  const key = `${CART_PREFIX}${email}`
+  safeSetItem(key, JSON.stringify(items))
+  safeSetItem('jce_cart_updated_at__' + email, new Date().toISOString())
+}
+
+// AFTER (add timestamp tracking)
 export function saveCart(items) {
   const key = getCartKey()
   safeSetItem(key, JSON.stringify(items))
-  
-  // Sync to backend so mobile app sees the same cart
+
   const userEmail = getCurrentUserEmail()
   if (userEmail) {
+    safeSetItem('jce_cart_updated_at__' + userEmail, new Date().toISOString())
     syncCartToBackend(userEmail, items).catch(() => {})
   }
 }
