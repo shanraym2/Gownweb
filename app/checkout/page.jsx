@@ -942,8 +942,12 @@ export default function CheckoutPage() {
     }))
     const params     = new URLSearchParams(window.location.search)
     const selectedIds = params.get('items')?.split(',').filter(Boolean) ?? []
-    const normalised  = selectedIds.length > 0
-      ? allItems.filter(item => selectedIds.includes(String(item.id)))
+    const selectedPairs = new Set(selectedIds.map(s => {
+      const [id, size] = s.split(':')
+      return `${id}__${decodeURIComponent(size ?? '')}`
+    }))
+    const normalised = selectedIds.length > 0
+      ? allItems.filter(item => selectedPairs.has(`${item.id}__${item.size ?? ''}`))
       : allItems
 
     setItems(normalised)
@@ -1023,8 +1027,24 @@ export default function CheckoutPage() {
       }
 
       const cart       = loadCart()
-      const orderedIds = new Set(items.map(i => String(i.id)))
-      saveCart(cart.filter(i => !orderedIds.has(String(i.id))))
+      const orderedKeys = new Set(items.map(i => `${i.id}__${i.size ?? ''}`))
+      const remainingCart = cart.filter(i => !orderedKeys.has(`${i.id}__${i.size ?? ''}`))
+      saveCart(remainingCart)
+
+      try {
+        if (user?.email) {
+          await fetch('/api/mobile/cart', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-user-email': user.email,
+            },
+            body: JSON.stringify({ items: remainingCart }),
+          })
+        }
+      } catch {
+        
+      }
       router.push(`/order-confirmation/${data.orderId}`)
     } catch {
       setPlaceError('Could not connect to the server. Please try again.')
