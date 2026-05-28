@@ -29,12 +29,25 @@ const POSE_SCRIPTS = [
 ]
 const SEG_SCRIPT = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.1/dist/body-segmentation.min.js'
 
-function loadScript(src) {
+function loadScript(src, retries = 3, delayMs = 2000) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
-    const s = Object.assign(document.createElement('script'), { src, async: false })
-    s.onload = resolve; s.onerror = () => reject(new Error('Failed: ' + src))
-    document.head.appendChild(s)
+
+    const attempt = (remaining) => {
+      const s = Object.assign(document.createElement('script'), { src, async: false })
+      s.onload = resolve
+      s.onerror = () => {
+        s.remove()
+        if (remaining > 0) {
+          setTimeout(() => attempt(remaining - 1), delayMs)
+        } else {
+          reject(new Error('Failed to load: ' + src))
+        }
+      }
+      document.head.appendChild(s)
+    }
+
+    attempt(retries)
   })
 }
 
