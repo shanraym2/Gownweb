@@ -4,21 +4,50 @@
  * components/TryOnCamera.jsx
  *
  * Shared headless-ish camera + pose detection + gown overlay component.
+ * Used by:
+ *   app/virtual-try-on/page.jsx  — standalone page
+ *   app/fitting-room/page.jsx    — TryOnPanel (reads detectorRef from context)
  *
- * FIXES APPLIED
  * ─────────────────────────────────────────────────────────────────────────────
- *  • onSave prop wired — takePhoto and startTimedCapture both call onSave?(dataUrl)
- *  • internalModelState syncs when externalDetector arrives late (useEffect guard)
- *  • Removed duplicated KP/CONF/dist/mid/lerpPt/smoothKps/analyzePose/
- *    getGownLayout/drawGown — all imported from poseUtils.js and gownOverlay.js
- *  • CONF is now 0.45 everywhere (was 0.25 locally, causing ghost keypoints)
- *  • canStart also checks detectorRef.current to guard against ref/state race
+ * FIXES APPLIED  (from audit)
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  • Model loading race condition — component accepts an external detectorRef
+ *    (from FittingRoomCtx) OR loads its own. The Start button is disabled
+ *    until modelState === 'ready', so the detect loop never spins on a null
+ *    detector.
+ *  • Camera stream leak on tab blur — visibilitychange listener stops the
+ *    stream whenever the tab is hidden while the camera is active.
+ *  • Enhanced mode / segmentation errors surface as visible UI (segError state)
+ *    instead of silent failure.
+ *  • Orientation warning shown on mobile landscape while camera is active.
+ *  • All interactive elements have aria-label / aria-pressed.
+ *  • detect() is a stable callback (empty dep array) — all changing values
+ *    are read via refs to avoid loop restarts.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * CROSS-ORIGIN / TAINTED CANVAS NOTE
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Gown images are loaded with img.crossOrigin = 'anonymous'. If the CDN/server
+ * does not return CORS headers (Access-Control-Allow-Origin), drawImage() will
+ * taint the canvas and getImageData() will throw a SecurityError. This is a
+ * server configuration issue — make sure your image CDN serves CORS headers.
+ * The component catches the error gracefully and disables enhanced mode.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * PROPS
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  gown              object | null  — currently selected gown
+ *  gowns             array          — full gown list for the thumbnail strip
+ *  onGownChange      fn(gown)       — called when the user picks a different gown
+ *  externalDetector  RefObject      — optional shared detectorRef from context
+ *                                     (if provided, the component skips loading its own model)
+ *  externalSegmenter RefObject      — optional shared segmenterRef from context
+ *  modelState        string         — 'idle'|'loading'|'ready'|'error'
+ *                                     (pass from context if externalDetector is provided)
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { KP, CONF, lerpPt, smoothKpsDisplay as smoothKps, analyzePose } from '../../lib/fitting-room/poseUtils.js'
-import { getGownLayout, drawGown } from '../../lib/fitting-room/gownOverlay.js'
 
 // ── CDN scripts ───────────────────────────────────────────────────────────────
 const POSE_SCRIPTS = [
@@ -38,6 +67,50 @@ function loadScript(src) {
   })
 }
 
+// ── Keypoints ─────────────────────────────────────────────────────────────────
+const KP   = { NOSE:0, LS:5, RS:6, LH:11, RH:12, LK:13, RK:14, LA:15, RA:16 }
+const CONF = 0.25
+
+// ── Geometry ──────────────────────────────────────────────────────────────────
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) }
+function mid(a, b)  { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }
+function lerpPt(a, b, t) { return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, score: b.score } }
+function smoothKps(prev, curr, t = 0.35) {
+  if (!prev) return curr
+  return curr.map((k, i) => lerpPt(prev[i], k, t))
+}
+
+// ── Pose analysis ─────────────────────────────────────────────────────────────
+function analyzePose(kps, vw, vh) {
+  if (!kps) return { ok: false, issues: ['no_pose'], facingBack: false }
+  const ls = kps[KP.LS], rs = kps[KP.RS], lh = kps[KP.LH], rh = kps[KP.RH]
+  const lk = kps[KP.LK], rk = kps[KP.RK], la = kps[KP.LA], ra = kps[KP.RA]
+  const nose = kps[KP.NOSE]
+  const issues = []
+  const shouldersOk = ls?.score > CONF && rs?.score > CONF
+  const hipsOk      = lh?.score > CONF && rh?.score > CONF
+  const kneesOk     = lk?.score > CONF && rk?.score > CONF
+  const anklesOk    = la?.score > CONF && ra?.score > CONF
+  const margin = vw * 0.08
+  const tooCloseFrame = shouldersOk && (
+    ls.x < margin || rs.x > vw - margin || (hipsOk && mid(lh, rh).y > vh * 0.72)
+  )
+  const faceVisible    = nose && nose.score > 0.30
+  const bodyStable     = shouldersOk && hipsOk
+  const shoulderSpan   = shouldersOk ? dist(ls, rs) : 0
+  const bodyWideEnough = shoulderSpan > vw * 0.10
+  const facingBack = !faceVisible && bodyStable && bodyWideEnough && !tooCloseFrame
+  if (!shouldersOk) { issues.push('no_shoulders'); return { ok: false, issues, shouldersOk, hipsOk, facingBack } }
+  if (!hipsOk)      { issues.push('no_hips');      return { ok: false, issues, shouldersOk, hipsOk, facingBack } }
+  if (!kneesOk) issues.push('no_legs')
+  if (tooCloseFrame) issues.push('too_close')
+  if (nose?.score > 0.15 && nose.y < vh * 0.06) issues.push('head_cut')
+  if (!kneesOk && hipsOk && mid(lh, rh).y > vh * 0.55 && !tooCloseFrame) issues.unshift('too_close')
+  if (kneesOk && !anklesOk && mid(lk, rk).y < vh * 0.82) issues.push('too_close')
+  const ok = shouldersOk && hipsOk && issues.length === 0
+  return { ok, issues, shouldersOk, hipsOk, kneesOk, anklesOk, facingBack }
+}
+
 const GUIDANCE = {
   no_pose:      { icon: '🚶', text: 'Stand in front of the camera — full body visible.' },
   no_shoulders: { icon: '⬆️', text: 'Step back until your shoulders appear.' },
@@ -45,8 +118,49 @@ const GUIDANCE = {
   no_legs:      { icon: '↕️', text: 'Step back so your legs are visible.' },
   too_close:    { icon: '↔️', text: 'Too close — move back 1–2 metres.' },
   head_cut:     { icon: '⬇️', text: 'Move down slightly — your head is cut off.' },
-  tilted:       { icon: '↗️', text: 'Stand straight — your shoulders look tilted.' },
-  rotated:      { icon: '↩️', text: 'Face the camera directly.' },
+}
+
+// ── Gown layout ───────────────────────────────────────────────────────────────
+function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
+  const ls = kps[KP.LS], rs = kps[KP.RS], lh = kps[KP.LH], rh = kps[KP.RH]
+  const lk = kps[KP.LK], rk = kps[KP.RK], la = kps[KP.LA], ra = kps[KP.RA]
+  if ([ls, rs, lh, rh].some(k => !k || k.score < CONF)) return null
+  const sm = mid(ls, rs), hm = mid(lh, rh), torsoH = hm.y - sm.y
+  const rawSw = dist(ls, rs), sw = Math.min(Math.max(rawSw, vw * 0.28), vw * 0.80)
+  const rawHw = dist(lh, rh), hw = Math.max(rawHw, sw * 0.90)
+  const neckOff = cal.necklineY ?? 0.18
+  const topY = sm.y - torsoH * neckOff
+  let bottomY
+  if (la?.score > CONF && ra?.score > CONF) {
+    bottomY = Math.max(la.y, ra.y) + torsoH * 0.15
+  } else if (lk?.score > CONF && rk?.score > CONF) {
+    const km = mid(lk, rk), legH = km.y - hm.y
+    bottomY = km.y + legH * 1.1
+  } else {
+    bottomY = sm.y + torsoH * 4.8
+  }
+  if (cal.hemY != null) {
+    const fullH = sm.y + torsoH * 4.8 - topY
+    bottomY = topY + fullH * cal.hemY
+  }
+  const shoulderPad = cal.shoulderPad ?? 1.45
+  const skirtFlare  = cal.skirtFlare  ?? 1.20
+  const topW = sw * shoulderPad
+  const botW = Math.max(hw * 1.55, topW) * skirtFlare
+  const cx = (sm.x + hm.x) / 2
+  return { topY, bottomY, cx, topW, botW, torsoH }
+}
+
+function drawGown(ctx, img, layout, opacity) {
+  const { topY, bottomY, cx, topW, botW } = layout
+  const h = bottomY - topY; if (h <= 0) return
+  ctx.save(); ctx.globalAlpha = opacity
+  ctx.beginPath()
+  ctx.moveTo(cx - topW / 2, topY); ctx.lineTo(cx + topW / 2, topY)
+  ctx.lineTo(cx + botW / 2, bottomY); ctx.lineTo(cx - botW / 2, bottomY)
+  ctx.closePath(); ctx.clip()
+  ctx.drawImage(img, cx - botW / 2, topY, botW, h)
+  ctx.restore()
 }
 
 async function applySegmentation(segmenter, video, ctx, w, h) {
@@ -78,12 +192,11 @@ async function applySegmentation(segmenter, video, ctx, w, h) {
 
 export default function TryOnCamera({
   gown,
-  gowns             = [],
+  gowns         = [],
   onGownChange,
-  externalDetector  = null,
-  externalSegmenter = null,
-  modelState: externalModelState = null,
-  onSave,                           // FIX 1: accept onSave prop
+  externalDetector  = null,   // { current: detector | null }
+  externalSegmenter = null,   // { current: segmenter | null }
+  modelState: externalModelState = null,  // passed from context when using externalDetector
 }) {
   const videoRef   = useRef(null)
   const canvasRef  = useRef(null)
@@ -91,26 +204,31 @@ export default function TryOnCamera({
   const animRef    = useRef(null)
   const prevKpsRef = useRef(null)
 
+  // Internal refs — used when NOT sharing via context
   const internalDetectorRef  = useRef(null)
   const internalSegmenterRef = useRef(null)
 
+  // Use external refs when provided, fall back to internal
   const detectorRef  = externalDetector  ?? internalDetectorRef
   const segmenterRef = externalSegmenter ?? internalSegmenterRef
 
-  const opacityRef  = useRef(0.88)
-  const enhancedRef = useRef(false)
-  const gownRef     = useRef(gown)
-  const gownImgRef  = useRef(null)
-  const gownBackRef = useRef(null)
+  // Stable refs for values consumed inside the detect loop
+  const opacityRef    = useRef(0.88)
+  const enhancedRef   = useRef(false)
+  const gownRef       = useRef(gown)
+  const gownImgRef    = useRef(null)
+  const gownBackRef   = useRef(null)
 
-  const goodFrames   = useRef(0)
-  const facingFrames = useRef(0)
+  const goodFrames    = useRef(0)
+  const facingFrames  = useRef(0)
 
+  // Internal model loading (only used when no external detector is provided)
   const [internalModelState, setInternalModelState] = useState(
-    externalDetector != null ? 'ready' : 'idle'
+    externalDetector ? 'ready' : 'idle'
   )
   const modelState = externalModelState ?? internalModelState
 
+  // Camera + pose state
   const [camState,   setCamState  ] = useState('off')
   const [camError,   setCamError  ] = useState('')
   const [poseLocked, setPoseLocked] = useState(false)
@@ -118,29 +236,25 @@ export default function TryOnCamera({
   const [poseIssues, setPoseIssues] = useState([])
   const [facingBack, setFacingBack] = useState(false)
 
+  // Overlay controls
   const [opacity,    setOpacity   ] = useState(0.88)
   const [enhanced,   setEnhanced  ] = useState(false)
   const [segLoading, setSegLoading] = useState(false)
   const [segError,   setSegError  ] = useState('')
 
+  // Capture / timer
   const [captured,   setCaptured  ] = useState(null)
   const [countdown,  setCountdown ] = useState(null)
   const [timerSecs,  setTimerSecs ] = useState(0)
   const countdownRef = useRef(null)
 
+  // Mobile orientation
   const [isLandscape, setIsLandscape] = useState(false)
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
-  useEffect(() => { opacityRef.current  = opacity  }, [opacity])
+  useEffect(() => { opacityRef.current = opacity },   [opacity])
   useEffect(() => { enhancedRef.current = enhanced }, [enhanced])
-  useEffect(() => { gownRef.current     = gown     }, [gown])
-
-  // FIX 2: sync internalModelState when externalDetector arrives after mount
-  useEffect(() => {
-    if (externalDetector != null && internalModelState !== 'ready') {
-      setInternalModelState('ready')
-    }
-  }, [externalDetector]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { gownRef.current = gown },         [gown])
 
   // ── Load gown image when gown changes ──────────────────────────────────────
   useEffect(() => {
@@ -151,6 +265,7 @@ export default function TryOnCamera({
     const img = new Image(); img.crossOrigin = 'anonymous'
     img.onload  = () => { gownImgRef.current = img }
     img.onerror = () => {
+      // Fallback: try the plain product image without crossOrigin (no CORS needed for display)
       if (src !== gown.image) {
         const fb = new Image(); fb.crossOrigin = 'anonymous'
         fb.onload = () => { gownImgRef.current = fb }
@@ -165,13 +280,14 @@ export default function TryOnCamera({
       bi.src = gown.tryonImageBack
     }
 
+    // Reset capture state when gown changes
     setCaptured(null); goodFrames.current = 0; setPoseLocked(false)
     setFacingBack(false); facingFrames.current = 0
   }, [gown])
 
   // ── Load internal model (skipped when external detector is provided) ───────
   useEffect(() => {
-    if (externalDetector != null) return
+    if (externalDetector) return   // model is managed externally
     if (detectorRef.current || internalModelState === 'loading' || internalModelState === 'ready') return
     setInternalModelState('loading')
     Promise.all(POSE_SCRIPTS.map(loadScript))
@@ -214,14 +330,15 @@ export default function TryOnCamera({
       await videoRef.current.play(); setCamState('on')
     } catch (err) {
       let msg = 'Could not start camera.'
-      if (err.name === 'NotAllowedError')       msg = 'Camera permission denied. Click the camera icon in the address bar → Allow → refresh.'
-      else if (err.name === 'NotFoundError')    msg = 'No camera found on this device.'
+      if (err.name === 'NotAllowedError')    msg = 'Camera permission denied. Click the camera icon in the address bar → Allow → refresh.'
+      else if (err.name === 'NotFoundError') msg = 'No camera found on this device.'
       else if (err.name === 'NotReadableError') msg = 'Camera is in use by another app. Close Zoom/Teams and try again.'
-      else if (err.message === 'timeout')       msg = 'Camera took too long to start — please try again.'
+      else if (err.message === 'timeout')    msg = 'Camera took too long to start — please try again.'
       setCamError(msg); setCamState('error')
     }
   }, [])
 
+  // FIX: stop camera on tab visibility change to prevent silent stream leaks
   useEffect(() => {
     const onVisibility = () => { if (document.hidden && camState === 'on') stopCamera() }
     document.addEventListener('visibilitychange', onVisibility)
@@ -251,6 +368,7 @@ export default function TryOnCamera({
           .then(s => { segmenterRef.current = s })
           .catch(e => {
             console.warn('Segmentation load failed:', e)
+            // FIX: surface error instead of silently failing
             setSegError('Could not load enhanced mode. Try refreshing.')
             setEnhanced(false); enhancedRef.current = false
           })
@@ -261,11 +379,13 @@ export default function TryOnCamera({
   }, [segmenterRef])
 
   // ── Detect loop ────────────────────────────────────────────────────────────
+  // FIX: stable callback with empty dep array — all changing values via refs
   const detect = useCallback(async () => {
     const video = videoRef.current, canvas = canvasRef.current
     if (!video || !canvas || video.readyState < 2) {
       animRef.current = requestAnimationFrame(detect); return
     }
+    // FIX: gate on detectorRef being populated — never spin on null detector
     if (!detectorRef.current) {
       animRef.current = requestAnimationFrame(detect); return
     }
@@ -278,17 +398,20 @@ export default function TryOnCamera({
     const ctx = canvas.getContext('2d')
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
+    // Draw mirrored video
     ctx.save(); ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, vw, vh); ctx.restore()
 
     try {
       const poses = await detectorRef.current?.estimatePoses(video)
       if (poses?.length > 0) {
+        // Flip keypoints to match the mirrored canvas
         let kps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
         kps = smoothKps(prevKpsRef.current, kps); prevKpsRef.current = kps
 
         const analysis = analyzePose(kps, vw, vh)
         setPoseIssues(analysis.issues)
 
+        // Smooth back-facing transitions — require 8 consecutive frames
         const tooClose = analysis.issues.includes('too_close') && !analysis.facingBack
         if (tooClose) facingFrames.current = 0
         else if (analysis.facingBack) facingFrames.current = Math.min(facingFrames.current + 1, 8)
@@ -323,7 +446,7 @@ export default function TryOnCamera({
     } catch { /* skip frame */ }
 
     animRef.current = requestAnimationFrame(detect)
-  }, [detectorRef, segmenterRef]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [detectorRef, segmenterRef])   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (camState === 'on') detect()
@@ -334,33 +457,25 @@ export default function TryOnCamera({
   useEffect(() => () => stopCamera(), [stopCamera])
 
   // ── Capture ────────────────────────────────────────────────────────────────
-  // FIX 1: takePhoto calls onSave after setting captured
   const takePhoto = useCallback(() => {
     if (!canvasRef.current) return
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.93)
-    setCaptured(dataUrl)
-    onSave?.(dataUrl)
-  }, [onSave])
+    setCaptured(canvasRef.current.toDataURL('image/jpeg', 0.93))
+  }, [])
 
-  // FIX 1: startTimedCapture also calls onSave inside the tick callback
   const startTimedCapture = useCallback(() => {
     if (timerSecs === 0) { takePhoto(); return }
     setCountdown(timerSecs)
     const tick = remaining => {
       if (remaining <= 0) {
         setCountdown(null)
-        if (canvasRef.current) {
-          const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.93)
-          setCaptured(dataUrl)
-          onSave?.(dataUrl)
-        }
+        if (canvasRef.current) setCaptured(canvasRef.current.toDataURL('image/jpeg', 0.93))
         return
       }
       setCountdown(remaining)
       countdownRef.current = setTimeout(() => tick(remaining - 1), 1000)
     }
     countdownRef.current = setTimeout(() => tick(timerSecs - 1), 1000)
-  }, [timerSecs, takePhoto, onSave])
+  }, [timerSecs, takePhoto])
 
   const cancelCountdown = useCallback(() => {
     clearTimeout(countdownRef.current); setCountdown(null)
@@ -381,14 +496,15 @@ export default function TryOnCamera({
   }, [captured])
 
   // ── Derived state ──────────────────────────────────────────────────────────
-  // FIX 4: also check detectorRef.current to guard against ref/state race
-  const canStart = modelState === 'ready' && !!gown && !!detectorRef.current
+  // FIX: gate start button on modelState — not just selectedGown
+  const canStart = modelState === 'ready' && !!gown
   const canCap   = camState === 'on' && poseLocked && !captured
   const issue    = poseFound ? null : (poseIssues[0] ? GUIDANCE[poseIssues[0]] : null)
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="tc-wrap">
+      {/* Gown thumbnail strip */}
       {gowns.length > 0 && (
         <div className="tc-strip" role="listbox" aria-label="Select gown">
           {gowns.map(g => (
@@ -411,6 +527,7 @@ export default function TryOnCamera({
         </div>
       )}
 
+      {/* Viewport */}
       <div className="tc-viewport" aria-label="Camera viewport">
         <video ref={videoRef} playsInline muted
           style={{ position:'absolute', inset:0, width:'100%', height:'100%',
@@ -419,6 +536,7 @@ export default function TryOnCamera({
           style={{ position:'absolute', inset:0, width:'100%', height:'100%',
                    opacity: camState === 'on' ? 1 : 0, transition:'opacity .3s' }}/>
 
+        {/* Off-state placeholder */}
         {camState !== 'on' && !captured && (
           <div className="tc-ph" aria-live="polite">
             <svg width="44" height="44" viewBox="0 0 80 80" fill="none" opacity=".3">
@@ -434,6 +552,7 @@ export default function TryOnCamera({
           </div>
         )}
 
+        {/* Body guide silhouette */}
         {camState === 'on' && !poseFound && !captured && !isLandscape && (
           <div className="tc-guide" aria-hidden="true">
             <svg viewBox="0 0 100 220" fill="none" stroke="rgba(255,255,255,.2)"
@@ -448,6 +567,7 @@ export default function TryOnCamera({
           </div>
         )}
 
+        {/* Guidance hint */}
         {camState === 'on' && issue && !captured && (
           <div className="tc-hint" role="status">
             <span aria-hidden="true">{issue.icon}</span>
@@ -455,6 +575,7 @@ export default function TryOnCamera({
           </div>
         )}
 
+        {/* Landscape warning */}
         {isLandscape && camState === 'on' && (
           <div className="tc-hint tc-hint--warn" role="alert">
             <span aria-hidden="true">📱</span>
@@ -462,6 +583,7 @@ export default function TryOnCamera({
           </div>
         )}
 
+        {/* Pose status badge */}
         {camState === 'on' && poseFound && !captured && countdown === null && (
           <div className={`tc-pose-badge${poseLocked ? ' locked' : ''}`} role="status"
             aria-label={poseLocked ? 'Pose ready — tap to capture' : 'Tracking your pose'}>
@@ -473,18 +595,21 @@ export default function TryOnCamera({
           </div>
         )}
 
+        {/* Countdown overlay */}
         {countdown !== null && (
           <div className="tc-countdown" role="timer" aria-live="assertive">
             <span key={countdown}>{countdown}</span>
           </div>
         )}
 
+        {/* Captured image */}
         {captured && (
           <img src={captured} alt="Your virtual try-on"
             style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain' }}/>
         )}
       </div>
 
+      {/* Controls */}
       <div className="tc-controls">
         {camError && (
           <div className="tc-alert tc-alert--err" role="alert">{camError}</div>
@@ -536,6 +661,7 @@ export default function TryOnCamera({
                   : 'Waiting…'}
               </button>
 
+              {/* Timer selector */}
               <div className="tc-timer-row" role="group" aria-label="Self-timer">
                 {[0, 3, 5, 10].map(s => (
                   <button key={s}
@@ -555,6 +681,7 @@ export default function TryOnCamera({
           )}
         </div>
 
+        {/* Overlay settings — only shown while camera is active */}
         {camState === 'on' && !captured && (
           <div className="tc-settings">
             <div className="tc-opacity-row">
@@ -589,6 +716,8 @@ export default function TryOnCamera({
 
       <style suppressHydrationWarning>{`
         .tc-wrap { display:flex; flex-direction:column; height:100%; }
+
+        /* Strip */
         .tc-strip { display:flex; gap:8px; padding:10px 12px; overflow-x:auto; border-bottom:1px solid #f0ede8; background:#fff; flex-shrink:0; scroll-behavior:smooth; }
         .tc-strip::-webkit-scrollbar { height:3px; }
         .tc-strip::-webkit-scrollbar-thumb { background:#c9a96e; border-radius:2px; }
@@ -597,6 +726,8 @@ export default function TryOnCamera({
         .tc-strip-item.sel { border-color:#c9a96e; }
         .tc-strip-check { position:absolute; inset:0; background:rgba(201,169,110,.4); display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700; }
         .tc-strip-view-hint { position:absolute; bottom:3px; right:3px; font-size:10px; background:rgba(0,0,0,.6); color:#fff; padding:1px 4px; border-radius:3px; }
+
+        /* Viewport */
         .tc-viewport { flex:1; position:relative; background:#0d0a07; overflow:hidden; min-height:320px; }
         .tc-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:20px; }
         .tc-ph-text { color:rgba(255,255,255,.4); font-size:13px; text-align:center; line-height:1.5; }
@@ -610,6 +741,8 @@ export default function TryOnCamera({
         .tc-countdown { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); }
         .tc-countdown span { font-size:6rem; font-weight:200; color:#fff; font-family:'Georgia',serif; animation:tcCountIn .2s ease; }
         @keyframes tcCountIn { from{transform:scale(1.3);opacity:0} to{transform:none;opacity:1} }
+
+        /* Controls */
         .tc-controls { padding:10px 12px; background:#fff; border-top:1px solid #f0ede8; flex-shrink:0; display:flex; flex-direction:column; gap:8px; }
         .tc-alert { font-size:12px; padding:8px 12px; border-radius:7px; line-height:1.4; }
         .tc-alert--err { background:#fcebeb; color:#501313; border:1px solid #f09595; }
@@ -628,6 +761,8 @@ export default function TryOnCamera({
         .tc-timer-btn { padding:5px 9px; border:1px solid #e0ddd8; border-radius:6px; font-size:10px; cursor:pointer; background:#fff; color:#888; transition:all .15s; }
         .tc-timer-btn.active { background:#1a1108; border-color:#1a1108; color:#faf9f7; }
         .tc-timer-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+        /* Settings */
         .tc-settings { display:flex; flex-direction:column; gap:6px; padding-top:6px; border-top:1px solid #f0ede8; }
         .tc-opacity-row { display:flex; align-items:center; gap:8px; }
         .tc-opacity-label { font-size:11px; color:#888; width:52px; flex-shrink:0; }
