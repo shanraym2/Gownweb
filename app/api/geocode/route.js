@@ -5,7 +5,27 @@
 
 import { NextResponse } from 'next/server'
 
+const rateLimitMap = new Map()
+const WINDOW_MS = 60_000
+const MAX_REQUESTS = 20
+
+function checkRateLimit(request) {
+  const key = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'
+  const now = Date.now()
+  const entry = rateLimitMap.get(key)
+  if (!entry || now - entry.windowStart > WINDOW_MS) {
+    rateLimitMap.set(key, { windowStart: now, count: 1 })
+    return true
+  }
+  entry.count++
+  return entry.count <= MAX_REQUESTS
+}
+
 export async function POST(request) {
+  if (!checkRateLimit(request)) {
+    return NextResponse.json({ ok: false, error: 'Too many requests' }, { status: 429 })
+  }
+
   let body
   try { body = await request.json() }
   catch {

@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -52,9 +53,10 @@ function isWithinReturnWindow(order) {
 // ── GET ───────────────────────────────────────────────────────────────────────
 
 export async function GET(request) {
-  const userId = request.headers.get('x-user-id')
-  if (!userId)
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser)
     return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
+  const userId = sessionUser.id
 
   if (!USE_DB) {
     const returns = loadReturns()
@@ -101,9 +103,10 @@ export async function GET(request) {
 
 export async function POST(request) {
   console.log('[returns POST] cwd:', process.cwd(), '| retFile:', retFile)
-  const userId = request.headers.get('x-user-id')
-  if (!userId)
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser)
     return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
+  const userId = sessionUser.id
 
   let body
   try { body = await request.json() }
@@ -120,7 +123,7 @@ export async function POST(request) {
   if (!items?.length)
     return NextResponse.json({ ok: false, error: 'Select at least one item.' }, { status: 400 })
 
-  const cleanDetails      = (details || '').trim()
+  const cleanDetails      = (details || '').trim().slice(0, 500)
   // evidenceUrls is an array of { url, name, type } objects from /api/returns/upload
   const cleanEvidenceUrls = Array.isArray(evidenceUrls)
     ? evidenceUrls.slice(0, 5).filter(f => f?.url)
@@ -210,6 +213,30 @@ export async function POST(request) {
     if (dupeRows.length)
       return NextResponse.json({ ok: false, error: 'A return request for this order is already open.' }, { status: 409 })
 
+    // Rebuild the items payload from the real order — never trust
+    // gownName/quantity as submitted by the client, since an attacker
+    // could fabricate items never actually purchased on this order.
+    const realItemRows = await query(
+      `SELECT gown_id, gown_name, size_label, quantity FROM order_items WHERE order_id = $1`,
+      [orderId]
+    )
+    const realByGownId = new Map(realItemRows.map(i => [String(i.gown_id), i]))
+
+    const validatedItems = (items || [])
+      .filter(i => realByGownId.has(String(i.gownId)))
+      .map(i => {
+        const real = realByGownId.get(String(i.gownId))
+        return {
+          gownId: real.gown_id,
+          gownName: real.gown_name,
+          sizeLabel: real.size_label,
+          quantity: Math.min(Number(i.quantity) || 1, real.quantity),
+        }
+      })
+
+    if (validatedItems.length === 0)
+      return NextResponse.json({ ok: false, error: 'Selected items do not match this order.' }, { status: 400 })
+
     const result = await query(`
       INSERT INTO return_requests
         (order_id, request_type, reason, details, items, evidence_urls, status)
@@ -220,7 +247,7 @@ export async function POST(request) {
       type,
       reason,
       cleanDetails,
-      JSON.stringify(items || []),
+      JSON.stringify(validatedItems),
       JSON.stringify(cleanEvidenceUrls),
     ])
 
@@ -233,7 +260,7 @@ export async function POST(request) {
         type,
         reason,
         details:       cleanDetails,
-        items,
+        items:         validatedItems,
         evidenceUrls:  cleanEvidenceUrls,
       },
       order

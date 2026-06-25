@@ -92,7 +92,7 @@ function MeasurementsCard({ userId }) {
   useEffect(() => {
     if (!userId) { setLoading(false); return }
     Promise.all([
-      fetch('/api/measurements', { headers: { 'x-user-id': userId } }).then(r => r.json()),
+      fetch('/api/measurements', { credentials: 'include' }).then(r => r.json()),
       fetch('/api/size-chart').then(r => r.json()),
     ])
       .then(([mData, cData]) => {
@@ -159,7 +159,8 @@ function MeasurementsCard({ userId }) {
       }
       const res  = await fetch('/api/measurements', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body:    JSON.stringify(body),
       })
       const data = await res.json()
@@ -179,7 +180,7 @@ function MeasurementsCard({ userId }) {
     if (!confirm('Remove your saved measurements?')) return
     setDeleting(true)
     try {
-      await fetch('/api/measurements', { method: 'DELETE', headers: { 'x-user-id': userId } })
+      await fetch('/api/measurements', { method: 'DELETE', credentials: 'include' })
       setMeas(null); setForm({ bust: '', waist: '', hips: '', height: '', weight: '' })
       setMsg({ text: 'Measurements cleared.', type: 'success' })
       setTimeout(() => setMsg(null), 3000)
@@ -626,9 +627,7 @@ export default function ProfilePage() {
       zip:      extra.zip      || '',
     })
 
-    fetch('/api/my-orders', {
-      headers: { 'X-Customer-Email': existing.email }
-    })
+    fetch('/api/my-orders', { credentials: 'include' })
       .then(r => r.json())
       .then(data => { if (data.ok) setOrders((data.orders || []).slice(0, 3)) })
       .catch(() => {})
@@ -658,8 +657,8 @@ export default function ProfilePage() {
       setEditing(false)
       showToast('Profile updated')
 
-      // Re-fetch orders with updated email
-      fetch('/api/my-orders', { headers: { 'X-Customer-Email': form.email } })
+      // Re-fetch orders after save
+      fetch('/api/my-orders', { credentials: 'include' })
         .then(r => r.json())
         .then(data => { if (data.ok) setOrders((data.orders || []).slice(0, 3)) })
         .catch(() => {})

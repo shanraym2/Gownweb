@@ -465,7 +465,8 @@ function ProofUpload({ orderId, userId, paymentMethod, onUploaded, content }) {
     try {
       const res  = await fetch('/api/orders/upload-proof', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body:    JSON.stringify({ orderId, image, referenceNo: refNo }),
       })
       const data = await res.json()
@@ -694,7 +695,7 @@ export default function OrderConfirmationPage() {
   const fetchOrder = useCallback(() => {
     if (!orderId || !user?.id) return
     setLoading(true)
-    fetch(`/api/orders?userId=${user.id}`, { headers: { 'x-user-id': user.id } })
+    fetch(`/api/orders?userId=${user.id}`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => {
         if (!d.ok) { setError('Could not load order.'); return }
@@ -714,7 +715,8 @@ export default function OrderConfirmationPage() {
     try {
       const res  = await fetch('/api/orders', {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body:    JSON.stringify({ orderId: order.id, status: 'completed' }),
       })
       const data = await res.json()

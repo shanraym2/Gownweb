@@ -50,11 +50,14 @@ function hashOtp(otp) {
 }
 
 async function writeSecretToDb(newSecret) {
+  // Store only the hash — matches checkAdminAuth()'s post-FIX-9 expectation
+  // and the pattern already used correctly for OTPs and device tokens.
+  const hash = crypto.createHash('sha256').update(newSecret).digest('hex')
   await query(
     `INSERT INTO admin_config (key, value)
      VALUES ('admin_secret', $1)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [newSecret]
+    [hash]
   )
 }
 

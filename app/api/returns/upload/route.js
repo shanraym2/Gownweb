@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -78,12 +79,33 @@ async function uploadToDisk(buffer, filename) {
 
 // ── POST /api/returns/upload ──────────────────────────────────────────────────
 
+const rateLimitMap = new Map()
+const WINDOW_MS = 10 * 60_000
+const MAX_REQUESTS = 10
+
+function checkRateLimit(request) {
+  const key = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'
+  const now = Date.now()
+  const entry = rateLimitMap.get(key)
+  if (!entry || now - entry.windowStart > WINDOW_MS) {
+    rateLimitMap.set(key, { windowStart: now, count: 1 })
+    return true
+  }
+  entry.count++
+  return entry.count <= MAX_REQUESTS
+}
+
 export async function POST(req) {
+  if (!checkRateLimit(req)) {
+    return NextResponse.json({ ok: false, error: 'Too many uploads. Please wait.' }, { status: 429 })
+  }
+
   // Must be signed-in customer
-  const userId = req.headers.get('x-user-id')
-  if (!userId) {
+  const sessionUser = await getAuthenticatedUser(req)
+  if (!sessionUser) {
     return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
   }
+  const userId = sessionUser.id
 
   let formData
   try {
@@ -117,12 +139,12 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, error: 'Invalid file' }, { status: 400 })
     }
 
-    const mimeType = file.type || ''
+    const declaredMimeType = file.type || ''
 
-    if (!ALLOWED_TYPES.has(mimeType)) {
+    if (!ALLOWED_TYPES.has(declaredMimeType)) {
       return NextResponse.json({
         ok: false,
-        error: `File type not allowed: ${mimeType || 'unknown'}. Allowed: JPEG, PNG, WEBP, GIF, MP4, MOV`,
+        error: `File type not allowed: ${declaredMimeType || 'unknown'}. Allowed: JPEG, PNG, WEBP, GIF, MP4, MOV`,
       }, { status: 400 })
     }
 
@@ -133,9 +155,23 @@ export async function POST(req) {
       }, { status: 400 })
     }
 
+    const buffer = Buffer.from(await file.arrayBuffer())
+
+    // Verify actual file bytes match the declared type — a renamed/relabeled
+    // file (e.g. HTML saved as .jpg with Content-Type: image/jpeg) would
+    // otherwise pass the check above on the client-supplied label alone.
+    const { fileTypeFromBuffer } = await import('file-type')
+    const detected = await fileTypeFromBuffer(buffer)
+    const mimeType = detected?.mime
+    if (!mimeType || !ALLOWED_TYPES.has(mimeType)) {
+      return NextResponse.json({
+        ok: false,
+        error: 'File content does not match an allowed type.',
+      }, { status: 400 })
+    }
+
     const ext      = EXT_MAP[mimeType] || path.extname(file.name || '').toLowerCase() || '.bin'
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`
-    const buffer   = Buffer.from(await file.arrayBuffer())
 
     try {
       const url = hasSpaces

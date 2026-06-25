@@ -7,6 +7,7 @@
 
 import { query } from '@/lib/db';
 import { NextResponse } from 'next/server';
+import { getAuthenticatedUser } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,10 +15,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request) {
   try {
-    const userEmail = request.headers.get('x-user-email');
-    if (!userEmail) {
-      return NextResponse.json({ error: 'User email required' }, { status: 400 });
+    const sessionUser = await getAuthenticatedUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
+    const userEmail = sessionUser.email;
 
     const rows = await query(
       `SELECT items, updated_at FROM user_carts WHERE LOWER(email) = LOWER($1)`,
@@ -46,10 +48,11 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const userEmail = request.headers.get('x-user-email');
-    if (!userEmail) {
-      return NextResponse.json({ error: 'User email required' }, { status: 400 });
+    const sessionUser = await getAuthenticatedUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
+    const userEmail = sessionUser.email;
 
     const body = await request.json();
     const { items } = body;

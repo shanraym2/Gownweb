@@ -54,10 +54,8 @@ export async function syncCartFromBackend() {
   try {
     const res = await fetch('/api/mobile/cart', {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Email': userEmail,
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
     })
 
     if (!res.ok) return loadCart()
@@ -107,10 +105,8 @@ async function syncCartToBackend(userEmail, items) {
   try {
     const res = await fetch('/api/mobile/cart', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Email': userEmail,
-      },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ items }),
     })
     

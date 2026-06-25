@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import path from 'path'
 import fs   from 'fs'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'orders.json')
@@ -43,10 +44,11 @@ function syntheticHistory(order) {
 }
 
 export async function GET(request) {
-  const userId = request.headers.get('x-user-id')
-  if (!userId) {
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser) {
     return NextResponse.json({ ok: false, error: 'Sign in required' }, { status: 401 })
   }
+  const userId = sessionUser.id
 
   // ── JSON mode ──────────────────────────────────────────────────────────────
   if (!USE_DB) {

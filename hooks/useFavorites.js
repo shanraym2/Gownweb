@@ -37,7 +37,7 @@ export function useFavorites() {
     if (!userId) { setFavoriteIds(new Set()); setLoading(false); return }
     setLoading(true)
     try {
-      const res  = await fetch('/api/favorites', { headers: { 'x-user-id': userId } })
+      const res  = await fetch('/api/favorites', { credentials: 'include' })
       const data = await res.json()
       if (data.ok) {
         setCached(userId, data.favoriteIds)
@@ -71,7 +71,8 @@ export function useFavorites() {
     try {
       const res = await fetch('/api/favorites', {
         method:  wasFav ? 'DELETE' : 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body:    JSON.stringify({ gownId: id }),
       })
       const data = await res.json()

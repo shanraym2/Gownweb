@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
 import bcrypt from 'bcryptjs'
 import { isRealName } from '@/app/utils/authValidation'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
@@ -10,17 +11,16 @@ function normalizeEmail(email) {
 export async function PATCH(request) {
   try {
     // ── Auth ──────────────────────────────────────────────────────────────────
-    // NOTE: x-user-id is the current auth mechanism. A full session/JWT system
-    // should replace this once implemented. The UUID format check rejects
-    // obviously malformed values but is not a substitute for signed auth.
-    const userId = request.headers.get('x-user-id')
-    if (!userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    // Verified server-side session — replaces the old forgeable x-user-id header.
+    const sessionUser = await getAuthenticatedUser(request)
+    if (!sessionUser) {
       return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
     }
+    const userId = sessionUser.id
 
     const body = await request.json()
     // Accept both split fields (firstName/lastName) and legacy combined (name)
-    const { firstName, lastName, name, email, password } = body
+    const { firstName, lastName, name, email, password, currentPassword } = body
 
     const setClauses = []
     const values     = []
@@ -80,14 +80,26 @@ export async function PATCH(request) {
     }
 
     // ── Password handling ─────────────────────────────────────────────────────
+    // Require the current password before allowing a change — closes the
+    // account-takeover hole where password could previously be changed with
+    // no re-authentication at all.
     // Cost factor 10: matches all other auth routes; factor 12 risks timeout
     // on DigitalOcean basic droplets within Next.js's serverless time limit.
     if (password !== undefined && password !== '') {
+      const currentRows = await query('SELECT password_hash FROM users WHERE id = $1', [userId])
+      const verified = currentRows.length &&
+        await bcrypt.compare(String(currentPassword || ''), currentRows[0].password_hash)
+      if (!verified) {
+        return NextResponse.json(
+          { ok: false, error: 'Current password is incorrect.' },
+          { status: 403 }
+        )
+      }
       const hash = await bcrypt.hash(String(password), 10)
       setClauses.push(`password_hash = $${paramIndex++}`)
       values.push(hash)
     }
-
+    
     if (setClauses.length === 0) {
       return NextResponse.json({ ok: false, error: 'Nothing to update.' }, { status: 400 })
     }

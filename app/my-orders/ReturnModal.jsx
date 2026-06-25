@@ -73,7 +73,7 @@ function EvidenceUploader({ files, setFiles, uploading, setUploading, userId, or
 
       const res  = await fetch('/api/returns/upload', {
         method:  'POST',
-        headers: { 'x-user-id': order.userId || '' },
+        credentials: 'include',
         body:    form,
       })
       const data = await res.json()
@@ -305,10 +305,8 @@ export default function ReturnModal({ order, onClose, onSuccess }) {
 
       const res  = await fetch('/api/returns', {
         method:  'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id':    order.userId || '',
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           orderId:      order.id,
           type,

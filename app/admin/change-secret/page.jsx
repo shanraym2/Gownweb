@@ -186,8 +186,7 @@ export default function ChangeSecretPage() {
             </div>
 
             <p className="adm-field-hint">
-                The new secret will be written to <code>.env.local</code> and saved to your browser.
-                You must <strong>restart the server</strong> for it to take effect.
+                The new secret takes effect immediately — no server restart required.
             </p>
 
             <div className="adm-form-actions">
@@ -220,13 +219,13 @@ export default function ChangeSecretPage() {
           background: 'var(--adm-success-bg)', color: 'var(--adm-success)',
           border: '1px solid rgba(22,101,52,0.25)', marginBottom: 20,
         }}>
-          ✓ <strong>Admin secret updated</strong> in <code>.env.local</code> and saved to your browser.
+          ✓ <strong>Admin secret updated</strong> and saved to your browser.
         </div>
 
-        <ol style={{ fontSize: 14, color: 'var(--adm-text-2)', paddingLeft: 20, margin: '0 0 24px', lineHeight: 2.2 }}>
-          <li>Restart the dev server (<code>Ctrl+C</code> then <code>npm run dev</code>).</li>
-          <li>Return to the dashboard — your new secret is already stored.</li>
-        </ol>
+        <p style={{ fontSize: 14, color: 'var(--adm-text-2)', margin: '0 0 24px', lineHeight: 1.7 }}>
+          Your new secret is active immediately — no restart needed. Make sure any other admins
+          on your team are given the new value, since their current sessions will stop working.
+        </p>
 
         <Link href="/admin" className="adm-btn" style={{ display: 'inline-flex', textDecoration: 'none' }}>
           Back to dashboard

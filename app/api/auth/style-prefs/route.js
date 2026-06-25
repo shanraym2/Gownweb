@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET STYLE PREFERENCES
@@ -7,14 +8,15 @@ import { query } from '@/lib/db'
 
 export async function GET(request) {
   try {
-    const userId = request.headers.get('x-user-id')
+    const sessionUser = await getAuthenticatedUser(request)
 
-    if (!userId) {
+    if (!sessionUser) {
       return NextResponse.json(
         { ok: false, error: 'Not authenticated.' },
         { status: 401 }
       )
     }
+    const userId = sessionUser.id
 
     const rows = await query(
       `
@@ -69,14 +71,15 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const userId = request.headers.get('x-user-id')
+    const sessionUser = await getAuthenticatedUser(request)
 
-    if (!userId) {
+    if (!sessionUser) {
       return NextResponse.json(
         { ok: false, error: 'Not authenticated.' },
         { status: 401 }
       )
     }
+    const userId = sessionUser.id
 
     const {
       bodyType,

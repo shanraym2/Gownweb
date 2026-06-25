@@ -22,23 +22,7 @@ export async function POST(request) {
       )
     }
 
-    // ── Account existence check comes BEFORE password validation ─────────────
-    // Checking password format first would let an attacker confirm whether an
-    // email is registered by submitting a weak password (gets 400 = email found)
-    // vs a strong one (gets 404 = email not found). Order matters for security.
-    const rows = await query(
-      'SELECT id FROM users WHERE email = $1',
-      [cleanEmail]
-    )
-
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: 'No account found with this email.' },
-        { status: 404 }
-      )
-    }
-
-    // ── Password validation after account confirmed ───────────────────────────
+    // ── Password validation ───────────────────────────────────────────────────
     if (!passwordMeetsRules(cleanPass)) {
       return NextResponse.json(
         { ok: false, error: 'Password must be at least 8 characters and include letters and numbers.' },
@@ -46,7 +30,10 @@ export async function POST(request) {
       )
     }
 
-    // ── OTP verification gate ─────────────────────────────────────────────────
+    // ── OTP verification gate comes BEFORE account existence is revealed ─────
+    // otp_codes rows exist independent of whether a user account exists for
+    // that email, so checking this first never leaks registration status.
+    // A non-existent email will simply never have a matching consumed OTP.
     // Require a recently-consumed password_reset OTP before allowing the update.
     // Without this, anyone who knows a registered email can reset the password
     // with a single unauthenticated POST request.

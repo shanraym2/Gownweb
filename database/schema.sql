@@ -984,3 +984,47 @@ WHERE delivery_method = 'lalamove'
 CREATE INDEX IF NOT EXISTS idx_return_requests_has_evidence
   ON public.return_requests ((jsonb_array_length(evidence_urls) > 0));
  
+
+ ALTER TABLE public.admin_audit_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY audit_insert_only ON public.admin_audit_log
+  FOR INSERT WITH CHECK (true);
+-- No UPDATE/DELETE policy → those are denied by default once RLS is enabled.
+
+UPDATE admin_config
+SET value = encode(digest(value, 'sha256'), 'hex')
+WHERE key = 'admin_secret';
+
+-- Enable RLS on all sensitive per-user tables
+ALTER TABLE public.user_measurements     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ar_fit_profiles       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_style_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.favorites             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.return_requests       ENABLE ROW LEVEL SECURITY;
+
+-- Example policy (repeat for each table above, adjusting the column name)
+CREATE POLICY user_measurements_owner ON public.user_measurements
+  USING (user_id = current_setting('app.current_user_id', true)::uuid);
+
+-- In lib/db.js, set the session variable per authenticated request:
+-- await query(`SELECT set_config('app.current_user_id', $1, true)`, [sessionUser.id])
+
+-- Option A: Prevent deletion while orders exist (recommended for boutique)
+ALTER TABLE public.orders
+  DROP CONSTRAINT orders_user_id_fkey,
+  ADD CONSTRAINT orders_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+-- Option B: Keep SET NULL but add a cleanup policy
+-- (implement a proper account-deletion routine that anonymizes PII fields first)
+
+CREATE TABLE public.sessions (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid        NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  token_hash text        NOT NULL UNIQUE,
+  user_agent text,
+  ip         text,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_sessions_token_hash ON public.sessions(token_hash);
+CREATE INDEX idx_sessions_user_id    ON public.sessions(user_id);

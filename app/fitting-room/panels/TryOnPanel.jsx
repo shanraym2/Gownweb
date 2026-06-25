@@ -24,7 +24,8 @@ export default function TryOnPanel({ initialGownId }) {
     try {
       const res = await fetch('/api/auth/save-tryon', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           image:     imageDataUrl,
           gownId:    selectedGown?.id,

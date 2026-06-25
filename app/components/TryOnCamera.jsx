@@ -68,8 +68,8 @@ function loadScript(src) {
 }
 
 // ── Keypoints ─────────────────────────────────────────────────────────────────
-const KP   = { NOSE:0, LS:5, RS:6, LH:11, RH:12, LK:13, RK:14, LA:15, RA:16 }
-const CONF = 0.25
+import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
+
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) }
@@ -154,12 +154,25 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
 function drawGown(ctx, img, layout, opacity) {
   const { topY, bottomY, cx, topW, botW } = layout
   const h = bottomY - topY; if (h <= 0) return
-  ctx.save(); ctx.globalAlpha = opacity
-  ctx.beginPath()
-  ctx.moveTo(cx - topW / 2, topY); ctx.lineTo(cx + topW / 2, topY)
-  ctx.lineTo(cx + botW / 2, bottomY); ctx.lineTo(cx - botW / 2, bottomY)
-  ctx.closePath(); ctx.clip()
-  ctx.drawImage(img, cx - botW / 2, topY, botW, h)
+
+  // Off-screen canvas at logical pixel size (no DPR scaling) so the
+  // trapezoid clip doesn't bleed into subsequent frames on the main canvas
+  const vw = ctx.canvas.width  / (window.devicePixelRatio || 1)
+  const vh = ctx.canvas.height / (window.devicePixelRatio || 1)
+  const oc = document.createElement('canvas')
+  oc.width = vw; oc.height = vh
+  const octx = oc.getContext('2d')
+
+  octx.beginPath()
+  octx.moveTo(cx - topW / 2, topY); octx.lineTo(cx + topW / 2, topY)
+  octx.lineTo(cx + botW / 2, bottomY); octx.lineTo(cx - botW / 2, bottomY)
+  octx.closePath(); octx.clip()
+  octx.drawImage(img, cx - botW / 2, topY, botW, h)
+
+  ctx.save()
+  ctx.globalAlpha = opacity
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.drawImage(oc, 0, 0, vw, vh, 0, 0, vw * (window.devicePixelRatio || 1), vh * (window.devicePixelRatio || 1))
   ctx.restore()
 }
 
@@ -197,6 +210,7 @@ export default function TryOnCamera({
   externalDetector  = null,   // { current: detector | null }
   externalSegmenter = null,   // { current: segmenter | null }
   modelState: externalModelState = null,  // passed from context when using externalDetector
+  onSave,
 }) {
   const videoRef   = useRef(null)
   const canvasRef  = useRef(null)
@@ -263,7 +277,14 @@ export default function TryOnCamera({
     const src = gown.tryonImage || gown.image; if (!src) return
 
     const img = new Image(); img.crossOrigin = 'anonymous'
-    img.onload  = () => { gownImgRef.current = img }
+    img.onload  = () => {
+      gownImgRef.current = img
+      setCaptured(null)
+      goodFrames.current = 0
+      setPoseLocked(false)
+      setFacingBack(false)
+      facingFrames.current = 0
+    }
     img.onerror = () => {
       // Fallback: try the plain product image without crossOrigin (no CORS needed for display)
       if (src !== gown.image) {
@@ -280,10 +301,9 @@ export default function TryOnCamera({
       bi.src = gown.tryonImageBack
     }
 
-    // Reset capture state when gown changes
-    setCaptured(null); goodFrames.current = 0; setPoseLocked(false)
-    setFacingBack(false); facingFrames.current = 0
-  }, [gown])
+    // Reset capture state only after image is confirmed loaded — avoids
+    // goodFrames decrement racing against async img.onload
+  }, [gown?.id])   // stable dep: only re-runs when gown ID changes, not on object identity churn
 
   // ── Load internal model (skipped when external detector is provided) ───────
   useEffect(() => {

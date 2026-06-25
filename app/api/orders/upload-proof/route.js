@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/adminAuth'   // ← consistent with every other admin route
+import { getAuthenticatedUser } from '@/lib/auth'
 
 const USE_DB = process.env.USE_DB === 'true'
 
@@ -60,9 +61,10 @@ function saveJson(o) {
 // ── POST /api/orders/upload-proof — customer uploads their payment proof ──────
 
 export async function POST(request) {
-  const userId = request.headers.get('x-user-id')
-  if (!userId)
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser)
     return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+  const userId = sessionUser.id
 
   let body
   try { body = await request.json() }

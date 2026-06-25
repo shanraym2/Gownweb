@@ -136,7 +136,7 @@ export async function resetUserPassword({ email, password }) {
 
 // ─── Update profile ──────────────────────────────────────────────────────────
 
-export async function updateUser({ firstName, lastName, email, password } = {}) {
+export async function updateUser({ firstName, lastName, email, password, currentPassword } = {}) {
   const current = getCurrentUser()
   if (!current) return { ok: false, error: 'Not logged in.' }
 
@@ -162,14 +162,17 @@ export async function updateUser({ firstName, lastName, email, password } = {}) 
       return { ok: false, error: 'Password must be at least 8 characters and include letters and numbers.' }
     }
     updates.password = String(password)
+    updates.currentPassword = String(currentPassword || '')
   }
 
   try {
     const res  = await fetch('/api/auth/update-profile', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': current.id },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(updates),
     })
+    
     const data = await res.json()
     if (!data.ok) return { ok: false, error: data.error || 'Failed to update profile.' }
 

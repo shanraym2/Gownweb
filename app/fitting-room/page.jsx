@@ -91,7 +91,7 @@ function FittingRoomInner() {
     const u = getCurrentUser()
     if (!u) return
 
-    fetch('/api/measurements', { headers: { 'x-user-id': u.id } })
+    fetch('/api/measurements', { credentials: 'include' })
       .then(r => r.json())
       .then(d => {
         if (d.ok && d.measurements) {
@@ -103,7 +103,7 @@ function FittingRoomInner() {
         }
       }).catch(() => {})
 
-    fetch('/api/auth/style-prefs', { headers: { 'x-user-id': u.id } })
+    fetch('/api/auth/style-prefs', { credentials: 'include' })
       .then(r => r.json())
       .then(d => {
         if (d.ok && d.prefs) {
@@ -125,7 +125,8 @@ function FittingRoomInner() {
       const [measRes, styleRes] = await Promise.all([
         fetch('/api/measurements', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             bust_cm: profile.bust ?? null, waist_cm: profile.waist ?? null,
             hips_cm: profile.hips ?? null, height_cm: profile.height ?? null,
@@ -134,7 +135,8 @@ function FittingRoomInner() {
         }).then(r => r.json()),
         fetch('/api/auth/style-prefs', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             bodyType:            profile.bodyShape || null,
             skinTone:            profile.skinTone  || null,

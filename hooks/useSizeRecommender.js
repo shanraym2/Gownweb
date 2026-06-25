@@ -54,7 +54,7 @@ export function useSizeRecommender({ supplierId, userId } = {}) {
     setLoading(true); setError(null)
 
     Promise.all([
-      fetch('/api/measurements',                                           { headers: { 'x-user-id': userId } }).then(r => r.json()),
+      fetch('/api/measurements', { credentials: 'include' }).then(r => r.json()),
       fetch(`/api/size-chart${supplierId ? `?supplierId=${supplierId}` : ''}`).then(r => r.json()),
     ])
       .then(([measData, chartData]) => {

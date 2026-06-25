@@ -40,8 +40,8 @@ export async function POST(request) {
 
     if (!user.is_active) {
       return NextResponse.json(
-        { ok: false, error: 'This account has been deactivated.' },
-        { status: 403 }
+        { ok: false, error: 'Invalid email or password.' },
+        { status: 401 }
       )
     }
 
@@ -66,10 +66,23 @@ export async function POST(request) {
 
     const response = NextResponse.json({ ok: true, user: userData })
 
-    // Persist a simple session cookie so the user stays logged in across
-    // page navigations without localStorage being the sole source of truth.
-    // HttpOnly so JS cannot read it — used only by middleware for role checks.
-    response.cookies.set('jce_session', user.id, {
+    // Issue a random opaque session token and store only its hash —
+    // mirrors the pattern already used correctly for device_tokens.
+    // The raw user.id is never sent to the browser as a credential.
+    const crypto = await import('crypto')
+    const sessionToken = crypto.randomBytes(32).toString('hex')
+    const sessionHash  = crypto.createHash('sha256').update(sessionToken).digest('hex')
+    const expiresAt    = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+
+    await query(
+      `INSERT INTO sessions (user_id, token_hash, expires_at, ip, user_agent)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user.id, sessionHash, expiresAt,
+       request.headers.get('x-forwarded-for')?.split(',')[0] || null,
+       request.headers.get('user-agent') || null]
+    )
+
+    response.cookies.set('jce_session', sessionToken, {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
       sameSite: 'lax',
@@ -78,6 +91,7 @@ export async function POST(request) {
     })
 
     return response
+    
   } catch (err) {
     console.error('Login error:', err)
     return NextResponse.json(

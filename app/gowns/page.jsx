@@ -165,7 +165,7 @@ function FitMatcherBanner({ user }) {
 
   useEffect(() => {
     if (!user?.id) { setMeas(null); return }
-    fetch('/api/measurements', { headers: { 'x-user-id': user.id } })
+    fetch('/api/measurements', { credentials: 'include' })
       .then(r => r.json())
       .then(d => setMeas(d.ok ? d.measurements : null))
       .catch(() => setMeas(null))

@@ -262,9 +262,12 @@ export async function POST(request) {
 
 // ── PATCH — update order status ───────────────────────────────────────────────
 export async function PATCH(request) {
-  const adminSecret = request.headers.get('x-admin-secret')
-  const isAdmin     = process.env.ADMIN_SECRET && adminSecret === process.env.ADMIN_SECRET
-  const userId      = request.headers.get('x-user-id')
+  const { checkAdminAuth }      = await import('@/lib/adminAuth')
+  const { getAuthenticatedUser } = await import('@/lib/auth')
+
+  const isAdmin    = await checkAdminAuth(request)
+  const sessionUser = !isAdmin ? await getAuthenticatedUser(request) : null
+  const userId      = sessionUser?.id || null
 
   if (!isAdmin && !userId) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })

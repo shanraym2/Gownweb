@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 export async function POST(request) {
   try {
-    const userId = request.headers.get('x-user-id')
-    if (!userId) {
+    const sessionUser = await getAuthenticatedUser(request)
+    if (!sessionUser) {
       return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
     }
+    const userId = sessionUser.id
 
     const { image, gownId, gownName } = await request.json()
     if (!image) {

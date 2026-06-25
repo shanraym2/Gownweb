@@ -1,15 +1,17 @@
 import { NextResponse } from 'next/server'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 const USE_DB = process.env.USE_DB === 'true'
 
-function getUserId(request) {
-  return request.headers.get('x-user-id') || null
+async function getUserId(request) {
+  const sessionUser = await getAuthenticatedUser(request)
+  return sessionUser?.id || null
 }
 
 export async function GET(request) {
-  const userId = getUserId(request)
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
 
   if (!USE_DB) return NextResponse.json({ ok: true, favoriteIds: [] })
@@ -28,7 +30,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const userId = getUserId(request)
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
 
   let gownId
@@ -55,7 +57,7 @@ export async function POST(request) {
 }
 
 export async function DELETE(request) {
-  const userId = getUserId(request)
+  const userId = await getUserId(request)
   if (!userId) return NextResponse.json({ ok: false, error: 'Not authenticated.' }, { status: 401 })
 
   let gownId

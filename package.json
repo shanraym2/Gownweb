@@ -27,6 +27,7 @@
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
+    "file-type": "^22.0.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "next": "^14.0.0",

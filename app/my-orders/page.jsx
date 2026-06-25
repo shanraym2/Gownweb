@@ -1015,8 +1015,8 @@ export default function MyOrdersPage() {
     setError('')
     try {
       const [ordersRes, returnsRes] = await Promise.all([
-        fetch('/api/my-orders',  { headers: { 'x-user-id': currentUser.id } }),
-        fetch('/api/returns',    { headers: { 'x-user-id': currentUser.id } }),
+        fetch('/api/my-orders', { credentials: 'include' }),
+        fetch('/api/returns',   { credentials: 'include' }),
       ])
       const ordersData  = await ordersRes.json()
       const returnsData = await returnsRes.json()
@@ -1041,7 +1041,8 @@ export default function MyOrdersPage() {
     if (!user) return
     const res  = await fetch('/api/orders', {
       method:  'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': user.id },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body:    JSON.stringify({ orderId, status: 'completed' }),
     })
     const data = await res.json()

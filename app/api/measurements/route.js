@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 const USE_DB   = process.env.USE_DB === 'true'
 
@@ -38,9 +39,10 @@ function validateMeasurement(key, value) {
 
 // ── GET /api/measurements — fetch saved measurements for the authed user ──────
 export async function GET(request) {
-  const userId = request.headers.get('x-user-id')
-  if (!userId)
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser)
     return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+  const userId = sessionUser.id
 
   if (!USE_DB) {
     const all = loadJson()
@@ -64,9 +66,10 @@ export async function GET(request) {
 
 // ── POST /api/measurements — upsert measurements for the authed user ──────────
 export async function POST(request) {
-  const userId = request.headers.get('x-user-id')
-  if (!userId)
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser)
     return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+  const userId = sessionUser.id
 
   let body
   try { body = await request.json() }
@@ -148,9 +151,10 @@ export async function POST(request) {
 
 // ── DELETE /api/measurements — clear saved measurements ───────────────────────
 export async function DELETE(request) {
-  const userId = request.headers.get('x-user-id')
-  if (!userId)
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser)
     return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+  const userId = sessionUser.id
 
   if (!USE_DB) {
     const all = loadJson().filter(r => String(r.userId) !== String(userId))

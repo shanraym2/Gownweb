@@ -6,12 +6,24 @@ import bcrypt from "bcryptjs";
 const USE_DB = process.env.USE_DB === "true";
 const dataFile = path.join(process.cwd(), "data", "users.json");
 
-function requireAdminSecret(request) {
-  const secret = request.headers.get("x-admin-secret");
-  if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+// Simple per-IP rate limiter — this route no longer requires an admin
+// secret (it's a normal "find or create my account" operation triggered
+// by ordinary mobile app users, not an admin action), so it needs its own
+// abuse control instead.
+const rateLimitMap = new Map();
+const WINDOW_MS = 60_000;
+const MAX_REQUESTS = 20;
+
+function checkRateLimit(request) {
+  const key = request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+  const now = Date.now();
+  const entry = rateLimitMap.get(key);
+  if (!entry || now - entry.windowStart > WINDOW_MS) {
+    rateLimitMap.set(key, { windowStart: now, count: 1 });
+    return true;
   }
-  return null;
+  entry.count++;
+  return entry.count <= MAX_REQUESTS;
 }
 
 function normalizeEmail(email) {
@@ -44,8 +56,9 @@ function saveUsers(users) {
 }
 
 export async function POST(request) {
-  const deny = requireAdminSecret(request);
-  if (deny) return deny;
+  if (!checkRateLimit(request)) {
+    return NextResponse.json({ ok: false, error: "Too many requests" }, { status: 429 });
+  }
 
   let body;
   try {

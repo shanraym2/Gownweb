@@ -61,11 +61,20 @@ function applyInteraction(data, userId, gownId, eventType) {
 
 // ── POST ───────────────────────────────────────────────────────────────────
 
+import { getAuthenticatedUser } from '@/lib/auth'
+
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { userId, gownId, eventType, events } = body
+    const { gownId, eventType, events } = body
 
+    // Resolve the identity from the session when logged in; otherwise fall
+    // back to the anonymous session ID the client already generates for
+    // guest tracking. Never trust a client-supplied userId for someone
+    // else's account — that allowed poisoning or reading anyone's
+    // recommendation profile.
+    const sessionUser = await getAuthenticatedUser(request)
+    const userId = sessionUser?.id || body.anonymousSessionId
     if (!userId) {
       return NextResponse.json({ ok: false, error: 'userId is required' }, { status: 400 })
     }
