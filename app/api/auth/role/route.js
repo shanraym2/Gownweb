@@ -1,15 +1,13 @@
 // app/api/auth/role/route.js
 //
-// SECURITY FIX: Added rate limiting to prevent email enumeration.
-// Previously this endpoint was open — any caller could probe it to discover
-// whether an email belongs to an admin/staff user. We now enforce a per-IP
-// sliding window (same pattern as the OTP cooldown).
-//
-// Rate limit: 20 requests per minute per IP (generous for legitimate use,
-// tight enough to prevent automated enumeration).
+// SECURITY FIX: Endpoint now requires an authenticated session.
+// Previously accepted ?email= from anyone and revealed whether that email
+// belonged to an admin or staff member. Now derives identity from the
+// session cookie only — no caller-supplied email accepted.
 
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
+import { getAuthenticatedUser } from '@/lib/auth'
 
 // In-memory rate limit store (per-process; good enough for single-instance).
 // For multi-instance deployments, swap this for a Redis/Upstash counter.
@@ -51,27 +49,12 @@ setInterval(() => {
 }, WINDOW_MS)
 
 export async function GET(request) {
-  // ── Rate limit ───────────────────────────────────────────────────────────
-  const rlKey    = getRateLimitKey(request)
-  const rl       = checkRateLimit(rlKey)
-  if (!rl.allowed) {
-    return NextResponse.json(
-      { ok: false, error: `Too many requests. Please wait ${rl.retryAfter}s.` },
-      {
-        status: 429,
-        headers: { 'Retry-After': String(rl.retryAfter) },
-      }
-    )
+  const sessionUser = await getAuthenticatedUser(request)
+  if (!sessionUser) {
+    return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
   }
 
-  const { searchParams } = new URL(request.url)
-  const email = searchParams.get('email')
-
-  if (!email) {
-    return NextResponse.json({ ok: false, error: 'Email required' }, { status: 400 })
-  }
-
-  const normalizedEmail = email.trim().toLowerCase()
+  const normalizedEmail = sessionUser.email.trim().toLowerCase()
 
   // ── 1. Database lookup ───────────────────────────────────────────────────
   let dbRole = null
@@ -97,24 +80,16 @@ export async function GET(request) {
 
   // ── 3. Merge ─────────────────────────────────────────────────────────────
   let role
-  if (envIsAdmin) {
-    role = 'admin'
-  } else if (envIsStaff) {
-    role = dbRole === 'admin' ? 'admin' : 'staff'
-  } else if (dbRole) {
-    role = dbRole
-  } else {
-    role = 'customer'
-  }
+  if (envIsAdmin)      role = 'admin'
+  else if (envIsStaff) role = dbRole === 'admin' ? 'admin' : 'staff'
+  else if (dbRole)     role = dbRole
+  else                 role = 'customer'
 
   const res = { ok: true, role }
 
   if (process.env.NODE_ENV === 'development') {
-    res.dbRole                = dbRole
-    res.adminEmailConfigured  = adminEmail.length > 0
-    res.staffEmailsConfigured = staffEmails.length > 0
-    res.staffCount            = staffEmails.length
-    res.resolvedFrom          = envIsAdmin ? 'env:admin' : envIsStaff ? 'env:staff' : dbRole ? 'db' : 'default'
+    res.dbRole       = dbRole
+    res.resolvedFrom = envIsAdmin ? 'env:admin' : envIsStaff ? 'env:staff' : dbRole ? 'db' : 'default'
   }
 
   return NextResponse.json(res)

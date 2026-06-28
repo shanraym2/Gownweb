@@ -218,10 +218,10 @@ export async function syncCurrentUserRole() {
   if (!raw) return
   let current
   try { current = JSON.parse(raw) } catch { return }
-  if (!current?.email) return
+  if (!current) return
 
   try {
-    const res  = await fetch(`/api/auth/role?email=${encodeURIComponent(current.email)}`)
+    const res  = await fetch('/api/auth/role', { credentials: 'include' })
     const data = await res.json()
     if (!data.ok || data.role === current.role) return
     safeSetItem(CURRENT_USER_KEY, JSON.stringify({ ...current, role: data.role }))
