@@ -865,7 +865,7 @@ WHERE focal_point IS NULL
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-INSERT INTO admin_config (key, value) VALUES ('admin_secret', '1234567812345678t');
+
 
 ALTER TABLE public.orders
 ADD COLUMN IF NOT EXISTS tax numeric(12,2) NOT NULL DEFAULT 0

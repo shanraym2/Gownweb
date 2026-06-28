@@ -6,12 +6,59 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase()
 }
 
+// ── Rate limiter ──────────────────────────────────────────────────────────────
+// Keyed by IP: max 10 attempts per 15 minutes.
+// Keyed by email: max 8 attempts per 15 minutes.
+// Both must pass — whichever hits first returns 429.
+const ipMap    = new Map()
+const emailMap = new Map()
+const WINDOW   = 15 * 60 * 1000
+const IP_MAX   = 10
+const EMAIL_MAX = 8
+
+function checkRateLimit(ip, email) {
+  const now = Date.now()
+
+  const ipEntry = ipMap.get(ip)
+  if (!ipEntry || now - ipEntry.windowStart > WINDOW) {
+    ipMap.set(ip, { windowStart: now, count: 1 })
+  } else {
+    ipEntry.count++
+    if (ipEntry.count > IP_MAX) return false
+  }
+
+  const emailEntry = emailMap.get(email)
+  if (!emailEntry || now - emailEntry.windowStart > WINDOW) {
+    emailMap.set(email, { windowStart: now, count: 1 })
+  } else {
+    emailEntry.count++
+    if (emailEntry.count > EMAIL_MAX) return false
+  }
+
+  return true
+}
+
+// Prune stale entries every 15 minutes to avoid unbounded memory growth
+setInterval(() => {
+  const cutoff = Date.now() - WINDOW
+  for (const [k, v] of ipMap)    if (v.windowStart < cutoff) ipMap.delete(k)
+  for (const [k, v] of emailMap) if (v.windowStart < cutoff) emailMap.delete(k)
+}, WINDOW)
+
 export async function POST(request) {
   try {
     const { email, password } = await request.json()
 
     const cleanEmail = normalizeEmail(email)
     const cleanPass  = String(password || '')
+
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'
+    if (!checkRateLimit(ip, cleanEmail)) {
+      return NextResponse.json(
+        { ok: false, error: 'Too many login attempts. Please wait 15 minutes and try again.' },
+        { status: 429, headers: { 'Retry-After': '900' } }
+      )
+    }
 
     if (!cleanEmail || !cleanPass) {
       return NextResponse.json(

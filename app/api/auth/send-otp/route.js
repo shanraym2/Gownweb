@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { query } from '@/lib/db'
-import { sendOtp } from '@/lib/sendOtp'
+import { sendOtp, checkOtpIpLimit } from '@/lib/sendOtp'
 
 const PURPOSE_MAP = {
   login:          'login',
@@ -12,6 +12,13 @@ const PURPOSE_MAP = {
 export async function POST(request) {
   try {
     const { email, purpose } = await request.json()
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'
+    if (!checkOtpIpLimit(ip)) {
+      return NextResponse.json(
+        { ok: false, error: 'Too many requests. Please wait before requesting another code.' },
+        { status: 429, headers: { 'Retry-After': '600' } }
+      )
+    }
 
     if (!email || typeof email !== 'string')
       return NextResponse.json({ ok: false, error: 'Email is required' }, { status: 400 })
