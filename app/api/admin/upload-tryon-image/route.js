@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import path from 'path'
 import fs from 'fs'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 export const maxDuration = 60
 
@@ -137,6 +138,14 @@ export async function POST(request) {
     } else {
       url = uploadToDisk(buffer, filename)
     }
+
+    logAudit({
+      request,
+      action:     'gown.tryon.upload',
+      entityType: 'upload',
+      entityId:   filename,
+      payload:    { filename, mimeType, destination: isProduction ? 'spaces' : 'disk' },
+    })
 
     // IMPORTANT: always return FULL URL only
     return NextResponse.json({

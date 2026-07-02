@@ -8,8 +8,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../adminSecret'
-import { useRoleGuard }   from '../../utils/useRoleGuard'
+import { useRoleGuard } from '../../utils/useRoleGuard'
+import { adminFetch }   from '../adminFetch'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -483,7 +483,6 @@ export default function AdminReturnsPage() {
 
   const adminHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'X-Admin-Secret': getAdminSecret() || '',
   }), [])
 
   function showToast(msg, type = 'success') {
@@ -495,7 +494,7 @@ export default function AdminReturnsPage() {
     setError('')
     try {
       const url  = `/api/admin/returns${status ? `?status=${encodeURIComponent(status)}` : ''}`
-      const res  = await fetch(url, { headers: adminHeaders() })
+      const res  = await adminFetch(url, { headers: adminHeaders() })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load returns')
       const all = data.returns || []
@@ -525,7 +524,7 @@ export default function AdminReturnsPage() {
     const prevDrawer  = drawerRet
 
     try {
-      const res  = await fetch('/api/admin/returns', {
+      const res  = await adminFetch('/api/admin/returns', {
         method:  'PATCH',
         headers: adminHeaders(),
         body:    JSON.stringify({ returnId, action, ...payload }),

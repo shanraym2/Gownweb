@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server'
 import { writeFile, mkdir } from 'fs/promises'
 import path from 'path'
 import { checkAdminAuth } from '@/lib/adminAuth'
+import { logAudit }       from '@/lib/audit'
 
 // ─────────────────────────────────────────────────────────────
 // Spaces Upload
@@ -109,6 +110,14 @@ export async function POST(req) {
     const url = hasSpacesConfig
       ? await uploadToSpaces(buffer, filename, mimeType)
       : await uploadToDisk(buffer, filename)
+
+    logAudit({
+      request: req,
+      action:     'cms.upload',
+      entityType: 'upload',
+      entityId:   filename,
+      payload:    { filename, mimeType, destination: hasSpacesConfig ? 'spaces' : 'disk' },
+    })
 
     return NextResponse.json({ url })
 

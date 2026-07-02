@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../layout'
 import { getCurrentUser } from '../../utils/authClient'
-import { useRoleGuard } from '../../utils/useRoleGuard'
+import { useRoleGuard }   from '../../utils/useRoleGuard'
+import { adminFetch }     from '../adminFetch'
 import { isRealName, getPasswordRuleChecks, passwordMeetsRules } from '../../utils/authValidation'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ function ViewUserModal({ user, onClose }) {
 // Only the logged-in admin/staff can edit their own account.
 // Fields: first name, last name, email, password. Role is always read-only.
 
-function EditSelfModal({ user, secret, onSave, onClose }) {
+function EditSelfModal({ user, onSave, onClose }) {
   const [firstName, setFirstName] = useState(user?.firstName || user?.name?.split(' ')[0] || '')
   const [lastName,  setLastName ] = useState(user?.lastName  || user?.name?.split(' ').slice(1).join(' ') || '')
   const [email,     setEmail    ] = useState(user?.email || '')
@@ -162,9 +162,9 @@ function EditSelfModal({ user, secret, onSave, onClose }) {
 
     setSaving(true)
     try {
-      const res  = await fetch('/api/admin/users', {
+      const res  = await adminFetch('/api/admin/users', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': secret },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: user.id,
           firstName,
@@ -288,7 +288,7 @@ function EditSelfModal({ user, secret, onSave, onClose }) {
 //
 // No password field — server generates a temporary random password.
 
-function AddUserModal({ secret, editorRole, onSave, onClose }) {
+function AddUserModal({ editorRole, onSave, onClose }) {
   const assignableRoles = editorRole === 'admin'
     ? ['customer', 'staff', 'admin']
     : ['customer']
@@ -310,9 +310,9 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
 
     setSaving(true)
     try {
-      const res  = await fetch('/api/admin/users', {
+      const res  = await adminFetch('/api/admin/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': secret },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           firstName,
           lastName,
@@ -473,7 +473,7 @@ function AddUserModal({ secret, editorRole, onSave, onClose }) {
 
 // ── Change role modal (admin only, staff users only) ──────────────────────────
 
-function ChangeRoleModal({ user, secret, onSave, onClose }) {
+function ChangeRoleModal({ user, onSave, onClose }) {
   const [role,   setRole  ] = useState(user.role || 'staff')
   const [error,  setError ] = useState('')
   const [saving, setSaving] = useState(false)
@@ -482,9 +482,9 @@ function ChangeRoleModal({ user, secret, onSave, onClose }) {
     setError('')
     setSaving(true)
     try {
-      const res  = await fetch('/api/admin/users', {
+      const res  = await adminFetch('/api/admin/users', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Secret': secret },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: user.id, role }),
       })
       const data = await res.json()
@@ -528,7 +528,7 @@ function ChangeRoleModal({ user, secret, onSave, onClose }) {
 
 // ── Archive confirm modal ─────────────────────────────────────────────────────
 
-function ArchiveModal({ user, secret, onConfirm, onClose }) {
+function ArchiveModal({ user, onConfirm, onClose }) {
   const isArchiving = user.isActive
   const [loading, setLoading] = useState(false)
   const [error,   setError  ] = useState('')
@@ -536,9 +536,8 @@ function ArchiveModal({ user, secret, onConfirm, onClose }) {
   async function handleArchive() {
     setLoading(true)
     try {
-      const res  = await fetch(`/api/admin/users?id=${user.id}`, {
-        method:  'DELETE',
-        headers: { 'X-Admin-Secret': secret },
+      const res  = await adminFetch(`/api/admin/users?id=${user.id}`, {
+        method: 'DELETE',
       })
       const data = await res.json()
       if (!data.ok) { setError(data.error || 'Failed.'); return }
@@ -607,19 +606,18 @@ export default function AdminUsersPage() {
   const [roleUser,     setRoleUser    ] = useState(null)  // change role modal
   const [archiveUser,  setArchiveUser ] = useState(null)
 
-  const secret  = getAdminSecret() || ''
   const current = typeof window !== 'undefined' ? getCurrentUser() : null
 
   const loadUsers = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const res  = await fetch('/api/admin/users', { headers: { 'X-Admin-Secret': secret } })
+      const res  = await adminFetch('/api/admin/users')
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Failed to load')
       setUsers(data.users || [])
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
-  }, [secret])
+  }, [])
 
   useEffect(() => { loadUsers() }, [loadUsers])
 
@@ -894,7 +892,6 @@ export default function AdminUsersPage() {
       {editSelf && selfRecord && (
         <EditSelfModal
           user={selfRecord}
-          secret={secret}
           onSave={handleEdited}
           onClose={() => setEditSelf(false)}
         />
@@ -903,7 +900,6 @@ export default function AdminUsersPage() {
       {/* Add user — admin only */}
       {isAdmin && addOpen && (
         <AddUserModal
-          secret={secret}
           editorRole={editorRole}
           onSave={handleCreated}
           onClose={() => setAddOpen(false)}
@@ -914,7 +910,6 @@ export default function AdminUsersPage() {
       {isAdmin && roleUser && (
         <ChangeRoleModal
           user={roleUser}
-          secret={secret}
           onSave={handleEdited}
           onClose={() => setRoleUser(null)}
         />
@@ -924,7 +919,6 @@ export default function AdminUsersPage() {
       {isAdmin && archiveUser && (
         <ArchiveModal
           user={archiveUser}
-          secret={secret}
           onConfirm={handleArchived}
           onClose={() => setArchiveUser(null)}
         />

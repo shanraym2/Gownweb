@@ -147,7 +147,7 @@ export default function AdminDashboardPage() {
           { href: '/admin/dashboard',     title: 'Sales dashboard', desc: 'Revenue charts and analytics.'                         },
           { href: '/admin/users',         title: 'Users',           desc: 'View registered accounts.'                             },
           { href: '/admin/contents',      title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'                },
-         // { href: '/admin/audit',         title: 'Audit trail',     desc: 'Append-only log of all admin mutations and events.'    },
+          { href: '/admin/audit',         title: 'Audit trail',     desc: 'Append-only log of all admin mutations and events.'    },
           { href: '/admin/change-secret', title: 'Change secret',   desc: 'Update the admin secret with 2FA verification.'       },
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">

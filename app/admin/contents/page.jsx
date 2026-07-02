@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
+import { adminFetch }   from '../adminFetch'
 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -292,11 +292,9 @@ function ImageUploadField({ value, onChange }) {
       const formData = new FormData()
       formData.append('file', file)
  
-      const res  = await fetch('/api/admin/upload-tryon-image', {
-        method:  'POST',
-        headers: { 'X-Admin-Secret': getAdminSecret() || '' },
-        // No Content-Type header — browser sets multipart boundary automatically
-        body: formData,
+      const res  = await adminFetch('/api/admin/upload-tryon-image', {
+        method: 'POST',
+        body:   formData,
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Upload failed')
@@ -594,7 +592,7 @@ export default function AdminContentsPage() {
   const [confirm, setConfirm] = useState(null)
 
   function headers() {
-    return { 'Content-Type': 'application/json', 'X-Admin-Secret': getAdminSecret() || '' }
+    return { 'Content-Type': 'application/json' }
   }
 
   function showToast(message, type = 'success') { setToast({ message, type }) }

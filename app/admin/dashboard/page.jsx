@@ -7,8 +7,8 @@ import {
   CategoryScale, LinearScale, BarElement, ArcElement, Tooltip,
 } from 'chart.js'
 import { Bar, Doughnut } from 'react-chartjs-2'
-import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
+import { adminFetch }   from '../adminFetch'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip)
 
@@ -1117,9 +1117,7 @@ export default function AdminSalesDashboardPage() {
   const [period,  setPeriod ] = useState('daily')
 
   useEffect(() => {
-    const secret = getAdminSecret()
-    if (!secret) { setError('Enter the admin secret first.'); setLoading(false); return }
-    fetch('/api/admin/orders', { headers: { 'X-Admin-Secret': secret } })
+    adminFetch('/api/admin/orders')
       .then(r => r.json())
       .then(d => { if (d.ok) setOrders(d.orders || []); else setError(d.error || 'Failed') })
       .catch(() => setError('Could not load orders.'))

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
+import { adminFetch }   from '../adminFetch'
 
 // ── Status machine ────────────────────────────────────────────────────────────
 
@@ -234,9 +234,7 @@ function ProofModal({ order, onVerify, onReject, onClose }) {
     async function load() {
       setFetchErr('')
       try {
-        const res  = await fetch(`/api/orders/upload-proof?orderId=${order.id}`, {
-          headers: { 'X-Admin-Secret': getAdminSecret() || '' },
-        })
+        const res  = await adminFetch(`/api/orders/upload-proof?orderId=${order.id}`)
         const data = await res.json()
         if (cancelled) return
         if (data.ok) {
@@ -523,10 +521,9 @@ function StatusControls({ order, onAction, onRefresh, onToast }) {
                             try {
                               const fd = new FormData()
                               fd.append('file', file)
-                              const res  = await fetch('/api/admin/upload', {
-                                method:  'POST',
-                                headers: { 'X-Admin-Secret': getAdminSecret() || '' },
-                                body:    fd,
+                              const res  = await adminFetch('/api/admin/upload', {
+                                method: 'POST',
+                                body:   fd,
                               })
                               const data = await res.json()
                               if (data.url) setShipmentPhotoUrl(data.url)
@@ -895,7 +892,6 @@ export default function AdminOrdersPage() {
 
   const adminHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'X-Admin-Secret': getAdminSecret() || '',
   }), [])
 
   function showToast(msg, type = 'success') {
@@ -908,7 +904,7 @@ export default function AdminOrdersPage() {
     setError('')
     try {
       const url  = `/api/admin/orders${status ? `?status=${encodeURIComponent(status)}` : ''}`
-      const res  = await fetch(url, { headers: adminHeaders() })
+      const res  = await adminFetch(url, { headers: adminHeaders() })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load orders')
       const all = data.orders || []
@@ -958,7 +954,7 @@ export default function AdminOrdersPage() {
         setDrawerOrder(p => p?.id === orderId ? patch(p) : p)
       }
 
-      const res  = await fetch('/api/admin/orders', {
+      const res  = await adminFetch('/api/admin/orders', {
         method:  'PATCH',
         headers: adminHeaders(),
         body:    JSON.stringify({ action, orderId, ...payload }),

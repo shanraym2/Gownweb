@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { getCurrentUser } from '../../utils/authClient'
-import { getAdminSecret } from '../adminSecret'
+import { adminFetch }     from '../adminFetch'
 
 // ── Domain → badge config ────────────────────────────────────────────────────
 const ACTION_DOMAINS = {
@@ -134,9 +134,6 @@ export default function AuditPage() {
   }, [router])
 
   const fetchLogs = useCallback(async (off = 0) => {
-    const secret = getAdminSecret()
-    if (!secret) return
-
     setLoading(true)
     setError('')
 
@@ -148,7 +145,7 @@ export default function AuditPage() {
     if (filterTo)     params.set('to',          filterTo   + 'T23:59:59')
 
     try {
-      const res  = await fetch(`/api/admin/audit?${params}`, { headers: { 'X-Admin-Secret': secret } })
+      const res  = await adminFetch(`/api/admin/audit?${params}`)
       const data = await res.json()
       if (data.ok) {
         setLogs(data.logs || [])

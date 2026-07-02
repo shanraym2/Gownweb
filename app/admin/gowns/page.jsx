@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { getAdminSecret } from '../adminSecret'
 import { useRoleGuard } from '../../utils/useRoleGuard'
+import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
 
 /* ─────────────────────────────────────────────
@@ -31,7 +31,7 @@ function numericPrice(p) {
 function totalAvail(g) {
   return (g.inventory||[]).reduce((s,i)=>s+Math.max(0,(i.stock||0)-(i.reserved||0)),0)
 }
-function headers() { return {'Content-Type':'application/json','X-Admin-Secret':getAdminSecret()||''} }
+function headers() { return {'Content-Type':'application/json'} }
 
 /* ─────────────────────────────────────────────
    SizePicker
@@ -140,10 +140,9 @@ function ImageUploader({ label, hint, value, onChange, onError, error, badge }) 
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const res  = await fetch('/api/admin/upload-tryon-image', {
-        method:  'POST',
-        headers: { 'X-Admin-Secret': getAdminSecret() || '' },
-        body:    formData,
+      const res  = await adminFetch('/api/admin/upload-tryon-image', {
+        method: 'POST',
+        body:   formData,
       })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Upload failed')
@@ -228,9 +227,7 @@ async function toSafeUrl(src) {
   if (src.startsWith('blob:') || src.startsWith('data:') || src.startsWith('/')) {
     return src
   }
-  const res = await fetch(`/api/admin/proxy-img?url=${encodeURIComponent(src)}`, {
-    headers: { 'X-Admin-Secret': getAdminSecret() || '' },
-  })
+  const res = await adminFetch(`/api/admin/proxy-img?url=${encodeURIComponent(src)}`)
   if (!res.ok) throw new Error('Could not load image for processing.')
   const blob = await res.blob()
   return URL.createObjectURL(blob)
@@ -329,7 +326,7 @@ function BgRemover({ src, onDone, onClose }) {
   const handleSave=async()=>{
     if(!result)return; setSaving(true)
     try{
-      const res=await fetch('/api/admin/upload-tryon-image',{method:'POST',headers:headers(),body:JSON.stringify({image:result})})
+      const res=await adminFetch('/api/admin/upload-tryon-image',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:result})})
       const data=await res.json(); if(!data.ok)throw new Error(data.error||'Upload failed')
       onDone(data.url)
     }catch(e){setError(e.message)}
@@ -1254,7 +1251,7 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
     try{
       const method=isEdit?'PUT':'POST'
       const payload=isEdit?{...form,id:editingGown.id,inventory}:{...form,inventory}
-      const res=await fetch('/api/admin/gowns',{method,headers:headers(),body:JSON.stringify(payload)})
+      const res=await adminFetch('/api/admin/gowns',{method,headers:headers(),body:JSON.stringify(payload)})
       const data=await res.json()
       if(!res.ok)throw new Error(data.error||'Failed to save')
       onSaved(data.gown, isEdit)
@@ -1547,8 +1544,8 @@ export default function AdminGownsPage() {
     setLoading(true); setError('')
     try{
       const [aRes,rRes]=await Promise.all([
-        fetch('/api/admin/gowns',{headers:headers()}),
-        fetch('/api/admin/gowns?tab=archived',{headers:headers()})
+        adminFetch('/api/admin/gowns',{headers:headers()}),
+        adminFetch('/api/admin/gowns?tab=archived',{headers:headers()})
       ])
       const aData=await aRes.json(), rData=await rRes.json()
       if(!aRes.ok)throw new Error(aData.error||'Failed to load')
@@ -1592,7 +1589,7 @@ export default function AdminGownsPage() {
   }
 
   const handleSaveStock=async(id,inventory)=>{
-    const res=await fetch('/api/admin/gowns',{method:'PUT',headers:headers(),body:JSON.stringify({id,inventory})})
+    const res=await adminFetch('/api/admin/gowns',{method:'PUT',headers:headers(),body:JSON.stringify({id,inventory})})
     const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
     setGowns(p=>p.map(g=>String(g.id)===String(id)?{...g,inventory}:g))
     showToast('Inventory updated')
@@ -1608,12 +1605,12 @@ export default function AdminGownsPage() {
     setConfirm(null)
     try{
       if(archive){
-        const res=await fetch(`/api/admin/gowns?id=${id}`,{method:'DELETE',headers:headers()}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
+        const res=await adminFetch(`/api/admin/gowns?id=${id}`,{method:'DELETE',headers:headers()}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
         const gown=gowns.find(g=>String(g.id)===String(id))
         setGowns(p=>p.filter(g=>String(g.id)!==String(id))); if(gown){setArchived(p=>[{...gown,isActive:false},...p]);setArcCount(c=>c+1)}
         showToast(`"${name}" archived`)
       }else{
-        const res=await fetch('/api/admin/gowns',{method:'PUT',headers:headers(),body:JSON.stringify({id,restore:true})}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
+       const res=await fetch('/api/admin/gowns',{method:'PUT',headers:headers(),body:JSON.stringify({id,restore:true})}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
         const gown=archived.find(g=>String(g.id)===String(id))
         setArchived(p=>p.filter(g=>String(g.id)!==String(id))); setArcCount(c=>Math.max(0,c-1))
         if(gown)setGowns(p=>[{...gown,isActive:true},...p]); showToast(`"${name}" restored`)
@@ -1626,7 +1623,7 @@ export default function AdminGownsPage() {
   const doPermanentDelete=async(id,name)=>{
     setConfirm(null)
     try{
-      const res=await fetch(`/api/admin/gowns?id=${id}&permanent`,{method:'DELETE',headers:headers()}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
+    const res=await adminFetch(`/api/admin/gowns?id=${id}&permanent`,{method:'DELETE',headers:headers()}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
       setArchived(p=>p.filter(g=>String(g.id)!==String(id))); setArcCount(c=>Math.max(0,c-1))
       showToast(`"${name}" permanently deleted`)
     }catch(e){setError(e.message);showToast(e.message,'error')}
