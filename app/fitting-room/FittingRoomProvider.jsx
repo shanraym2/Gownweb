@@ -1,28 +1,42 @@
 'use client'
-
 import { useCallback, useEffect, useRef, useState, createContext, useContext } from 'react'
+import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
 import { scoreGown } from '../constants/styleOptions'
 import { SEGMENTS } from '../constants/sizeConstants'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POSE SCRIPTS
+// MEDIAPIPE POSE LANDMARKER CONFIG
+//
+// WASM_BASE / MODEL_PATH point at Google's CDN for now — matches the quick-
+// start pattern in MediaPipe's own docs. Swap these to self-hosted paths
+// under /public once the feature is stable (removes a CDN dependency and
+// avoids the SRI gap that existed with the old TFJS script-tag loading).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const POSE_SCRIPTS = [
-  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.10.0/dist/tf-core.min.js',
-  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.10.0/dist/tf-converter.min.js',
-  'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.10.0/dist/tf-backend-webgl.min.js',
-  'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
-]
+const WASM_BASE  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+const MODEL_PATH = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task'
 
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
-    const s = Object.assign(document.createElement('script'), { src, async: false })
-    s.onload = resolve
-    s.onerror = () => reject(new Error('Failed: ' + src))
-    document.head.appendChild(s)
-  })
+// Adapter: wraps PoseLandmarker so the rest of the codebase (ScanPanel's
+// detect loop) can keep calling `detectorRef.current.estimatePoses(video)`
+// exactly like it did with the old MoveNet detector. Landmarks come back
+// normalised (0–1); we convert to pixel space here so downstream pixel-based
+// geometry in poseUtils.js / measurementUtils.js needs no changes.
+function wrapPoseLandmarker(landmarker) {
+  return {
+    landmarker,
+    estimatePoses: (video) => {
+      const vw = video.videoWidth || 640
+      const vh = video.videoHeight || 480
+      const result = landmarker.detectForVideo(video, performance.now())
+      if (!result?.landmarks?.length) return Promise.resolve([])
+      const keypoints = result.landmarks[0].map(lm => ({
+        x: lm.x * vw,
+        y: lm.y * vh,
+        score: lm.visibility ?? 0,
+      }))
+      return Promise.resolve([{ keypoints }])
+    },
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,21 +194,28 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
   // MODEL LOADING
   // ─────────────────────────────────────────────────────────────────────────
 
+  const detectorLoadStarted = useRef(false)
+
   useEffect(() => {
-    if (detectorRef.current || modelState === 'loading' || modelState === 'ready') return
+    if (detectorLoadStarted.current) return
+    detectorLoadStarted.current = true
+
     setModelState('loading')
-    Promise.all(POSE_SCRIPTS.map(loadScript))
-      .then(() => window.tf.ready())
-      .then(() => window.tf.setBackend('webgl').catch(() => window.tf.setBackend('cpu')))
-      .then(() => {
-        const pd = window.poseDetection
-        return pd.createDetector(pd.SupportedModels.MoveNet, {
-          modelType: pd.movenet.modelType.SINGLEPOSE_THUNDER,
-        })
+    FilesetResolver.forVisionTasks(WASM_BASE)
+      .then(vision => PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
+        runningMode: 'VIDEO',
+        numPoses: 1,
+      }))
+      .then(landmarker => {
+        detectorRef.current = wrapPoseLandmarker(landmarker)
+        setModelState('ready')
       })
-      .then(det => { detectorRef.current = det; setModelState('ready') })
-      .catch(() => setModelState('error'))
-  }, [modelState])
+      .catch(() => {
+        detectorLoadStarted.current = false // allow retry on genuine failure
+        setModelState('error')
+      })
+  }, [])
 
   return (
     <FittingRoomCtx.Provider value={{

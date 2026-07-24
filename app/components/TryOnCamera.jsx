@@ -212,11 +212,14 @@ export default function TryOnCamera({
   modelState: externalModelState = null,  // passed from context when using externalDetector
   onSave,
 }) {
-  const videoRef   = useRef(null)
-  const canvasRef  = useRef(null)
-  const streamRef  = useRef(null)
-  const animRef    = useRef(null)
-  const prevKpsRef = useRef(null)
+  const videoRef      = useRef(null)
+  const canvasRef     = useRef(null)
+  const streamRef     = useRef(null)
+  const animRef       = useRef(null)
+  const prevKpsRef    = useRef(null)
+  const isStartingRef = useRef(false)
+  const cancelledRef  = useRef(null)   // set by startCamera(); called on unmount
+  const tcWrapRef     = useRef(null)   // fullscreen target — wraps the viewport
 
   // Internal refs — used when NOT sharing via context
   const internalDetectorRef  = useRef(null)
@@ -245,6 +248,7 @@ export default function TryOnCamera({
   // Camera + pose state
   const [camState,   setCamState  ] = useState('off')
   const [camError,   setCamError  ] = useState('')
+  const [camQuality, setCamQuality] = useState('requested')  // 'requested' | 'reduced' | 'minimal'
   const [poseLocked, setPoseLocked] = useState(false)
   const [poseFound,  setPoseFound ] = useState(false)
   const [poseIssues, setPoseIssues] = useState([])
@@ -264,6 +268,9 @@ export default function TryOnCamera({
 
   // Mobile orientation
   const [isLandscape, setIsLandscape] = useState(false)
+
+  // Fullscreen
+  const [fullscreen, setFullscreen] = useState(false)
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
   useEffect(() => { opacityRef.current = opacity },   [opacity])
@@ -325,6 +332,7 @@ export default function TryOnCamera({
 
   // ── Camera controls ────────────────────────────────────────────────────────
   const stopCamera = useCallback(() => {
+    console.trace('[TryOnCamera] stopCamera() called — stream was:', streamRef.current?.id)
     if (animRef.current) cancelAnimationFrame(animRef.current)
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
@@ -333,28 +341,99 @@ export default function TryOnCamera({
   }, [])
 
   const startCamera = useCallback(async () => {
-    setCamError(''); setCamState('starting')
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCamError('Camera not supported in this browser.'); setCamState('error'); return
+    // Hard guard against a second concurrent call (double-click / re-render).
+    if (isStartingRef.current) return
+    isStartingRef.current = true
+
+    // Track whether this component is still mounted by the time the async
+    // work below resolves. Without this, navigating away from the Try On
+    // tab WHILE getUserMedia()'s permission prompt is pending causes the
+    // component to unmount and run stopCamera() before the stream exists —
+    // then the promise resolves afterward and assigns a live stream to a
+    // ref nothing will ever clean up again. That orphaned stream holds the
+    // camera device until the tab is fully closed, and every subsequent
+    // attempt anywhere on the site fails with "in use by another app."
+    let cancelled = false
+    cancelledRef.current = () => { cancelled = true }
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
     }
+
+    setCamError(''); setCamState('starting'); setCamQuality('requested')
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamError('Camera not supported in this browser.'); setCamState('error')
+      isStartingRef.current = false; return
+    }
+
+    let stream = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } },
-        audio: false,
-      })
+      console.log('[TryOnCamera] before getUserMedia')
+      try {
+        // Tier 1 — full quality: resolution, framerate, and front camera
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } },
+          audio: false,
+        })
+        setCamQuality('requested')
+      } catch (fullErr) {
+        if (fullErr.name !== 'NotReadableError') throw fullErr
+        console.warn('[TryOnCamera] Full-quality getUserMedia failed, retrying without frameRate:', fullErr)
+        try {
+          // Tier 2 — drop the framerate ask, keep resolution + front camera preference
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+            audio: false,
+          })
+          setCamQuality('reduced')
+        } catch (reducedErr) {
+          if (reducedErr.name !== 'NotReadableError') throw reducedErr
+          console.warn('[TryOnCamera] Reduced-quality getUserMedia failed, retrying with defaults:', reducedErr)
+          // Tier 3 — let the browser pick whatever it can actually open
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+          setCamQuality('minimal')
+        }
+      }
+      console.log('[TryOnCamera] after getUserMedia, stream id:', stream.id, 'tracks:', stream.getVideoTracks().map(t => t.readyState))
+
+      if (cancelled) {
+        // Component unmounted while the permission prompt was pending —
+        // release immediately instead of assigning to a dead ref.
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
+
       streamRef.current = stream; videoRef.current.srcObject = stream
+      console.log('[TryOnCamera] waiting for metadata')
       await new Promise((res, rej) => {
         videoRef.current.onloadedmetadata = res
         setTimeout(() => rej(new Error('timeout')), 10_000)
       })
-      await videoRef.current.play(); setCamState('on')
+      if (cancelled) { stream.getTracks().forEach(t => t.stop()); streamRef.current = null; return }
+
+      console.log('[TryOnCamera] calling play()')
+      await videoRef.current.play()
+      console.log('[TryOnCamera] play() succeeded — setting camState to on')
+      if (cancelled) { stream.getTracks().forEach(t => t.stop()); streamRef.current = null; return }
+      setCamState('on')
     } catch (err) {
-      let msg = 'Could not start camera.'
-      if (err.name === 'NotAllowedError')    msg = 'Camera permission denied. Click the camera icon in the address bar → Allow → refresh.'
-      else if (err.name === 'NotFoundError') msg = 'No camera found on this device.'
-      else if (err.name === 'NotReadableError') msg = 'Camera is in use by another app. Close Zoom/Teams and try again.'
-      else if (err.message === 'timeout')    msg = 'Camera took too long to start — please try again.'
-      setCamError(msg); setCamState('error')
+      console.error('[TryOnCamera] Camera error:', err)
+      console.log('[TryOnCamera] Error name:', err.name, '| message:', err.message)
+      if (stream) stream.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      if (videoRef.current) videoRef.current.srcObject = null
+      if (!cancelled) {
+        let msg = 'Could not start camera.'
+        if (err.name === 'NotAllowedError')       msg = 'Camera permission denied. Click the camera icon in the address bar → Allow → refresh.'
+        else if (err.name === 'NotFoundError')    msg = 'No camera found on this device.'
+        else if (err.name === 'NotReadableError') msg = 'Camera is in use by another app. Close Zoom/Teams and try again.'
+        else if (err.name === 'OverconstrainedError') msg = `Camera doesn't support the requested resolution/settings.`
+        else if (err.message === 'timeout')       msg = 'Camera took too long to start — please try again.'
+        setCamError(msg); setCamState('error')
+      }
+    } finally {
+      isStartingRef.current = false
     }
   }, [])
 
@@ -372,6 +451,21 @@ export default function TryOnCamera({
     setIsLandscape(mq.matches)
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenEnabled) { setFullscreen(v => !v); return }
+    if (!document.fullscreenElement) {
+      tcWrapRef.current?.requestFullscreen().catch(() => setFullscreen(v => !v))
+    } else {
+      document.exitFullscreen()
+    }
+  }, [])
+
+  useEffect(() => {
+    const onFsChange = () => setFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
 
   // ── Enhanced mode ──────────────────────────────────────────────────────────
@@ -414,7 +508,10 @@ export default function TryOnCamera({
     const vw  = video.videoWidth  || 640
     const vh  = video.videoHeight || 480
     canvas.width  = vw * dpr; canvas.height = vh * dpr
-    canvas.style.width = vw + 'px'; canvas.style.height = vh + 'px'
+    // Do NOT set canvas.style.width/height here — that would overwrite the
+    // 100%/objectFit:contain styling set via the JSX style prop on every
+    // single frame (this runs 60x/sec), which is what was silently
+    // cancelling out the CSS fullscreen/centering fix.
     const ctx = canvas.getContext('2d')
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
@@ -474,7 +571,10 @@ export default function TryOnCamera({
     return () => { if (animRef.current) cancelAnimationFrame(animRef.current) }
   }, [camState, detect])
 
-  useEffect(() => () => stopCamera(), [stopCamera])
+  useEffect(() => () => {
+    cancelledRef.current?.()   // flag any in-flight startCamera() as cancelled
+    stopCamera()
+  }, [stopCamera])
 
   // ── Capture ────────────────────────────────────────────────────────────────
   const takePhoto = useCallback(() => {
@@ -548,13 +648,28 @@ export default function TryOnCamera({
       )}
 
       {/* Viewport */}
-      <div className="tc-viewport" aria-label="Camera viewport">
+      <div
+        ref={tcWrapRef}
+        className={`tc-viewport${fullscreen ? ' tc-viewport--fs' : ''}`}
+        aria-label="Camera viewport"
+      >
         <video ref={videoRef} playsInline muted
           style={{ position:'absolute', inset:0, width:'100%', height:'100%',
                    objectFit:'cover', transform:'scaleX(-1)', opacity:0 }}/>
         <canvas ref={canvasRef}
-          style={{ position:'absolute', inset:0, width:'100%', height:'100%',
-                   opacity: camState === 'on' ? 1 : 0, transition:'opacity .3s' }}/>
+          style={{ width:'100%', height:'100%', objectFit:'contain',
+                   display:'block', opacity: camState === 'on' ? 1 : 0, transition:'opacity .3s' }}/>
+
+        {camState === 'on' && (
+          <button
+            className="tc-fs-btn"
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {fullscreen ? '⤢' : '⤡'} <span>{fullscreen ? 'Exit' : 'Fullscreen'}</span>
+          </button>
+        )}
 
         {/* Off-state placeholder */}
         {camState !== 'on' && !captured && (
@@ -637,6 +752,11 @@ export default function TryOnCamera({
         {segError && (
           <div className="tc-alert tc-alert--err" role="alert">{segError}</div>
         )}
+        {camState === 'on' && camQuality !== 'requested' && (
+          <div className="tc-alert" style={{ background: '#fff8ec', color: '#7a5a1a', border: '1px solid #e8d5a8' }} role="status">
+            Camera running at reduced quality on this device — try-on still works, image may be softer than usual.
+          </div>
+        )}
 
         <div className="tc-ctrl-row">
           {(!camState || camState === 'off' || camState === 'error') ? (
@@ -681,22 +801,31 @@ export default function TryOnCamera({
                   : 'Waiting…'}
               </button>
 
-              {/* Timer selector */}
-              <div className="tc-timer-row" role="group" aria-label="Self-timer">
-                {[0, 3, 5, 10].map(s => (
-                  <button key={s}
-                    className={`tc-timer-btn${timerSecs === s ? ' active' : ''}`}
-                    onClick={() => setTimerSecs(s)}
-                    disabled={countdown !== null}
-                    aria-pressed={timerSecs === s}
-                    aria-label={s === 0 ? 'No timer' : `${s} second timer`}>
-                    {s === 0 ? 'Off' : `${s}s`}
-                  </button>
-                ))}
+              {/* Timer selector — grouped + labeled so it reads as "self-timer
+                  duration", distinct from the camera Stop control below */}
+              <div className="tc-timer-group">
+                <span className="tc-timer-caption">Self-timer</span>
+                <div className="tc-timer-row" role="group" aria-label="Self-timer duration">
+                  {[0, 3, 5, 10].map(s => (
+                    <button key={s}
+                      className={`tc-timer-btn${timerSecs === s ? ' active' : ''}`}
+                      onClick={() => setTimerSecs(s)}
+                      disabled={countdown !== null}
+                      aria-pressed={timerSecs === s}
+                      aria-label={s === 0 ? 'No timer' : `${s} second timer`}>
+                      {s === 0 ? 'No timer' : `${s}s`}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <button className="tc-btn tc-btn--ghost" onClick={stopCamera}
-                aria-label="Stop camera">■ Stop</button>
+              <div className="tc-ctrl-divider" aria-hidden="true"/>
+
+              <button className="tc-btn tc-btn--danger" onClick={stopCamera}
+                aria-label="Stop camera and turn off the video feed"
+                title="Stop camera">
+                ■ Stop camera
+              </button>
             </>
           )}
         </div>
@@ -748,7 +877,24 @@ export default function TryOnCamera({
         .tc-strip-view-hint { position:absolute; bottom:3px; right:3px; font-size:10px; background:rgba(0,0,0,.6); color:#fff; padding:1px 4px; border-radius:3px; }
 
         /* Viewport */
-        .tc-viewport { flex:1; position:relative; background:#0d0a07; overflow:hidden; min-height:320px; }
+        .tc-viewport {
+          flex:1; position:relative; background:#0d0a07; overflow:hidden; min-height:320px;
+          display:flex; align-items:center; justify-content:center;
+        }
+        .tc-viewport--fs {
+          position:fixed; inset:0; z-index:9999; min-height:100vh;
+        }
+        .tc-viewport:fullscreen { background:#0d0a07; }
+        .tc-fs-btn {
+          position:absolute; top:12px; right:12px; z-index:6;
+          display:flex; align-items:center; gap:6px;
+          padding:8px 14px; border-radius:20px; border:1.5px solid rgba(255,255,255,.9);
+          background:rgba(0,0,0,.6); color:#fff; font-size:13px; font-weight:600;
+          cursor:pointer; backdrop-filter:blur(4px);
+          box-shadow:0 2px 10px rgba(0,0,0,.35);
+        }
+        .tc-fs-btn:hover { background:rgba(0,0,0,.8); border-color:#fff; }
+        .tc-fs-btn span { line-height:1; }
         .tc-ph { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:20px; }
         .tc-ph-text { color:rgba(255,255,255,.4); font-size:13px; text-align:center; line-height:1.5; }
         .tc-guide { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
@@ -777,10 +923,15 @@ export default function TryOnCamera({
         .tc-btn--outline:hover { background:#faf6ee; }
         .tc-btn--capture { background:#1a1108; border-color:#1a1108; color:#faf9f7; }
         .tc-btn--capture.ready { background:#1D9E75; border-color:#1D9E75; }
-        .tc-timer-row { display:flex; gap:4px; }
-        .tc-timer-btn { padding:5px 9px; border:1px solid #e0ddd8; border-radius:6px; font-size:10px; cursor:pointer; background:#fff; color:#888; transition:all .15s; }
+        .tc-timer-group { display:flex; flex-direction:column; gap:3px; }
+        .tc-timer-caption { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:#aaa; padding-left:2px; }
+        .tc-timer-row { display:flex; gap:4px; padding:3px; background:#f5f3ef; border-radius:8px; }
+        .tc-timer-btn { padding:5px 9px; border:1px solid transparent; border-radius:6px; font-size:10px; cursor:pointer; background:transparent; color:#888; transition:all .15s; }
         .tc-timer-btn.active { background:#1a1108; border-color:#1a1108; color:#faf9f7; }
         .tc-timer-btn:disabled { opacity:.4; cursor:not-allowed; }
+        .tc-ctrl-divider { width:1px; align-self:stretch; background:#e8e5e0; margin:2px 2px; }
+        .tc-btn--danger { background:#fff; border-color:#e0a5a5; color:#a02020; }
+        .tc-btn--danger:hover:not(:disabled) { background:#fcebeb; border-color:#c96060; }
 
         /* Settings */
         .tc-settings { display:flex; flex-direction:column; gap:6px; padding-top:6px; border-top:1px solid #f0ede8; }
