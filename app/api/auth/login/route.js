@@ -8,42 +8,56 @@ function normalizeEmail(email) {
 
 // ── Rate limiter ──────────────────────────────────────────────────────────────
 // Keyed by IP: max 10 attempts per 15 minutes.
-// Keyed by email: max 8 attempts per 15 minutes.
+// Keyed by email: max 5 attempts per 15 minutes.
 // Both must pass — whichever hits first returns 429.
-const ipMap    = new Map()
-const emailMap = new Map()
-const WINDOW   = 15 * 60 * 1000
-const IP_MAX   = 10
-const EMAIL_MAX = 8
+// Backed by login_attempt_log in Postgres (see schema migration) instead of
+// an in-memory Map — survives restarts/redeploys and works correctly across
+// multiple app instances, unlike the old in-process counters.
+const WINDOW_SQL = '15 minutes'
+const IP_MAX     = 10
+const EMAIL_MAX  = 5
 
-function checkRateLimit(ip, email) {
-  const now = Date.now()
-
-  const ipEntry = ipMap.get(ip)
-  if (!ipEntry || now - ipEntry.windowStart > WINDOW) {
-    ipMap.set(ip, { windowStart: now, count: 1 })
-  } else {
-    ipEntry.count++
-    if (ipEntry.count > IP_MAX) return false
-  }
-
-  const emailEntry = emailMap.get(email)
-  if (!emailEntry || now - emailEntry.windowStart > WINDOW) {
-    emailMap.set(email, { windowStart: now, count: 1 })
-  } else {
-    emailEntry.count++
-    if (emailEntry.count > EMAIL_MAX) return false
-  }
-
-  return true
+// Opportunistic cleanup: ~1% of requests also delete rows older than a day.
+// No separate cron/scheduled job needed — this alone keeps the table small.
+async function cleanupOldAttempts() {
+  if (Math.random() > 0.01) return
+  await query(
+    `DELETE FROM login_attempt_log WHERE attempted_at < now() - interval '1 day'`
+  )
 }
 
-// Prune stale entries every 15 minutes to avoid unbounded memory growth
-setInterval(() => {
-  const cutoff = Date.now() - WINDOW
-  for (const [k, v] of ipMap)    if (v.windowStart < cutoff) ipMap.delete(k)
-  for (const [k, v] of emailMap) if (v.windowStart < cutoff) emailMap.delete(k)
-}, WINDOW)
+async function checkRateLimit(ip, email) {
+  await cleanupOldAttempts()
+
+  const [ipCountRows, emailCountRows] = await Promise.all([
+    query(
+      `SELECT COUNT(*)::int AS n FROM login_attempt_log
+       WHERE kind = 'ip' AND identifier = $1
+         AND attempted_at > now() - interval '${WINDOW_SQL}'`,
+      [ip]
+    ),
+    query(
+      `SELECT COUNT(*)::int AS n FROM login_attempt_log
+       WHERE kind = 'email' AND identifier = $1
+         AND attempted_at > now() - interval '${WINDOW_SQL}'`,
+      [email]
+    ),
+  ])
+
+  const ipCount    = ipCountRows[0]?.n    ?? 0
+  const emailCount = emailCountRows[0]?.n ?? 0
+
+  // Record this attempt regardless of outcome, so a persistent attacker
+  // can't dodge the count by aiming right at the boundary.
+  await Promise.all([
+    query(`INSERT INTO login_attempt_log (kind, identifier) VALUES ('ip', $1)`, [ip]),
+    query(`INSERT INTO login_attempt_log (kind, identifier) VALUES ('email', $1)`, [email]),
+  ])
+
+  if (ipCount + 1 > IP_MAX)       return false
+  if (emailCount + 1 > EMAIL_MAX) return false
+  return true
+}
 
 export async function POST(request) {
   try {
@@ -53,7 +67,7 @@ export async function POST(request) {
     const cleanPass  = String(password || '')
 
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown'
-    if (!checkRateLimit(ip, cleanEmail)) {
+    if (!(await checkRateLimit(ip, cleanEmail))) {
       return NextResponse.json(
         { ok: false, error: 'Too many login attempts. Please wait 15 minutes and try again.' },
         { status: 429, headers: { 'Retry-After': '900' } }

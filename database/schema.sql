@@ -1028,3 +1028,24 @@ CREATE TABLE public.sessions (
 );
 CREATE INDEX idx_sessions_token_hash ON public.sessions(token_hash);
 CREATE INDEX idx_sessions_user_id    ON public.sessions(user_id);
+
+-- =============================================================
+-- Migration: login_attempt_log
+-- Append-only log of login attempts (success or failure), used
+-- to rate-limit by IP and by email with a sliding 15-minute
+-- window. Replaces the in-memory Map() approach in the login
+-- route, which reset on every restart/redeploy/hot-reload and
+-- didn't share state across multiple app instances.
+-- Safe to re-run — uses IF NOT EXISTS.
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS public.login_attempt_log (
+  id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind         text        NOT NULL CHECK (kind IN ('ip', 'email')),
+  identifier   text        NOT NULL,   -- the IP address or normalized email
+  attempted_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Supports "COUNT(*) WHERE kind=$1 AND identifier=$2 AND attempted_at > now() - interval"
+CREATE INDEX IF NOT EXISTS idx_login_attempt_log_lookup
+  ON public.login_attempt_log (kind, identifier, attempted_at DESC);
