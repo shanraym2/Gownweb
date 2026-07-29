@@ -1610,7 +1610,12 @@ export default function AdminGownsPage() {
         setGowns(p=>p.filter(g=>String(g.id)!==String(id))); if(gown){setArchived(p=>[{...gown,isActive:false},...p]);setArcCount(c=>c+1)}
         showToast(`"${name}" archived`)
       }else{
-       const res=await fetch('/api/admin/gowns',{method:'PUT',headers:headers(),body:JSON.stringify({id,restore:true})}); const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
+       const res = await adminFetch('/api/admin/gowns', {
+          method: 'PUT',
+          headers: headers(),
+          body: JSON.stringify({ id, restore: true }),
+        });
+ const data=await res.json(); if(!res.ok)throw new Error(data.error||'Failed')
         const gown=archived.find(g=>String(g.id)===String(id))
         setArchived(p=>p.filter(g=>String(g.id)!==String(id))); setArcCount(c=>Math.max(0,c-1))
         if(gown)setGowns(p=>[{...gown,isActive:true},...p]); showToast(`"${name}" restored`)
