@@ -819,10 +819,23 @@ const statusLabel = {
                 </div>
               ) : (
                 <>
+                  {order.paymentMethod === 'qrph' && order.paymentStatus === 'paid' && (
+                    <div className="conf-card" style={{ borderLeft: '3px solid #155724', background: '#f0faf3' }}>
+                      <p className="conf-card-title" style={{ color: '#155724' }}>✓ Payment verified via PayMongo</p>
+                      <p className="conf-card-sub">Your payment was confirmed automatically — no proof needed.</p>
+                    </div>
+                  )}
+
                   <div className="conf-card">
                     <p className="conf-card-title">What happens next</p>
                     <ol className="conf-steps-list">
-                      {order.paymentMethod !== 'cash' ? (
+                      {order.paymentMethod === 'qrph' ? (
+                        <>
+                          <li>Your order is being prepared</li>
+                          {order.deliveryMethod === 'pickup'   && <li>We'll notify you when your order is ready for pickup</li>}
+                          {order.deliveryMethod === 'lalamove' && <li>We'll arrange Lalamove and notify you of the delivery fee</li>}
+                        </>
+                      ) : order.paymentMethod !== 'cash' ? (
                         <>
                           <li>Upload your proof of payment below</li>
                           <li>Our team verifies your payment (usually within 1–2 hours)</li>
@@ -872,7 +885,10 @@ const statusLabel = {
                       />
                     </div>
                   )}
-                  {(!order.proofStatus || order.proofStatus === 'none' || !['pending','verified','rejected'].includes(order.proofStatus)) && order.paymentMethod !== 'cash' && (
+                  {(!order.proofStatus || order.proofStatus === 'none' || !['pending','verified','rejected'].includes(order.proofStatus))
+                    && order.paymentMethod !== 'cash'
+                    && order.paymentMethod !== 'qrph'
+                    && (
                     <ProofUpload
                       orderId={order.id}
                       userId={user.id}

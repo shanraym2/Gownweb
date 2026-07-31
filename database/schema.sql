@@ -1049,3 +1049,39 @@ CREATE TABLE IF NOT EXISTS public.login_attempt_log (
 -- Supports "COUNT(*) WHERE kind=$1 AND identifier=$2 AND attempted_at > now() - interval"
 CREATE INDEX IF NOT EXISTS idx_login_attempt_log_lookup
   ON public.login_attempt_log (kind, identifier, attempted_at DESC);
+
+  -- =============================================================
+-- Migration: PayMongo QR Ph support
+-- =============================================================
+
+ALTER TABLE public.orders
+  DROP CONSTRAINT IF EXISTS orders_payment_method_check,
+  ADD CONSTRAINT orders_payment_method_check
+    CHECK (payment_method IN ('gcash', 'bdo', 'cash', 'qrph'));
+
+ALTER TABLE public.payments
+  DROP CONSTRAINT IF EXISTS payments_method_check,
+  ADD CONSTRAINT payments_method_check
+    CHECK (method IN ('gcash', 'bdo', 'cash', 'qrph'));
+
+ALTER TABLE public.payments
+  ADD COLUMN IF NOT EXISTS paymongo_intent_id text,
+  ADD COLUMN IF NOT EXISTS paymongo_qr_image_url text,
+  ADD COLUMN IF NOT EXISTS paymongo_expires_at timestamptz;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_paymongo_intent
+  ON public.payments (paymongo_intent_id)
+  WHERE paymongo_intent_id IS NOT NULL;
+
+  -- =============================================================
+-- Migration: soft inventory reservations for checkout
+-- =============================================================
+
+-- Track when an order's reservation expires if payment isn't completed.
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS reservation_expires_at timestamptz;
+
+-- Helpful for the expiry sweep job
+CREATE INDEX IF NOT EXISTS idx_orders_reservation_expiry
+  ON public.orders (reservation_expires_at)
+  WHERE reservation_expires_at IS NOT NULL;

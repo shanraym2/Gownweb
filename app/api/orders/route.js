@@ -46,7 +46,10 @@ export async function GET(request) {
   }
 
   try {
-    const { query } = await import('@/lib/db')
+    const { query, getClient } = await import('@/lib/db')
+    const { sweepExpiredReservations } = await import('@/lib/inventory')
+    await sweepExpiredReservations(query, getClient)
+
     const rows = await query(`
       SELECT o.*,
         json_agg(
@@ -116,7 +119,7 @@ export async function POST(request) {
   if (!deliveryMethod) return NextResponse.json({ ok: false, error: 'Delivery method required' }, { status: 400 })
   if (!items?.length)  return NextResponse.json({ ok: false, error: 'No items in order' },        { status: 400 })
 
-  if (!['gcash', 'bdo', 'cash'].includes(paymentMethod)) {
+  if (!['gcash', 'bdo', 'cash', 'qrph'].includes(paymentMethod)) {
     return NextResponse.json({ ok: false, error: 'Invalid payment method' }, { status: 400 })
   }
   if (!['pickup', 'lalamove'].includes(deliveryMethod)) {
@@ -182,8 +185,15 @@ export async function POST(request) {
           (order_number, user_id, customer_email, customer_name,
            status, payment_method, payment_status,
            delivery_method, delivery_address, lalamove_vehicle,
-           subtotal, discount_total, shipping_fee, tax, total, notes)
-         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,$9,0,$10,$11,$12,$13)
+           subtotal, discount_total, shipping_fee, tax, total, notes,
+           reservation_expires_at)
+         VALUES ($1,$2,$3,$4,'placed',$5,'unpaid',$6,$7,$8,$9,0,$10,$11,$12,$13,
+           CASE $5
+             WHEN 'qrph'  THEN NOW() + INTERVAL '20 minutes'
+             WHEN 'gcash' THEN NOW() + INTERVAL '24 hours'
+             WHEN 'bdo'   THEN NOW() + INTERVAL '24 hours'
+             ELSE NULL
+           END)
          RETURNING *`,
         [
           orderNumber,                                          // $1
@@ -218,16 +228,20 @@ export async function POST(request) {
           ]
         )
 
-        // ── INVENTORY: deduct stock_qty directly on order placement ──────────
-        // We reduce actual stock immediately so other customers see accurate
-        // availability. No reservation pattern — stock goes down on order.
+        // ── INVENTORY: soft-reserve stock on order placement ─────────────────
+        // Increments reserved_qty (not stock_qty) so other customers see
+        // accurate availability (stock_qty - reserved_qty) without units being
+        // physically removed until payment actually succeeds. Converted to a
+        // real stock_qty decrement by convertReservationToSale() in
+        // lib/inventory.js, or released back by releaseReservation() if the
+        // order is abandoned/cancelled before payment completes.
         if (item.gownId && item.sizeLabel) {
           const { rowCount } = await conn.query(
             `UPDATE gown_inventory
-             SET stock_qty = stock_qty - $1
+             SET reserved_qty = reserved_qty + $1
              WHERE gown_id    = $2
                AND size_label = $3
-               AND stock_qty  >= $1`,  
+               AND stock_qty - reserved_qty >= $1`,
             [qty, item.gownId, item.sizeLabel]
           )
 

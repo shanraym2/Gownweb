@@ -10,7 +10,7 @@ import { getCurrentUser } from '../utils/authClient'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STEPS = ['Review order', 'Delivery', 'Payment', 'Confirm']
+const STEPS = ['Review order', 'Delivery', 'Payment Method', 'Confirm', 'Payment']
 
 const BIZ_TAX_RATE  = 0.03   // 3% business tax
 
@@ -38,6 +38,12 @@ const DELIVERY_OPTIONS = [
 ]
 
 const PAYMENT_METHODS = [
+  {
+    id:      'qrph',
+    label:   'GCash / Maya / Bank (QR Ph)',
+    icon:    '📱',
+    detail:  'Scan a QR code to pay instantly — automatically verified.',
+  },
   {
     id:      'gcash',
     label:   'GCash',
@@ -612,17 +618,11 @@ function StepDelivery({
     </div>
   )
 }
+// ─── Step: Payment Method ──────────────────────────────────────────────────
 
-// ─── Step 3: Payment ──────────────────────────────────────────────────────────
-
-function StepPayment({ paymentMethod, setPaymentMethod, delivery, onNext, onBack }) {
+function StepPaymentMethod({ delivery, paymentMethod, setPaymentMethod, onNext, onBack }) {
   const [error, setError] = useState('')
   const available = PAYMENT_METHODS.filter(m => !m.onlyWith || m.onlyWith === delivery)
-
-  useEffect(() => {
-    if (paymentMethod && !available.some(m => m.id === paymentMethod)) setPaymentMethod('')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [delivery])
 
   const handleNext = () => {
     if (!paymentMethod) { setError('Please select a payment method.'); return }
@@ -643,31 +643,162 @@ function StepPayment({ paymentMethod, setPaymentMethod, delivery, onNext, onBack
             <span className="ck-option-icon">{opt.icon}</span>
             <div className="ck-option-text">
               <span className="ck-option-label">{opt.label}</span>
-              {paymentMethod === opt.id && <span className="ck-option-detail">{opt.detail}</span>}
+              <span className="ck-option-detail">{opt.detail}</span>
             </div>
             <span className={`ck-option-radio${paymentMethod === opt.id ? ' on' : ''}`} />
           </button>
         ))}
       </div>
-
-      {paymentMethod && paymentMethod !== 'cash' && (
-        <div className="ck-info-box ck-info-box--gold">
-          <p>
-            <strong>How to pay:</strong><br/>
-            1. Send the exact amount to the account shown above.<br/>
-            2. Screenshot your payment confirmation.<br/>
-            3. Upload your proof on the next page after placing your order.<br/>
-            <strong>Orders without proof within 24 hours may be cancelled.</strong>
-          </p>
-        </div>
-      )}
-
       {error && <p className="ck-error">{error}</p>}
-
       <div className="ck-actions">
-        <button className="ck-btn-primary" onClick={handleNext}>Review &amp; confirm →</button>
+        <button className="ck-btn-primary" onClick={handleNext}>Continue →</button>
         <button className="ck-btn-ghost" onClick={onBack}>← Back</button>
       </div>
+    </div>
+  )
+}
+// ─── Step 3: Payment ──────────────────────────────────────────────────────────
+
+function StepPayment({ orderId, orderNumber }) {
+  const router = useRouter()
+  const [qrImageUrl,  setQrImageUrl ] = useState(null)
+  const [checking,    setChecking   ] = useState(true)
+  const [pollError,   setPollError  ] = useState('')
+  const [showOther,   setShowOther  ] = useState(false)
+  const [switching,   setSwitching  ] = useState(false)
+  const [switchError, setSwitchError] = useState('')
+
+  useEffect(() => {
+    if (!orderId) return
+    let cancelled = false
+
+    async function createQr() {
+      try {
+        const res  = await fetch('/api/payments/paymongo/create', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body:    JSON.stringify({ orderId }),
+        })
+        const data = await res.json()
+        if (cancelled) return
+        if (!res.ok || !data.ok) {
+          setPollError('Could not generate a QR code right now. You can pay another way below.')
+          setChecking(false)
+          return
+        }
+        setQrImageUrl(data.qrImageUrl)
+        setChecking(false)
+      } catch {
+        if (!cancelled) {
+          setPollError('Could not connect. You can pay another way below.')
+          setChecking(false)
+        }
+      }
+    }
+    createQr()
+
+    const intervalId = setInterval(async () => {
+      try {
+        const res  = await fetch(`/api/payments/paymongo/create?orderId=${orderId}`, { credentials: 'include' })
+        const data = await res.json()
+        if (cancelled || !res.ok || !data.ok) return
+        if (data.qrImageUrl) setQrImageUrl(data.qrImageUrl)
+        if (data.paymentStatus === 'paid') {
+          clearInterval(intervalId)
+          router.push(`/order-confirmation/${orderId}`)
+        }
+        if (data.expired) {
+          clearInterval(intervalId)
+          setShowOther(true)
+        }
+      } catch {}
+    }, 5000)
+
+    return () => { cancelled = true; clearInterval(intervalId) }
+  }, [orderId, router])
+
+  const handleSwitchMethod = async (methodId) => {
+    setSwitching(true); setSwitchError('')
+    try {
+      const res  = await fetch('/api/orders', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body:    JSON.stringify({ orderId, paymentMethod: methodId }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setSwitchError(data.error || 'Could not switch payment method.')
+        setSwitching(false)
+        return
+      }
+      router.push(`/order-confirmation/${orderId}`)
+    } catch {
+      setSwitchError('Could not connect. Please try again.')
+      setSwitching(false)
+    }
+  }
+
+  const otherMethods = PAYMENT_METHODS.filter(m => m.id !== 'qrph')
+
+  return (
+    <div className="ck-step-body">
+      <h2 className="ck-section-title">Payment</h2>
+      <p className="ck-summary-note">Order {orderNumber} placed — complete payment to finish.</p>
+
+      {!showOther ? (
+        <>
+          <div className="ck-info-box" style={{ textAlign: 'center' }}>
+            {checking && !qrImageUrl ? (
+              <div style={{ padding: '24px 0' }}>
+                <div className="ck-shipping-spinner" style={{ margin: '0 auto 10px', width: 20, height: 20 }} />
+                <p>Generating your QR code…</p>
+              </div>
+            ) : qrImageUrl ? (
+              <>
+                <p style={{ fontWeight: 500, marginBottom: 10 }}>Scan to pay with GCash, Maya, or your bank</p>
+                <img src={qrImageUrl} alt="QR Ph payment code" style={{ width: 220, height: 220, margin: '0 auto 10px', display: 'block' }} />
+                <p className="ck-summary-note">
+                  This page updates automatically once payment is received — no need to refresh.
+                </p>
+              </>
+            ) : (
+              <p className="ck-error">{pollError || 'Could not load QR code.'}</p>
+            )}
+          </div>
+
+          <button type="button" className="ck-link-btn" onClick={() => setShowOther(true)}>
+            Pay another way →
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="ck-summary-note" style={{ marginBottom: 10 }}>
+            Choose another payment method. You'll upload proof of payment on the next page.
+          </p>
+          <div className="ck-options">
+            {otherMethods.map(opt => (
+              <button
+                key={opt.id}
+                className="ck-option"
+                onClick={() => handleSwitchMethod(opt.id)}
+                disabled={switching}
+              >
+                <span className="ck-option-icon">{opt.icon}</span>
+                <div className="ck-option-text">
+                  <span className="ck-option-label">{opt.label}</span>
+                  <span className="ck-option-detail">{opt.detail}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+          {switchError && <p className="ck-error">{switchError}</p>}
+          <button type="button" className="ck-link-btn" onClick={() => setShowOther(false)}>
+            ← Back to QR Ph payment
+          </button>
+        </>
+      )}
     </div>
   )
 }
@@ -678,7 +809,7 @@ function StepConfirm({
   items, gowns, delivery,
   lalamoveVehicle,
   addrStreet, addrCity, addrProvince, addrZip,
-  paymentMethod, shippingFee,
+  shippingFee,
   tncAccepted, setTncAccepted,
   onPlace, onBack, placing, placeError,
   // ── CMS ──
@@ -687,7 +818,6 @@ function StepConfirm({
   const [showTnc, setShowTnc] = useState(false)
 
   const deliveryOpt    = DELIVERY_OPTIONS.find(o => o.id === delivery)
-  const paymentOpt     = PAYMENT_METHODS.find(p => p.id === paymentMethod)
   const itemsSub       = computeItemsSubtotal(items, gowns)
   const shipping       = delivery === 'lalamove' ? (shippingFee || 0) : 0
   const { vat, bizTax, tax } = computeTax(itemsSub, shipping)
@@ -738,16 +868,6 @@ function StepConfirm({
           {delivery === 'lalamove' && (
             <p className="ck-confirm-sub ck-confirm-note">
               Estimated delivery fee: {formatPrice(shipping)} · Final fee confirmed before dispatch.
-            </p>
-          )}
-        </div>
-
-        <div className="ck-confirm-section">
-          <p className="ck-confirm-label">Payment</p>
-          <p className="ck-confirm-value">{paymentOpt?.label ?? '—'}</p>
-          {paymentMethod !== 'cash' && (
-            <p className="ck-confirm-sub ck-confirm-note">
-              Upload your proof of payment after placing the order.
             </p>
           )}
         </div>
@@ -898,10 +1018,12 @@ export default function CheckoutPage() {
   const [shippingLoading, setShippingLoading] = useState(false)
   const [shippingError,   setShippingError  ] = useState('')
 
-  const [paymentMethod, setPaymentMethod] = useState('')
-  const [tncAccepted,   setTncAccepted  ] = useState(false)
-  const [placing,       setPlacing      ] = useState(false)
-  const [placeError,    setPlaceError   ] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState(null)
+  const [tncAccepted, setTncAccepted] = useState(false)
+  const [placing,     setPlacing    ] = useState(false)
+  const [placeError,  setPlaceError ] = useState('')
+  const [orderId,     setOrderId    ] = useState(null)
+  const [orderNumber, setOrderNumber] = useState(null)
 
   // ── CMS content ──────────────────────────────────────────────────────────────
   const [cmsContent, setCmsContent] = useState({
@@ -1045,7 +1167,16 @@ export default function CheckoutPage() {
       } catch {
         
       }
-      router.push(`/order-confirmation/${data.orderId}`)
+      setOrderId(data.orderId)
+      setOrderNumber(data.orderNumber)
+      if (paymentMethod === 'qrph') {
+        setStep(4)
+      } else {
+        // gcash/bdo/cash have nothing further to do in checkout itself —
+        // gcash/bdo go straight to proof upload, cash straight to pickup
+        // instructions, both already handled by order-confirmation.
+        router.push(`/order-confirmation/${data.orderId}`)
+      }
     } catch {
       setPlaceError('Could not connect to the server. Please try again.')
     } finally {
@@ -1108,10 +1239,9 @@ export default function CheckoutPage() {
                     />
                   )}
                   {step === 2 && (
-                    <StepPayment
-                      paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}
+                    <StepPaymentMethod
                       delivery={delivery}
-                      addrStreet={addrStreet} addrCity={addrCity}
+                      paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}
                       onNext={() => setStep(3)} onBack={() => setStep(1)}
                     />
                   )}
@@ -1121,13 +1251,16 @@ export default function CheckoutPage() {
                       delivery={delivery}
                       addrStreet={addrStreet} addrCity={addrCity}
                       addrProvince={addrProvince} addrZip={addrZip}
-                      paymentMethod={paymentMethod} shippingFee={shippingFee}
+                      shippingFee={shippingFee}
                       tncAccepted={tncAccepted} setTncAccepted={setTncAccepted}
                       onPlace={handlePlaceOrder}
                       onBack={() => setStep(2)}
                       placing={placing} placeError={placeError}
                       cmsContent={cmsContent}
                     />
+                  )}
+                  {step === 4 && (
+                    <StepPayment orderId={orderId} orderNumber={orderNumber} />
                   )}
                 </>
               )}
@@ -1178,6 +1311,7 @@ export default function CheckoutPage() {
             .ck-sidebar-total-row--grand { font-size:14px; font-weight:600; color:#2c2420; padding-top:6px; }
             .ck-sidebar-divider { border-top:0.5px solid #e8e0db; margin:6px 0; }
             .ck-tax-detail { color:#aaa; font-size:10px; margin-left:3px; }
+.ck-link-btn { background:none; border:none; color:#9a7b4f; font-size:12px; text-decoration:underline; cursor:pointer; padding:8px 0 0; display:block; }
           `}</style>
         </>
       )}

@@ -6,6 +6,7 @@ import path from 'path'
 import fs   from 'fs'
 import { checkAdminAuth } from '@/lib/adminAuth'
 import { logAudit }       from '@/lib/audit'
+import { convertReservationToSale, releaseReservation } from '@/lib/inventory'
 
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'orders.json')
@@ -63,7 +64,10 @@ export async function GET(request) {
   }
 
   try {
-    const { query } = await import('@/lib/db')
+    const { query, getClient } = await import('@/lib/db')
+    const { sweepExpiredReservations } = await import('@/lib/inventory')
+    await sweepExpiredReservations(query, getClient)
+
     const rows = await query(`
       SELECT
         o.*,
@@ -264,10 +268,14 @@ export async function PATCH(request) {
       if (!status || !VALID.includes(status))
         return NextResponse.json({ ok: false, error: 'Invalid status' }, { status: 400 })
 
-      // Fetch previous status for the audit diff
-      const prevRows = await query(`SELECT status, order_number FROM orders WHERE id=$1`, [orderId])
-      const prevStatus    = prevRows[0]?.status || null
-      const orderNumber   = prevRows[0]?.order_number || null
+      // Fetch previous status for the audit diff, and to guard inventory
+      // transitions below (avoid double-conversion, avoid releasing stock
+      // that was already sold).
+      const prevRows = await query(`SELECT status, payment_status, order_number FROM orders WHERE id=$1`, [orderId])
+      const prevStatus       = prevRows[0]?.status || null
+      const prevPaymentStatus = prevRows[0]?.payment_status || null
+      const orderNumber      = prevRows[0]?.order_number || null
+      const wasAlreadyPaid   = prevPaymentStatus === 'paid'
 
       const rows = await query(
         `UPDATE orders
@@ -283,6 +291,10 @@ export async function PATCH(request) {
               AND payment_method  = 'cash'   THEN 'paid'
              ELSE payment_status
            END,
+           reservation_expires_at = CASE
+             WHEN $1 IN ('paid', 'completed', 'cancelled', 'refunded') THEN NULL
+             ELSE reservation_expires_at
+           END,
            updated_at            = NOW()
          WHERE id = $2
          RETURNING *`,
@@ -291,6 +303,35 @@ export async function PATCH(request) {
 
       if (!rows.length)
         return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
+
+      // Inventory transition — only act on the *first* time this order
+      // crosses into paid, or the first time it's cancelled/refunded while
+      // still unpaid. A paid-then-cancelled/refunded order needs a return
+      // process, not a reservation release — reserved_qty is already 0 for
+      // it by this point (converted at the paid transition), so nothing
+      // here should touch it.
+      if (!wasAlreadyPaid) {
+        const { getClient } = await import('@/lib/db')
+        const conn = await getClient()
+        try {
+          await conn.query('BEGIN')
+          if (['paid', 'completed'].includes(status)) {
+            await convertReservationToSale(conn, orderId)
+          } else if (['cancelled', 'refunded'].includes(status)) {
+            await releaseReservation(conn, orderId)
+          }
+          await conn.query('COMMIT')
+        } catch (err) {
+          await conn.query('ROLLBACK')
+          console.error('Inventory transition error in PATCH /api/admin/orders (status):', err)
+          // Don't fail the whole request over this — the order status
+          // change itself already succeeded above. Surface it via logs
+          // for manual reconciliation rather than rolling back a status
+          // change the admin already committed to.
+        } finally {
+          conn.release()
+        }
+      }
 
       sendStatusEmail(rows[0], status, note).catch(console.error)
 
@@ -336,7 +377,8 @@ export async function PATCH(request) {
 
         const { rows } = await conn.query(
           `UPDATE orders
-           SET status='paid', payment_status='paid', updated_at=NOW()
+           SET status='paid', payment_status='paid',
+               reservation_expires_at=NULL, updated_at=NOW()
            WHERE id=$1 RETURNING *`,
           [orderId]
         )
@@ -345,6 +387,8 @@ export async function PATCH(request) {
           await conn.query('ROLLBACK')
           return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
         }
+
+        await convertReservationToSale(conn, orderId)
 
         await conn.query('COMMIT')
         sendVerifyEmail(rows[0]).catch(console.error)
