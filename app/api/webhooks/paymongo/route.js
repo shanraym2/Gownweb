@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { query, getClient } from '@/lib/db'
 import { verifyWebhookSignature } from '@/lib/paymongo'
+import { convertReservationToSale } from '@/lib/inventory'
 
 export async function POST(request) {
   const rawBody   = await request.text()
