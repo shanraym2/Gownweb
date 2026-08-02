@@ -68,36 +68,47 @@ const PAYMENT_METHODS = [
 const TNC_TEXT = `TERMS AND CONDITIONS — JCE BRIDAL BOUTIQUE
 
 1. ORDER & PAYMENT
-  All orders are subject to availability. Full payment is required before your order is processed. For GCash and BDO transfers, please upload your proof of payment within 24 hours of placing your order. Orders without payment confirmation within 24 hours may be cancelled.
+  All orders are subject to availability. Full payment is required before your order is processed. We accept QR Ph (GCash, Maya, and participating banks), direct GCash transfer, BDO bank transfer, and cash on pickup.
+  QR Ph payments are confirmed automatically once your bank or wallet completes the transaction. You do not need to upload proof of payment for QR Ph.
+  For direct GCash and BDO transfers, upload your proof of payment within 24 hours of placing your order. Orders without payment confirmation within 24 hours may be cancelled and released back into stock.
+  QR Ph payment windows expire after a short period. If your QR code expires before you complete payment, you may generate a new one or switch to another payment method from the same order.
 
 2. PAYMENT PROOF
-  Upload a clear screenshot of your payment confirmation showing the reference number, amount, and date. Tampered or fraudulent proof of payment will result in immediate order cancellation and may be reported to authorities.
+  This section applies to direct GCash and BDO transfers only. Upload a clear screenshot of your payment confirmation showing the reference number, amount, and date. Tampered or fraudulent proof of payment will result in immediate order cancellation and may be reported to authorities.
 
-3. DELIVERY
+3. PAYMENT PROCESSING AND SECURITY
+  QR Ph payments are processed through PayMongo, a licensed payment gateway regulated by the Bangko Sentral ng Pilipinas. When you pay through QR Ph, PayMongo handles your payment details directly. JCE Bridal Boutique does not receive or store your bank account number, wallet credentials, or card details at any point.
+  PayMongo shares only the information needed to confirm your payment with us, such as the amount paid, payment status, and a payment reference number tied to your order.
+  Confirmation of QR Ph payments depends on a notification sent from PayMongo to our system. In rare cases this notification may be delayed. If your QR Ph payment was deducted but your order still shows as unpaid after some time, contact us with your order number and payment reference so we can verify and update your order manually.
+  Refunds for QR Ph payments are processed back to the original payment method through PayMongo and may take a number of business days to reflect, depending on your bank or wallet provider.
+
+4. DELIVERY
   Store pickup orders must be collected within 7 days of the ready notification.
-  For Lalamove deliveries, you select a vehicle type (Sedan or MPV) and the fee shown is a distance-based estimate; the final fare confirmed by Lalamove before dispatch may vary due to traffic, surcharges, or tolls. JCE Bridal Boutique is not responsible for delays caused by the courier. Motorcycle delivery is not available for gown orders.
+  For Lalamove deliveries, you select a vehicle type and the fee shown is a distance based estimate. The final fare confirmed by Lalamove before dispatch may vary due to traffic, surcharges, or tolls. JCE Bridal Boutique is not responsible for delays caused by the courier. Motorcycle delivery is only available for lightweight accessory orders and is not suitable for gowns.
 
-4. SIZING & ALTERATIONS
-  All gowns are ready-to-wear. Sizes are as listed per item. Alteration services are available upon request and at additional cost. We recommend selecting your correct size using our FitMatcher tool before ordering.
+5. SIZING AND ALTERATIONS
+  All gowns are ready to wear. Sizes are as listed per item. Alteration services are available upon request and at additional cost. We recommend confirming your size using our FitMatcher tool before ordering.
 
-5. CANCELLATIONS
-  Orders may be cancelled before payment is confirmed. Once payment is verified, cancellations are subject to our return and refund policy.
+6. CANCELLATIONS
+  Orders may be cancelled before payment is confirmed. Once payment is verified, cancellations are subject to our return and refund policy below.
+  Orders paid through QR Ph, GCash, or BDO that remain unpaid past the applicable payment window are automatically cancelled and any reserved stock is released.
 
-6. RETURNS & REFUNDS
-  Return, exchange, or refund requests must be submitted within 48 hours of order completion through the My Orders page. Items must be unworn, unaltered, and in original condition with tags attached. Eligible reasons are: item is defective or damaged, item differs significantly from description, wrong size received, or wrong item received.
-  — Returns: the item must be sent back to the boutique before a refund or exchange is processed.
-  — Exchanges: subject to stock availability; size or style swaps only.
-  — Refunds: processed within 7–14 business days via the original payment method.
-  Requests outside the 48-hour window will not be accepted.
+7. RETURNS AND REFUNDS
+  Return, exchange, or refund requests must be submitted within 48 hours of order completion through the My Orders page. Items must be unworn, unaltered, and in original condition with tags attached. Eligible reasons are: the item is defective or damaged, the item differs significantly from its description, the wrong size was received, or the wrong item was received.
+  Returns require the item to be sent back to the boutique before a refund or exchange is processed.
+  Exchanges are subject to stock availability and are limited to size or style swaps.
+  Refunds are processed within 7 to 14 business days via the original payment method. For QR Ph payments, this means the refund is returned through PayMongo to the wallet or bank account originally used.
+  Requests submitted outside the 48 hour window will not be accepted.
 
-7. TAXES
-  Prices shown are inclusive of 3% business tax, itemised in your order summary. JCE Bridal Boutique is not VAT-registered (annual gross sales below ₱3,000,000).
+8. TAXES
+  Prices shown are inclusive of 3% business tax, itemised in your order summary. JCE Bridal Boutique is not VAT registered, as annual gross sales are below ₱3,000,000.
 
-8. PRIVACY
-  Your personal information is used only to process and deliver your order. We do not share your data with third parties except as necessary to fulfil your order (e.g. courier services).
+9. PRIVACY
+  Your personal information is used only to process and deliver your order. We do not share your data with third parties except as necessary to fulfil your order, such as courier services for delivery and PayMongo for payment processing.
+  Payment card and bank details you enter through QR Ph are handled entirely by PayMongo under its own privacy and security practices. We recommend reviewing PayMongo's terms if you have questions about how your payment information is handled during the transaction itself.
 
-9. CONTACT
-  For order inquiries, contact us at the boutique or through our website contact form.
+10. CONTACT
+  For order inquiries, including questions about a QR Ph payment that has not yet reflected on your order, contact us at the boutique or through our website contact form. Please include your order number when reaching out.
 
 By placing an order, you confirm that you have read, understood, and agree to these Terms and Conditions.`
 
@@ -620,7 +631,7 @@ function StepDelivery({
 }
 // ─── Step: Payment Method ──────────────────────────────────────────────────
 
-function StepPaymentMethod({ delivery, paymentMethod, setPaymentMethod, onNext, onBack }) {
+function StepPaymentMethod({ delivery, paymentMethod, setPaymentMethod, onNext, onBack, externalError }) {
   const [error, setError] = useState('')
   const available = PAYMENT_METHODS.filter(m => !m.onlyWith || m.onlyWith === delivery)
 
@@ -650,6 +661,7 @@ function StepPaymentMethod({ delivery, paymentMethod, setPaymentMethod, onNext, 
         ))}
       </div>
       {error && <p className="ck-error">{error}</p>}
+      {externalError && <p className="ck-error">{externalError}</p>}
       <div className="ck-actions">
         <button className="ck-btn-primary" onClick={handleNext}>Continue →</button>
         <button className="ck-btn-ghost" onClick={onBack}>← Back</button>
@@ -659,14 +671,11 @@ function StepPaymentMethod({ delivery, paymentMethod, setPaymentMethod, onNext, 
 }
 // ─── Step 3: Payment ──────────────────────────────────────────────────────────
 
-function StepPayment({ orderId, orderNumber }) {
+function StepPayment({ orderId, orderNumber, onBack }) {
   const router = useRouter()
-  const [qrImageUrl,  setQrImageUrl ] = useState(null)
-  const [checking,    setChecking   ] = useState(true)
-  const [pollError,   setPollError  ] = useState('')
-  const [showOther,   setShowOther  ] = useState(false)
-  const [switching,   setSwitching  ] = useState(false)
-  const [switchError, setSwitchError] = useState('')
+  const [qrImageUrl, setQrImageUrl] = useState(null)
+  const [checking,   setChecking  ] = useState(true)
+  const [pollError,  setPollError ] = useState('')
 
   useEffect(() => {
     if (!orderId) return
@@ -718,87 +727,33 @@ function StepPayment({ orderId, orderNumber }) {
     return () => { cancelled = true; clearInterval(intervalId) }
   }, [orderId, router])
 
-  const handleSwitchMethod = async (methodId) => {
-    setSwitching(true); setSwitchError('')
-    try {
-      const res  = await fetch('/api/orders', {
-        method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body:    JSON.stringify({ orderId, paymentMethod: methodId }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data.ok) {
-        setSwitchError(data.error || 'Could not switch payment method.')
-        setSwitching(false)
-        return
-      }
-      router.push(`/order-confirmation/${orderId}`)
-    } catch {
-      setSwitchError('Could not connect. Please try again.')
-      setSwitching(false)
-    }
-  }
-
-  const otherMethods = PAYMENT_METHODS.filter(m => m.id !== 'qrph')
-
   return (
     <div className="ck-step-body">
       <h2 className="ck-section-title">Payment</h2>
       <p className="ck-summary-note">Order {orderNumber} placed — complete payment to finish.</p>
 
-      {!showOther ? (
-        <>
-          <div className="ck-info-box" style={{ textAlign: 'center' }}>
-            {checking && !qrImageUrl ? (
-              <div style={{ padding: '24px 0' }}>
-                <div className="ck-shipping-spinner" style={{ margin: '0 auto 10px', width: 20, height: 20 }} />
-                <p>Generating your QR code…</p>
-              </div>
-            ) : qrImageUrl ? (
-              <>
-                <p style={{ fontWeight: 500, marginBottom: 10 }}>Scan to pay with GCash, Maya, or your bank</p>
-                <img src={qrImageUrl} alt="QR Ph payment code" style={{ width: 220, height: 220, margin: '0 auto 10px', display: 'block' }} />
-                <p className="ck-summary-note">
-                  This page updates automatically once payment is received — no need to refresh.
-                </p>
-              </>
-            ) : (
-              <p className="ck-error">{pollError || 'Could not load QR code.'}</p>
-            )}
+      <div className="ck-info-box" style={{ textAlign: 'center' }}>
+        {checking && !qrImageUrl ? (
+          <div style={{ padding: '24px 0' }}>
+            <div className="ck-shipping-spinner" style={{ margin: '0 auto 10px', width: 20, height: 20 }} />
+            <p>Generating your QR code…</p>
           </div>
+        ) : qrImageUrl ? (
+          <>
+            <p style={{ fontWeight: 500, marginBottom: 10 }}>Scan to pay with GCash, Maya, or your bank</p>
+            <img src={qrImageUrl} alt="QR Ph payment code" style={{ width: 220, height: 220, margin: '0 auto 10px', display: 'block' }} />
+            <p className="ck-summary-note">
+              This page updates automatically once payment is received — no need to refresh.
+            </p>
+          </>
+        ) : (
+          <p className="ck-error">{pollError || 'Could not load QR code.'}</p>
+        )}
+      </div>
 
-          <button type="button" className="ck-link-btn" onClick={() => setShowOther(true)}>
-            Pay another way →
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="ck-summary-note" style={{ marginBottom: 10 }}>
-            Choose another payment method. You'll upload proof of payment on the next page.
-          </p>
-          <div className="ck-options">
-            {otherMethods.map(opt => (
-              <button
-                key={opt.id}
-                className="ck-option"
-                onClick={() => handleSwitchMethod(opt.id)}
-                disabled={switching}
-              >
-                <span className="ck-option-icon">{opt.icon}</span>
-                <div className="ck-option-text">
-                  <span className="ck-option-label">{opt.label}</span>
-                  <span className="ck-option-detail">{opt.detail}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-          {switchError && <p className="ck-error">{switchError}</p>}
-          <button type="button" className="ck-link-btn" onClick={() => setShowOther(false)}>
-            ← Back to QR Ph payment
-          </button>
-        </>
-      )}
+      <button type="button" className="ck-link-btn" onClick={onBack}>
+        ← Pay another way
+      </button>
     </div>
   )
 }
@@ -1093,6 +1048,31 @@ export default function CheckoutPage() {
       .finally(() => setLoadingGowns(false))
   }, [router])
 
+  const handleSwitchPaymentMethod = async (methodId) => {
+    if (!orderId || !methodId) return
+    setPlacing(true)
+    setPlaceError('')
+    try {
+      const res  = await fetch('/api/orders', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body:    JSON.stringify({ orderId, paymentMethod: methodId }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        setPlaceError(data.error || 'Could not switch payment method.')
+        return
+      }
+      if (methodId === 'qrph') setStep(4)
+      else router.push(`/order-confirmation/${orderId}`)
+    } catch {
+      setPlaceError('Could not connect. Please try again.')
+    } finally {
+      setPlacing(false)
+    }
+  }
+
   const handleRemove = useCallback((id, size) => {
     setItems(prev => {
       const next = prev.filter(i => !(String(i.id) === String(id) && (i.size ?? null) === (size ?? null)))
@@ -1242,7 +1222,9 @@ export default function CheckoutPage() {
                     <StepPaymentMethod
                       delivery={delivery}
                       paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod}
-                      onNext={() => setStep(3)} onBack={() => setStep(1)}
+                      onNext={() => orderId ? handleSwitchPaymentMethod(paymentMethod) : setStep(3)}
+                      onBack={() => orderId ? setStep(4) : setStep(1)}
+                      externalError={orderId ? placeError : ''}
                     />
                   )}
                   {step === 3 && (
@@ -1260,7 +1242,7 @@ export default function CheckoutPage() {
                     />
                   )}
                   {step === 4 && (
-                    <StepPayment orderId={orderId} orderNumber={orderNumber} />
+                    <StepPayment orderId={orderId} orderNumber={orderNumber} onBack={() => setStep(2)} />
                   )}
                 </>
               )}

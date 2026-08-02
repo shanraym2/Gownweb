@@ -291,8 +291,13 @@ export async function PATCH(request) {
   try { body = await request.json() }
   catch { return NextResponse.json({ ok: false, error: 'Invalid body' }, { status: 400 }) }
 
-  const { orderId, status, paymentStatus } = body
+  const { orderId, status, paymentStatus, paymentMethod } = body
   if (!orderId) return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
+
+  const VALID_PAYMENT_METHODS = ['gcash', 'bdo', 'cash', 'qrph']
+  if (paymentMethod && !VALID_PAYMENT_METHODS.includes(paymentMethod)) {
+    return NextResponse.json({ ok: false, error: 'Invalid payment method' }, { status: 400 })
+  }
 
   const VALID_STATUSES = [
     'placed', 'pending_payment', 'paid', 'processing',
@@ -318,12 +323,30 @@ export async function PATCH(request) {
 
   try {
     const { query } = await import('@/lib/db')
+
+    if (paymentMethod && !isAdmin) {
+      const owner = await query(`SELECT user_id FROM orders WHERE id=$1`, [orderId])
+      if (!owner.length) return NextResponse.json({ ok: false, error: 'Order not found' }, { status: 404 })
+      if (String(owner[0].user_id) !== String(userId)) {
+        return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 403 })
+      }
+    }
+
     const setParts  = []
     const vals      = []
     let   i         = 1
 
     if (status)        { setParts.push(`status=$${i++}`);         vals.push(status) }
     if (paymentStatus) { setParts.push(`payment_status=$${i++}`); vals.push(paymentStatus) }
+    if (paymentMethod) {
+      setParts.push(`payment_method=$${i++}`)
+      vals.push(paymentMethod)
+      setParts.push(`reservation_expires_at = CASE $${i - 1}
+        WHEN 'gcash' THEN NOW() + INTERVAL '24 hours'
+        WHEN 'bdo'   THEN NOW() + INTERVAL '24 hours'
+        WHEN 'qrph'  THEN NOW() + INTERVAL '20 minutes'
+        ELSE NULL END`)
+    }
     if (!setParts.length) return NextResponse.json({ ok: false, error: 'Nothing to update' }, { status: 400 })
 
     vals.push(orderId)
