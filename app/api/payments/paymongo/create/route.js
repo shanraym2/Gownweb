@@ -71,7 +71,8 @@ export async function GET(request) {
     return NextResponse.json({ ok: false, error: 'orderId required' }, { status: 400 })
 
   const rows = await query(
-    `SELECT o.payment_status, o.status, p.paymongo_qr_image_url, p.paymongo_expires_at
+    `SELECT o.payment_status, o.status, p.status AS payment_row_status,
+            p.paymongo_qr_image_url, p.paymongo_expires_at
      FROM orders o LEFT JOIN payments p ON p.order_id = o.id
      WHERE o.id=$1 AND o.user_id=$2`,
     [orderId, sessionUser.id]
@@ -86,6 +87,6 @@ export async function GET(request) {
     paymentStatus: rows[0].payment_status,
     orderStatus:   rows[0].status,
     qrImageUrl:    rows[0].paymongo_qr_image_url || null,
-    expired: !!expired && rows[0].payment_status === 'pending',
+    expired: !!expired && rows[0].payment_row_status === 'pending',
   })
 }
