@@ -366,6 +366,29 @@ export async function PATCH(request) {
 
 // ── Email helpers ─────────────────────────────────────────────────────────────
 
+const PAYMENT_METHOD_LABELS = {
+  qrph:  'GCash / Maya / Bank (QR Ph)',
+  gcash: 'GCash',
+  bdo:   'BDO Bank Transfer',
+  cash:  'Cash on Pickup',
+}
+
+function paymentInstructionText(method) {
+  if (method === 'qrph')  return 'Your payment is verified automatically through PayMongo. No action is needed from you.'
+  if (method === 'cash')  return 'Please bring full payment when you collect your order at the boutique.'
+  return 'Please upload your proof of payment within 24 hours to avoid cancellation.'
+}
+
+function paymentInstructionHtml(method) {
+  if (method === 'qrph') {
+    return `<p style="margin:0;color:#2c6e3f;">Your payment is verified automatically through PayMongo. No action is needed from you.</p>`
+  }
+  if (method === 'cash') {
+    return `<p style="margin:0;color:#5a4a44;">Please bring full payment when you collect your order at the boutique.</p>`
+  }
+  return `<p style="margin:0;color:#92400E;">Please upload your proof of payment within 24 hours to avoid cancellation.</p>`
+}
+
 async function sendOrderEmail(order) {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return
   const { default: nodemailer } = await import('nodemailer')
@@ -373,38 +396,133 @@ async function sendOrderEmail(order) {
     service: 'gmail',
     auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
   })
-  const itemLines = (order.items || [])
-    .map(i => `  • ${i.gownName}${i.sizeLabel ? ` (${i.sizeLabel})` : ''} ×${i.quantity} — ₱${Number(i.unitPrice).toLocaleString('en-PH')}`)
-    .join('\n')
+
+  const paymentMethod = order.paymentMethod || order.payment_method
+  const deliveryMethod = order.deliveryMethod || order.delivery_method
+  const deliveryAddress = order.deliveryAddress || order.delivery_address
+  const customerName = order.customerName || order.customer_name || 'there'
+  const orderNumber = order.orderNumber || order.order_number
   const tax      = Number(order.tax || 0)
   const shipping = Number(order.shippingFee || order.shipping_fee || 0)
+  const items    = order.items || []
+
+  const itemLines = items
+    .map(i => `  • ${i.gownName}${i.sizeLabel ? ` (${i.sizeLabel})` : ''} ×${i.quantity} — ₱${Number(i.unitPrice).toLocaleString('en-PH')}`)
+    .join('\n')
+
+  const itemRowsHtml = items.map(i => `
+    <tr>
+      <td style="padding:10px 0;border-bottom:1px solid #e8e0db;color:#2c2420;font-size:14px;">
+        ${i.gownName}${i.sizeLabel ? ` <span style="color:#9a8880;">(${i.sizeLabel})</span>` : ''}
+        <span style="color:#9a8880;"> ×${i.quantity}</span>
+      </td>
+      <td style="padding:10px 0;border-bottom:1px solid #e8e0db;color:#2c2420;font-size:14px;text-align:right;white-space:nowrap;">
+        ₱${(Number(i.unitPrice) * i.quantity).toLocaleString('en-PH')}
+      </td>
+    </tr>`).join('')
+
   await transporter.sendMail({
     from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
     to:      order.customerEmail || order.customer_email,
-    subject: `Order confirmed — ${order.orderNumber || order.order_number}`,
-    text: `Hi ${order.customerName || order.customer_name || 'there'},
+    subject: `Order confirmed — ${orderNumber}`,
+    text: `Hi ${customerName},
 
 Thank you for your order at JCE Bridal Boutique!
 
-Order number: ${order.orderNumber || order.order_number}
+Order number: ${orderNumber}
 Status: Placed — awaiting payment confirmation
 
 Items:
 ${itemLines}
 
 Subtotal:      ₱${Number(order.subtotal).toLocaleString('en-PH')}
-${shipping > 0 ? `Shipping fee:  ₱${shipping.toLocaleString('en-PH')}\n` : ''}${tax > 0 ? `VAT (12%):     ₱${tax.toLocaleString('en-PH')}\n` : ''}Total:         ₱${Number(order.total).toLocaleString('en-PH')}
+${shipping > 0 ? `Shipping fee:  ₱${shipping.toLocaleString('en-PH')}\n` : ''}${tax > 0 ? `Business tax:  ₱${tax.toLocaleString('en-PH')}\n` : ''}Total:         ₱${Number(order.total).toLocaleString('en-PH')}
 
-Payment method: ${order.paymentMethod || order.payment_method}
-${(order.paymentMethod || order.payment_method) !== 'cash' ? 'Please upload your proof of payment within 24 hours to avoid cancellation.' : ''}
+Payment method: ${PAYMENT_METHOD_LABELS[paymentMethod] || paymentMethod}
+${paymentInstructionText(paymentMethod)}
 
-Delivery: ${order.deliveryMethod || order.delivery_method}
-${order.deliveryAddress || order.delivery_address ? `Address: ${order.deliveryAddress || order.delivery_address}` : ''}
+Delivery: ${deliveryMethod}
+${deliveryAddress ? `Address: ${deliveryAddress}` : ''}
 
-You can track your order on your profile page.
+You can track your order on your my-orders page.
 
 Thank you,
 JCE Bridal Boutique`.trim(),
+    html: `
+<div style="background:#faf7f4;padding:32px 16px;font-family:'Jost',Arial,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #e8e0db;border-radius:12px;overflow:hidden;">
+
+    <div style="background:#1a0f0a;padding:28px 32px;text-align:center;">
+      <p style="margin:0;color:#c9a96e;font-family:Georgia,'Cormorant Garamond',serif;font-size:22px;letter-spacing:1px;">
+        JCE Bridal Boutique
+      </p>
+    </div>
+
+    <div style="padding:32px;">
+      <p style="margin:0 0 4px;color:#2c2420;font-size:15px;">Hi ${customerName},</p>
+      <p style="margin:0 0 24px;color:#5a4a44;font-size:14px;">Thank you for your order. Here are your details.</p>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+        <tr>
+          <td style="padding:8px 0;color:#9a8880;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Order number</td>
+          <td style="padding:8px 0;color:#2c2420;font-size:14px;text-align:right;font-weight:600;">${orderNumber}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 0;color:#9a8880;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Status</td>
+          <td style="padding:8px 0;color:#2c2420;font-size:14px;text-align:right;">Placed — awaiting payment confirmation</td>
+        </tr>
+      </table>
+
+      <p style="margin:0 0 8px;color:#2c2420;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Items</p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
+        ${itemRowsHtml}
+      </table>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+        <tr>
+          <td style="padding:4px 0;color:#5a4a44;font-size:13px;">Subtotal</td>
+          <td style="padding:4px 0;color:#5a4a44;font-size:13px;text-align:right;">₱${Number(order.subtotal).toLocaleString('en-PH')}</td>
+        </tr>
+        ${shipping > 0 ? `
+        <tr>
+          <td style="padding:4px 0;color:#5a4a44;font-size:13px;">Shipping fee</td>
+          <td style="padding:4px 0;color:#5a4a44;font-size:13px;text-align:right;">₱${shipping.toLocaleString('en-PH')}</td>
+        </tr>` : ''}
+        ${tax > 0 ? `
+        <tr>
+          <td style="padding:4px 0;color:#9a8880;font-size:12px;">Business tax</td>
+          <td style="padding:4px 0;color:#9a8880;font-size:12px;text-align:right;">₱${tax.toLocaleString('en-PH')}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding:10px 0 0;color:#2c2420;font-size:15px;font-weight:700;border-top:1px solid #e8e0db;">Total</td>
+          <td style="padding:10px 0 0;color:#2c2420;font-size:15px;font-weight:700;text-align:right;border-top:1px solid #e8e0db;">₱${Number(order.total).toLocaleString('en-PH')}</td>
+        </tr>
+      </table>
+
+      <div style="background:#faf9f7;border:1px solid #e8e0db;border-radius:8px;padding:16px 18px;margin-bottom:20px;">
+        <p style="margin:0 0 6px;color:#2c2420;font-size:13px;font-weight:600;">
+          Payment method: ${PAYMENT_METHOD_LABELS[paymentMethod] || paymentMethod}
+        </p>
+        ${paymentInstructionHtml(paymentMethod)}
+      </div>
+
+      <p style="margin:0 0 4px;color:#2c2420;font-size:13px;font-weight:600;">Delivery</p>
+      <p style="margin:0 0 20px;color:#5a4a44;font-size:14px;">
+        ${deliveryMethod === 'lalamove' ? 'Lalamove delivery' : 'Store pickup'}
+        ${deliveryAddress ? `<br/>${deliveryAddress}` : ''}
+      </p>
+
+      <p style="margin:0;color:#9a8880;font-size:12px;">
+        You can track your order anytime on your my-orders page.
+      </p>
+    </div>
+
+    <div style="background:#faf9f7;padding:18px 32px;text-align:center;border-top:1px solid #e8e0db;">
+      <p style="margin:0;color:#9a8880;font-size:11px;">JCE Bridal Boutique · 4I-19 Soler Wing 168 Mall Recto Mla, Manila</p>
+    </div>
+
+  </div>
+</div>`,
   })
 }
 
@@ -430,6 +548,6 @@ async function sendStatusEmail(order) {
     from:    `"JCE Bridal Boutique" <${process.env.GMAIL_USER}>`,
     to:      email,
     subject: `${label} — ${order.order_number}`,
-    text:    `Hi,\n\nYour order ${order.order_number} has been updated.\n\nStatus: ${label}\n\nView your order on your profile page.\n\nThank you,\nJCE Bridal Boutique`,
+    text:    `Hi,\n\nYour order ${order.order_number} has been updated.\n\nStatus: ${label}\n\nView your order on your my-orders page.\n\nThank you,\nJCE Bridal Boutique`,
   })
 }
