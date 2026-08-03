@@ -676,6 +676,7 @@ function StepPayment({ orderId, orderNumber, onBack }) {
   const [qrImageUrl, setQrImageUrl] = useState(null)
   const [checking,   setChecking  ] = useState(true)
   const [pollError,  setPollError ] = useState('')
+  const [expired,    setExpired   ] = useState(false)
 
   useEffect(() => {
     if (!orderId) return
@@ -719,7 +720,7 @@ function StepPayment({ orderId, orderNumber, onBack }) {
         }
         if (data.expired) {
           clearInterval(intervalId)
-          setShowOther(true)
+          setExpired(true)
         }
       } catch {}
     }, 5000)
@@ -733,7 +734,16 @@ function StepPayment({ orderId, orderNumber, onBack }) {
       <p className="ck-summary-note">Order {orderNumber} placed — complete payment to finish.</p>
 
       <div className="ck-info-box" style={{ textAlign: 'center' }}>
-        {checking && !qrImageUrl ? (
+        {expired ? (
+          <div style={{ padding: '12px 0' }}>
+            <p className="ck-error" style={{ marginBottom: 10 }}>
+              This QR code has expired. Please choose another payment method to complete your order.
+            </p>
+            <button type="button" className="ck-btn-primary" onClick={onBack}>
+              Choose payment method →
+            </button>
+          </div>
+        ) : checking && !qrImageUrl ? (
           <div style={{ padding: '24px 0' }}>
             <div className="ck-shipping-spinner" style={{ margin: '0 auto 10px', width: 20, height: 20 }} />
             <p>Generating your QR code…</p>
@@ -751,9 +761,11 @@ function StepPayment({ orderId, orderNumber, onBack }) {
         )}
       </div>
 
-      <button type="button" className="ck-link-btn" onClick={onBack}>
-        ← Pay another way
-      </button>
+      {!expired && (
+        <button type="button" className="ck-link-btn" onClick={onBack}>
+          ← Pay another way
+        </button>
+      )}
     </div>
   )
 }
