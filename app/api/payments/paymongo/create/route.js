@@ -38,11 +38,18 @@ export async function POST(request) {
     })
 
     await query(
+      // Fallback ceiling only — the qrph.expired webhook (see
+      // app/api/webhooks/paymongo/route.js) is the authoritative signal and
+      // will sync this to NOW() the moment PayMongo actually expires the
+      // code. 30 minutes matches PayMongo's observed real QR Ph expiry
+      // window, so this fallback shouldn't fire before the real webhook
+      // does under normal conditions — it only matters if that webhook is
+      // ever delayed or missed.
       `INSERT INTO payments (order_id, method, amount, status, paymongo_intent_id, paymongo_qr_image_url, paymongo_expires_at)
-       VALUES ($1, 'qrph', $2, 'pending', $3, $4, NOW() + INTERVAL '15 minutes')
+       VALUES ($1, 'qrph', $2, 'pending', $3, $4, NOW() + INTERVAL '30 minutes')
        ON CONFLICT (order_id) DO UPDATE
          SET paymongo_intent_id=$3, paymongo_qr_image_url=$4,
-             paymongo_expires_at=NOW() + INTERVAL '15 minutes', status='pending'`,
+             paymongo_expires_at=NOW() + INTERVAL '30 minutes', status='pending'`,
       [orderId, order.total, intentId, qrImageUrl]
     )
 

@@ -65,7 +65,23 @@ export async function POST(request) {
       // Reservation is intentionally left in place here — a failed QR
       // attempt falls through to "pay another way" (GCash/BDO) on the
       // same order, not a cancelled one. See lib/inventory.js.
+    } else if (eventType === 'qrph.expired') {
+      // PayMongo's own signal that the QR code has actually expired —
+      // authoritative, unlike our locally-guessed paymongo_expires_at
+      // (set to NOW()+15min at creation, which doesn't necessarily match
+      // PayMongo's real expiry window). Syncing it to NOW() here makes the
+      // existing GET-poll expiry check (paymongo_expires_at < NOW()) in
+      // app/api/payments/paymongo/create/route.js reflect the real state
+      // on the customer's very next poll, instead of relying on our guess.
+      // Only touch it if still pending — a payment that already succeeded
+      // or failed shouldn't be retroactively marked expired.
+      await conn.query(
+        `UPDATE payments SET paymongo_expires_at=NOW()
+         WHERE order_id=$1 AND paymongo_intent_id=$2 AND status='pending'`,
+        [orderId, intentId]
+      )
     }
+      
 
     await conn.query('COMMIT')
   } catch (err) {
