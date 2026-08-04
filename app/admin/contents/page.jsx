@@ -591,10 +591,6 @@ export default function AdminContentsPage() {
   const [toast,   setToast  ] = useState(null)
   const [confirm, setConfirm] = useState(null)
 
-  function headers() {
-    return { 'Content-Type': 'application/json' }
-  }
-
   function showToast(message, type = 'success') { setToast({ message, type }) }
 
   // ── Load hero slides ──────────────────────────────────────────────────────
@@ -602,7 +598,7 @@ export default function AdminContentsPage() {
   const loadSlides = useCallback(async () => {
     setSlidesLoad(true)
     try {
-      const res  = await fetch('/api/admin/cms/hero', { headers: headers() })
+      const res  = await adminFetch('/api/admin/cms/hero')
       const data = await res.json()
       if (data.ok) setSlides(data.slides || [])
     } catch { showToast('Failed to load slides', 'error') }
@@ -614,7 +610,7 @@ export default function AdminContentsPage() {
   const loadTestims = useCallback(async () => {
     setTestimsLoad(true)
     try {
-      const res  = await fetch('/api/admin/cms/testimonials', { headers: headers() })
+      const res  = await adminFetch('/api/admin/cms/testimonials')
       const data = await res.json()
       if (data.ok) setTestims(data.testimonials || [])
     } catch { showToast('Failed to load testimonials', 'error') }
@@ -626,7 +622,7 @@ export default function AdminContentsPage() {
   const loadBlocks = useCallback(async () => {
     setBlockLoad(true)
     try {
-      const res  = await fetch('/api/admin/cms/content', { headers: headers() })
+      const res  = await adminFetch('/api/admin/cms/content')
       const data = await res.json()
       if (data.ok) setBlocks(data.blocks || {})
     } catch { showToast('Failed to load content blocks', 'error') }
@@ -645,9 +641,9 @@ export default function AdminContentsPage() {
     setSlideSaving(true)
     const isNew = !slideModal?.id
     try {
-      const res  = await fetch('/api/admin/cms/hero', {
+      const res  = await adminFetch('/api/admin/cms/hero', {
         method:  isNew ? 'POST' : 'PUT',
-        headers: headers(),
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(isNew ? form : { ...form, id: slideModal.id }),
       })
       const data = await res.json()
@@ -661,9 +657,9 @@ export default function AdminContentsPage() {
 
   const handleToggleSlide = async (slide) => {
     try {
-      const res  = await fetch('/api/admin/cms/hero', {
+      const res  = await adminFetch('/api/admin/cms/hero', {
         method:  'PUT',
-        headers: headers(),
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ ...slide, is_active: !slide.is_active }),
       })
       const data = await res.json()
@@ -681,7 +677,7 @@ export default function AdminContentsPage() {
       onConfirm:    async () => {
         setConfirm(null)
         try {
-          const res  = await fetch(`/api/admin/cms/hero?id=${slide.id}`, { method: 'DELETE', headers: headers() })
+          const res  = await adminFetch(`/api/admin/cms/hero?id=${slide.id}`, { method: 'DELETE' })
           const data = await res.json()
           if (!res.ok) throw new Error(data.error || 'Failed to delete')
           setSlides(p => p.filter(s => s.id !== slide.id))
@@ -697,9 +693,9 @@ export default function AdminContentsPage() {
     setTestimSaving(true)
     const isNew = !testimModal?.id
     try {
-      const res  = await fetch('/api/admin/cms/testimonials', {
+      const res  = await adminFetch('/api/admin/cms/testimonials', {
         method:  isNew ? 'POST' : 'PUT',
-        headers: headers(),
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(isNew ? form : { ...form, id: testimModal.id }),
       })
       const data = await res.json()
@@ -713,9 +709,9 @@ export default function AdminContentsPage() {
 
   const handleToggleTestim = async (t) => {
     try {
-      const res  = await fetch('/api/admin/cms/testimonials', {
+      const res  = await adminFetch('/api/admin/cms/testimonials', {
         method:  'PUT',
-        headers: headers(),
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ ...t, is_active: !t.is_active }),
       })
       const data = await res.json()
@@ -733,7 +729,7 @@ export default function AdminContentsPage() {
       onConfirm:    async () => {
         setConfirm(null)
         try {
-          const res  = await fetch(`/api/admin/cms/testimonials?id=${t.id}`, { method: 'DELETE', headers: headers() })
+          const res  = await adminFetch(`/api/admin/cms/testimonials?id=${t.id}`, { method: 'DELETE' })
           const data = await res.json()
           if (!res.ok) throw new Error(data.error || 'Failed to delete')
           setTestims(p => p.filter(x => x.id !== t.id))
@@ -756,9 +752,9 @@ export default function AdminContentsPage() {
     setBlockSaving(true)
     setEditingBlock(section)
     try {
-      const res  = await fetch('/api/admin/cms/content', {
+      const res  = await adminFetch('/api/admin/cms/content', {
         method:  'PUT',
-        headers: headers(),
+        headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ section, fields: blocks[section] || {} }),
       })
       const data = await res.json()
