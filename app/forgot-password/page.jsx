@@ -24,6 +24,7 @@ export default function ForgotPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
 
   useEffect(() => {
     const u = getCurrentUser()
@@ -31,10 +32,16 @@ export default function ForgotPasswordPage() {
   }, [router])
 
   const pwdChecks = useMemo(() => getPasswordRuleChecks(newPassword), [newPassword])
+  const passwordsMismatch = useMemo(
+    () => confirmPassword.length > 0 && String(newPassword || '') !== String(confirmPassword || ''),
+    [newPassword, confirmPassword]
+  )
   const canSubmitNewPassword = useMemo(
     () =>
+      newPassword.trim() !== '' &&
+      confirmPassword.trim() !== '' &&
       passwordMeetsRules(newPassword) &&
-      String(newPassword || '') === String(confirmPassword || ''),
+      newPassword === confirmPassword,
     [newPassword, confirmPassword]
   )
 
@@ -97,6 +104,7 @@ export default function ForgotPasswordPage() {
   const handleResetPassword = async (e) => {
     e.preventDefault()
     setError('')
+    setSuccessMessage('')
 
     if (!passwordMeetsRules(newPassword)) {
       setError('Password must meet all requirements below.')
@@ -114,7 +122,10 @@ export default function ForgotPasswordPage() {
         setError(result.error || 'Unable to reset password.')
         return
       }
-      router.push('/')
+      setSuccessMessage('Success! Your password has been successfully reset.')
+      setTimeout(() => {
+        router.push('/login')
+      }, 1500)
     } finally {
       setIsSubmitting(false)
     }
@@ -213,6 +224,7 @@ export default function ForgotPasswordPage() {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Create a new password"
+                      required
                     />
                     <button
                       type="button"
@@ -228,6 +240,10 @@ export default function ForgotPasswordPage() {
                     <li className={pwdChecks.letter ? 'auth-rule-met' : ''}>At least one letter</li>
                     <li className={pwdChecks.number ? 'auth-rule-met' : ''}>At least one number</li>
                   </ul>
+
+                  {newPassword.trim() === '' && (
+                    <p className="auth-error">Password is required.</p>
+                  )}
                 </div>
 
                 <div className="auth-field">
@@ -250,10 +266,20 @@ export default function ForgotPasswordPage() {
                       {showConfirmPassword ? 'Hide' : 'Show'}
                     </button>
                   </div>
+                  {confirmPassword.trim() === '' ? (
+                    <p className="auth-error">Please confirm your password.</p>
+                  ) : passwordsMismatch ? (
+                    <p className="auth-error">Passwords do not match.</p>
+                  ) : null}
                 </div>
 
+                {successMessage && <p className="auth-success">{successMessage}</p>}
                 {error && <p className="auth-error">{error}</p>}
-                <button type="submit" className="btn btn-primary auth-submit" disabled={isSubmitting || !canSubmitNewPassword}>
+                <button
+  type="submit"
+  className="btn btn-primary auth-submit"
+  disabled={isSubmitting || !canSubmitNewPassword}
+>
                   {isSubmitting ? 'Saving...' : 'Reset password'}
                 </button>
                 <p className="auth-switch">
