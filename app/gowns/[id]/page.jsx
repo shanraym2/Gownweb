@@ -63,7 +63,7 @@ function FitMatcherSection({ gown, user }) {
             Enter your measurements and our AI will match you to the best available
             size for this dress — and suggest alterations if needed.
           </p>
-          <Link href={`/size-recommender?gown=${gown.id}`} className="dp-fm-btn">
+          <Link href={`/fitting-room`} className="dp-fm-btn">
             Get my size recommendation →
           </Link>
         </div>
