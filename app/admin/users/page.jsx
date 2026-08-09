@@ -536,9 +536,13 @@ function ArchiveModal({ user, onConfirm, onClose }) {
   async function handleArchive() {
     setLoading(true)
     try {
-      const res  = await adminFetch(`/api/admin/users?id=${user.id}`, {
-        method: 'DELETE',
-      })
+      const res  = isArchiving
+        ? await adminFetch(`/api/admin/users?id=${user.id}`, { method: 'DELETE' })
+        : await adminFetch('/api/admin/users', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: user.id, isActive: true }),
+          })
       const data = await res.json()
       if (!data.ok) { setError(data.error || 'Failed.'); return }
       onConfirm(user.id, !isArchiving)
