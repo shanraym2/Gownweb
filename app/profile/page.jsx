@@ -851,7 +851,7 @@ export default function ProfilePage() {
                   {orders.map((o, i) => (
                     <li key={i} className="profile-order-item">
                       <span className="profile-order-date">
-                        {new Date(o.placed_at).toLocaleDateString('en-PH', {
+                        {new Date(o.createdAt).toLocaleDateString('en-PH', {
                           month: 'short', day: 'numeric', year: 'numeric',
                         })}
                       </span>
