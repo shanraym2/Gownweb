@@ -166,7 +166,7 @@ export default function StaffDashboardPage() {
           },
           {
             href:  '/admin/dashboard',
-            title: 'Sales Overview',
+            title: 'Sales Dashboard',
             desc:  'View revenue charts and order statistics (read-only).',
           },
         ].map(({ href, title, desc }) => (
