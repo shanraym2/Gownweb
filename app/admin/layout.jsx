@@ -23,6 +23,7 @@ const STAFF_NAV_LINKS = [
   { href: '/admin/gowns',     label: 'Catalogue'              },
   { href: '/admin/orders',    label: 'Orders'                 },
   { href: '/admin/dashboard', label: 'Sales'                  },
+  { href: '/admin/returns',  label: 'Returns'                },
 ]
 
 const ADMIN_ONLY_ROUTES = ['/admin/contents', '/admin/users', '/admin/audit']

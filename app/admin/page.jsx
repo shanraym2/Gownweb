@@ -145,6 +145,7 @@ export default function AdminDashboardPage() {
           { href: '/admin/gowns',         title: 'Catalogue',       desc: 'Add, edit, or remove listings.'                        },
           { href: '/admin/orders',        title: 'Orders',          desc: 'View and manage all orders.'                           },
           { href: '/admin/dashboard',     title: 'Sales dashboard', desc: 'Revenue charts and analytics.'                         },
+          { href: '/admin/returns',       title: 'Returns',         desc: 'Manage return requests and process refunds.'             },
           { href: '/admin/users',         title: 'Users',           desc: 'View registered accounts.'                             },
           { href: '/admin/contents',      title: 'Content',         desc: 'Edit homepage slides, copy, and theme.'                },
           { href: '/admin/audit',         title: 'Audit trail',     desc: 'Append-only log of all admin mutations and events.'    },

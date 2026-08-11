@@ -169,6 +169,11 @@ export default function StaffDashboardPage() {
             title: 'Sales Dashboard',
             desc:  'View revenue charts and order statistics (read-only).',
           },
+          {
+            href:  '/admin/returns',
+            title: 'Returns',
+            desc:  'Manage return requests and process refunds.',
+          },
         ].map(({ href, title, desc }) => (
           <Link key={href} href={href} className="adm-nav-card">
             <div className="adm-nav-card-title">{title}</div>

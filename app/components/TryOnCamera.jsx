@@ -528,6 +528,17 @@ export default function TryOnCamera({
         const analysis = analyzePose(kps, vw, vh)
         setPoseIssues(analysis.issues)
 
+        /* TEMP DEBUG — remove after diagnosing overlay offset
+        ;[KP.LS, KP.RS, KP.LH, KP.RH].forEach(idx => {
+          const k = kps[idx]
+          if (k?.score > CONF) {
+            ctx.beginPath()
+            ctx.arc(k.x, k.y, 8, 0, Math.PI * 2)
+            ctx.fillStyle = 'red'
+            ctx.fill()
+          }
+        })*/
+
         // Smooth back-facing transitions — require 8 consecutive frames
         const tooClose = analysis.issues.includes('too_close') && !analysis.facingBack
         if (tooClose) facingFrames.current = 0
