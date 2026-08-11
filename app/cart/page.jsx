@@ -362,7 +362,7 @@ export default function CartPage() {
       <div className="cart-spacer" />
 
       <div className="cart-hero">
-        <span className="cart-hero-eyebrow">The Fitting Room</span>
+        <span className="cart-hero-eyebrow">Your Cart</span>
         <h1 className="cart-hero-h1">{content.heading || 'Your Curated Selection'}</h1>
         <p className="cart-hero-sub">Review your chosen pieces before we begin the fitting process.</p>
       </div>
