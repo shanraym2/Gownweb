@@ -172,7 +172,7 @@ function drawGown(ctx, img, layout, opacity) {
   ctx.save()
   ctx.globalAlpha = opacity
   ctx.globalCompositeOperation = 'source-over'
-  ctx.drawImage(oc, 0, 0, vw, vh, 0, 0, vw * (window.devicePixelRatio || 1), vh * (window.devicePixelRatio || 1))
+  ctx.drawImage(oc, 0, 0, vw, vh)
   ctx.restore()
 }
 
