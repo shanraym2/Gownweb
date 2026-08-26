@@ -136,11 +136,16 @@ export async function resetUserPassword({ email, password }) {
 
 // ─── Update profile ──────────────────────────────────────────────────────────
 
-export async function updateUser({ firstName, lastName, email, password, currentPassword } = {}) {
+export async function updateUser({ name, firstName, lastName, password, currentPassword } = {}) {
   const current = getCurrentUser()
   if (!current) return { ok: false, error: 'Not logged in.' }
 
   const updates = {}
+
+  // Legacy combined-name path — profile.jsx sends `name`, not firstName/lastName.
+  if (name !== undefined && firstName === undefined && lastName === undefined) {
+    updates.name = String(name).trim()
+  }
 
   if (firstName !== undefined) {
     const clean = String(firstName).trim()
@@ -152,11 +157,7 @@ export async function updateUser({ firstName, lastName, email, password, current
     if (!isRealName(clean)) return { ok: false, error: 'Use your real last name.' }
     updates.lastName = clean
   }
-  if (email !== undefined) {
-    const clean = normalizeEmail(email)
-    if (!isValidEmail(clean)) return { ok: false, error: 'Please enter a valid email address.' }
-    updates.email = clean
-  }
+ 
   if (password !== undefined && password !== '') {
     if (!isStrongPassword(String(password))) {
       return { ok: false, error: 'Password must be at least 8 characters and include letters and numbers.' }

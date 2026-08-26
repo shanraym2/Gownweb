@@ -4,9 +4,6 @@ import bcrypt from 'bcryptjs'
 import { isRealName } from '@/app/utils/authValidation'
 import { getAuthenticatedUser } from '@/lib/auth'
 
-function normalizeEmail(email) {
-  return String(email || '').trim().toLowerCase()
-}
 
 export async function PATCH(request) {
   try {
@@ -21,6 +18,17 @@ export async function PATCH(request) {
     const body = await request.json()
     // Accept both split fields (firstName/lastName) and legacy combined (name)
     const { firstName, lastName, name, email, password, currentPassword } = body
+
+    // Login email is not editable through self-service profile updates.
+    // It's the account's login identifier and password-reset destination,
+    // so changing it here — even with a valid session — is a takeover risk.
+    // Reject explicitly rather than silently ignoring it.
+    if (email !== undefined) {
+      return NextResponse.json(
+        { ok: false, error: 'Email changes are not supported from your profile. Contact support if you need to update it.' },
+        { status: 400 }
+      )
+    }
 
     const setClauses = []
     const values     = []
@@ -62,22 +70,7 @@ export async function PATCH(request) {
       values.push(cleanLast)
     }
 
-    // ── Email handling ────────────────────────────────────────────────────────
-    if (email !== undefined) {
-      const cleanEmail = normalizeEmail(email)
-      const taken = await query(
-        'SELECT id FROM users WHERE email = $1 AND id != $2',
-        [cleanEmail, userId]
-      )
-      if (taken.length > 0) {
-        return NextResponse.json(
-          { ok: false, error: 'That email is already in use.' },
-          { status: 409 }
-        )
-      }
-      setClauses.push(`email = $${paramIndex++}`)
-      values.push(cleanEmail)
-    }
+  
 
     // ── Password handling ─────────────────────────────────────────────────────
     // Require the current password before allowing a change — closes the

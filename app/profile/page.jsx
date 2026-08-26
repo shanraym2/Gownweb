@@ -644,7 +644,11 @@ export default function ProfilePage() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      updateUser({ name: form.name, email: form.email })
+      const result = await updateUser({ name: form.name })
+      if (!result.ok) {
+        showToast(result.error || 'Failed to update profile', 'error')
+        return
+      }
       saveProfileExtra({
         phone:    form.phone,
         address:  form.address,
@@ -652,7 +656,7 @@ export default function ProfilePage() {
         province: form.province,
         zip:      form.zip,
       })
-      setUser(prev => ({ ...prev, name: form.name, email: form.email }))
+      setUser(prev => ({ ...prev, name: form.name }))
       await new Promise(r => setTimeout(r, 500))
       setEditing(false)
       showToast('Profile updated')
@@ -766,7 +770,7 @@ export default function ProfilePage() {
               <div className="profile-fields">
                 <div className="profile-fields-row">
                   <EditableField label="Full name" name="name"  value={form.name}  editing={editing} onChange={handleChange} />
-                  <EditableField label="Email"     name="email" type="email" value={form.email} editing={editing} onChange={handleChange} />
+                  <EditableField label="Email"     name="email" type="email" value={form.email} editing={false} onChange={handleChange} />
                 </div>
                 <EditableField label="Phone number" name="phone" type="tel" value={form.phone} editing={editing} onChange={handleChange} maxLength={11} placeholder="09XXXXXXXXX" />
               </div>
