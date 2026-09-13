@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Image from 'next/image'
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 
 const OBSERVER_OPTIONS = { threshold: 0.15 }
@@ -55,14 +54,10 @@ export default function Testimonial() {
           ref={imageRef}
           className={`image-col reveal-right ${imageVisible ? 'active' : ''}`}
         >
-          <Image
+          <img
             src={testimonial.image_url}
             alt="Close-up detail of a wedding gown's embroidery"
             className="detail-img"
-            fill
-            sizes="(max-width: 768px) 100vw, 50vw"
-            style={{ objectFit: 'cover' }}
-            quality={75}
           />
         </div>
 
