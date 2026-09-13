@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import Image from 'next/image'
 import Header from '../../components/Header'
 import Footer from '../../components/Footer'
 import { useGowns, getGownById } from '@/hooks/useGowns'
@@ -458,16 +457,11 @@ export default function GownDetailPage() {
 
         {/* ── Image column ── */}
         <div className="dp-img-col">
-          <div className="dp-img-main" style={{ position: 'relative' }}>
-            <Image
+          <div className="dp-img-main">
+            <img
               src={images[activeImg] || gown.image}
               alt={gown.alt || gown.name}
               className="dp-img-main-img"
-              fill
-              sizes="(max-width: 768px) 100vw, 50vw"
-              style={{ objectFit: 'cover' }}
-              priority
-              quality={80}
             />
             {(gown.category || gown.type) && (
               <span className="dp-img-cat">{gown.category || gown.type}</span>
@@ -492,9 +486,8 @@ export default function GownDetailPage() {
                   className={`dp-thumb${i === activeImg ? ' dp-thumb--on' : ''}`}
                   onClick={() => setActiveImg(i)}
                   aria-label={`View image ${i + 1}`}
-                  style={{ position: 'relative' }}
                 >
-                  <Image src={src} alt="" fill sizes="80px" style={{ objectFit: 'cover' }} quality={60} />
+                  <img src={src} alt="" />
                 </button>
               ))}
             </div>

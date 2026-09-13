@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback } from 'react'
-import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 
@@ -32,13 +31,11 @@ export default function ProductCard({ product, delay = 0 }) {
       aria-label={product.name}
     >
       <div className="product-img-wrapper">
-        <Image
+        <img
           src={product.image}
           alt={product.alt ?? product.name}
-          fill
-          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-          style={{ ...product.style, objectFit: 'cover' }}
-          quality={75}
+          style={product.style}
+          loading="lazy"
           draggable="false"
         />
       </div>
