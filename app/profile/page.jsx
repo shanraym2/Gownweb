@@ -89,6 +89,20 @@ function MeasurementsCard({ userId }) {
   const inToCm = inches => inches != null ? Math.round(inches * CM_PER_INCH * 10) / 10 : null
   const dispVal = (cm) => cm == null ? '—' : unit === 'in' ? `${cmToIn(cm)} in` : `${cm} cm`
 
+  const formDisplayVal = (key, cmStr) => {
+    if (key === 'weight') return cmStr
+    const cm = parseFloat(cmStr)
+    if (!Number.isFinite(cm)) return ''
+    return unit === 'in' ? String(cmToIn(cm) ?? '') : cmStr
+  }
+  const formOnChange = (key) => (e) => {
+    if (key === 'weight') { setForm(p => ({ ...p, weight: e.target.value })); return }
+    const raw = parseFloat(e.target.value)
+    if (!Number.isFinite(raw)) { setForm(p => ({ ...p, [key]: '' })); return }
+    const cm = unit === 'in' ? String(inToCm(raw) ?? '') : String(raw)
+    setForm(p => ({ ...p, [key]: cm }))
+  }
+
   useEffect(() => {
     if (!userId) { setLoading(false); return }
     Promise.all([
@@ -138,20 +152,20 @@ function MeasurementsCard({ userId }) {
 
   const handleSave = async () => {
     setSaving(true); setMsg(null)
-    const toStoredCm = (key, val) => {
+    // form.* is already cm-native (see formDisplayVal/formOnChange above) —
+    // just parse, no unit math needed here anymore.
+    const toStoredCm = (val) => {
       if (!val) return null
       const n = Number(val)
-      if (!Number.isFinite(n)) return null
-      // weight is always kg, height/bust/waist/hips convert if unit is 'in'
-      return (unit === 'in' && key !== 'weight') ? Math.round(n * CM_PER_INCH * 10) / 10 : n
+      return Number.isFinite(n) ? n : null
     }
     try {
       const body = {
-        bust_cm:   toStoredCm('bust',   form.bust),
-        waist_cm:  toStoredCm('waist',  form.waist),
-        hips_cm:   toStoredCm('hips',   form.hips),
-        height_cm: toStoredCm('height', form.height),
-        weight_kg: toStoredCm('weight', form.weight),
+        bust_cm:   toStoredCm(form.bust),
+        waist_cm:  toStoredCm(form.waist),
+        hips_cm:   toStoredCm(form.hips),
+        height_cm: toStoredCm(form.height),
+        weight_kg: toStoredCm(form.weight),
         source:    'manual',
       }
       if (!body.bust_cm && !body.waist_cm && !body.hips_cm) {
@@ -356,8 +370,8 @@ function MeasurementsCard({ userId }) {
                   <input
                     className="profile-field-input"
                     type="number"
-                    value={form[f.key]}
-                    onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                    value={formDisplayVal(f.key, form[f.key])}
+                    onChange={formOnChange(f.key)}
                     placeholder={f.placeholder}
                     min={f.min} max={f.max}
                   />

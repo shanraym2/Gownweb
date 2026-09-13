@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import Image from 'next/image'
 import { getCurrentUser } from '@/app/utils/authClient'
 
 function HeroGreeting() {
@@ -110,7 +111,17 @@ export default function Hero() {
           className={`hero-slide ${i === current ? 'hero-slide--active' : ''}`}
           aria-hidden={i !== current}
         >
-          <img src={s.image_url} alt="" role="presentation" />
+          <Image
+            src={s.image_url}
+            alt=""
+            role="presentation"
+            fill
+            sizes="100vw"
+            style={{ objectFit: 'cover' }}
+            priority={i === 0}
+            loading={i === 0 ? 'eager' : 'lazy'}
+            quality={75}
+          />
         </div>
       ))}
 
