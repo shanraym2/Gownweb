@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://plankton-app-bjwn2.ondigitalocean.app/sitemap.xml
