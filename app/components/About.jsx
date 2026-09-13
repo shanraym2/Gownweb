@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import { useIntersectionObserver } from '@/hooks/useIntersectionObserver'
 
 const OBSERVER_OPTIONS = { threshold: 0.15 }
@@ -32,10 +33,14 @@ export default function About() {
           ref={imageRef}
           className={`image-col reveal-left ${imageVisible ? 'active' : ''}`}
         >
-          <img
+          <Image
             src={content.image_url}
             alt="A designer carefully crafting a wedding gown"
             className="feature-img"
+            fill
+            sizes="(max-width: 768px) 100vw, 50vw"
+            style={{ objectFit: 'cover' }}
+            quality={75}
           />
           <div className="quote-icon" aria-hidden="true">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="var(--gold)" xmlns="http://www.w3.org/2000/svg">

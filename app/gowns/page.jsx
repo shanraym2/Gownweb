@@ -3,6 +3,7 @@
 import { Suspense, useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
+import Image from 'next/image'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { useGowns } from '@/hooks/useGowns'
@@ -119,10 +120,15 @@ function GownCard({ g, score }) {
         <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
           <HeartButton gownId={g.id} size="sm" redirectPath="/gowns" />
         </div>
-        <img
+        <Image
           src={g.image}
           alt={g.alt || g.name}
           className={`gc-img${unavailable ? ' gc-img--grey' : ''}`}
+          fill
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+          style={{ objectFit: 'cover' }}
+          loading="lazy"
+          quality={70}
         />
         {unavailable ? (
           <div className="gc-soldout-overlay">
