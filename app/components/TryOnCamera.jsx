@@ -58,6 +58,7 @@ const POSE_SCRIPTS = [
 ]
 const SEG_SCRIPT = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.1/dist/body-segmentation.min.js'
 
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) { resolve(); return }
@@ -474,7 +475,13 @@ export default function TryOnCamera({
       const next = !v; enhancedRef.current = next; setSegError('')
       if (next && !segmenterRef.current) {
         setSegLoading(true)
-        loadScript(SEG_SCRIPT)
+        // Ensure the TFJS engine/backend exists before touching bodySegmentation —
+        // it's never loaded elsewhere when the pose detector is the external
+        // MediaPipe PoseLandmarker (see TFJS_CORE_SCRIPTS comment above).
+        Promise.all(TFJS_CORE_SCRIPTS.map(loadScript))
+          .then(() => window.tf.ready())
+          .then(() => window.tf.setBackend('webgl').catch(() => window.tf.setBackend('cpu')))
+          .then(() => loadScript(SEG_SCRIPT))
           .then(() => window.bodySegmentation.createSegmenter(
             window.bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation,
             { runtime: 'tfjs' }
