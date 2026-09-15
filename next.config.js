@@ -33,9 +33,9 @@ const nextConfig = {
           { key: 'Content-Security-Policy',    value: [
             "default-src 'self'",
             "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
-            "style-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "img-src 'self' data: blob: https://*.digitaloceanspaces.com",
-            "font-src 'self' data:",
+            "font-src 'self' data: https://fonts.gstatic.com",
             "connect-src 'self' https://*.digitaloceanspaces.com https://api.paymongo.com https://cdn.jsdelivr.net https://storage.googleapis.com",
             "media-src 'self' blob:",
             "worker-src 'self' blob:",
