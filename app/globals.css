@@ -247,7 +247,12 @@ footer {
     color: var(--color-header-accent);
 }
 .copyright {
-    color: var(--color-header-text);
+    color: #8B7A6F;
+    font-size: 0.8rem;
+}
+
+.copyright {
+    color: #8B7A6F;
     font-size: 0.8rem;
 }
 /* --- Animations --- */
