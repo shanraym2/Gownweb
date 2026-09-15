@@ -17,15 +17,6 @@ const nextConfig = {
     },
   },
 
-  images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: '**.digitaloceanspaces.com' },
-      // If DO_SPACES_CDN_URL points to a custom domain instead of the
-      // raw *.digitaloceanspaces.com endpoint, add it explicitly, e.g.:
-      // { protocol: 'https', hostname: 'cdn.jcebridal.com' },
-    ],
-  },
-
   // FIX: CORS headers for /images/* so canvas.drawImage() with
   // crossOrigin='anonymous' doesn't taint the canvas.
   // Without these, the canvas goes opaque and white PNG pixels show through.
