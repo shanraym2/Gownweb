@@ -2,6 +2,7 @@
 
 const CART_PREFIX = 'jce_cart_'
 const CART_NOTE_PREFIX = 'jce_cart_note_'
+import { handleAuthFailure } from './sessionGuard'
 
 function safeGetItem(key) {
   if (typeof window === 'undefined') return null
@@ -58,7 +59,10 @@ export async function syncCartFromBackend() {
       credentials: 'include',
     })
 
-    if (!res.ok) return loadCart()
+        if (!res.ok) {
+      handleAuthFailure(res.status)
+      return loadCart()
+    }
 
     const data = await res.json()
     const backendItems = data.items || []
@@ -110,7 +114,8 @@ async function syncCartToBackend(userEmail, items) {
       body: JSON.stringify({ items }),
     })
     
-    if (!res.ok) {
+        if (!res.ok) {
+      handleAuthFailure(res.status)
       console.warn('Failed to sync cart to backend:', res.status)
     }
   } catch (err) {

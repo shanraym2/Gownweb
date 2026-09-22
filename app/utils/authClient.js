@@ -2,6 +2,7 @@
 
 import { clearAllCarts } from './cartClient'
 import { isRealName, passwordMeetsRules } from './authValidation'
+import { handleAuthFailure } from './sessionGuard'
 
 const CURRENT_USER_KEY = 'jce_current_user'
 
@@ -222,7 +223,8 @@ export async function syncCurrentUserRole() {
   if (!current) return
 
   try {
-    const res  = await fetch('/api/auth/role', { credentials: 'include' })
+        const res  = await fetch('/api/auth/role', { credentials: 'include' })
+    if (res.status === 401) { handleAuthFailure(401); return }
     const data = await res.json()
     if (!data.ok || data.role === current.role) return
     safeSetItem(CURRENT_USER_KEY, JSON.stringify({ ...current, role: data.role }))
