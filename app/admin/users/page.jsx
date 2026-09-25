@@ -190,20 +190,22 @@ function EditSelfModal({ user, onSave, onClose }) {
         {error && <div className="modal-error">{error}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <label className="modal-label">First name
+          <label className="modal-label" style={{ minWidth: 0 }}>First name
             <input
               className="modal-input"
               value={firstName}
               onChange={e => setFirstName(e.target.value)}
               placeholder="Maria"
+              style={{ boxSizing: 'border-box', width: '100%' }}
             />
           </label>
-          <label className="modal-label">Last name
+          <label className="modal-label" style={{ minWidth: 0 }}>Last name
             <input
               className="modal-input"
               value={lastName}
               onChange={e => setLastName(e.target.value)}
               placeholder="Santos"
+              style={{ boxSizing: 'border-box', width: '100%' }}
             />
           </label>
         </div>
