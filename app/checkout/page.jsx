@@ -494,7 +494,7 @@ function StepDelivery({
           <p className="ck-addr-form-title">Delivery address</p>
           {/* ── Vehicle selector with smart recommendation ── */}
           {(() => {
-            const itemCount = items.length
+            const itemCount = items.reduce((sum, i) => sum + (Number(i.qty) || 1), 0)
             const getTag = (v) => {
               if (itemCount <= 1 && v.id === 'motorcycle') return { label: 'Available', style: 'neutral' }
               if (itemCount <= 5 && v.id === 'sedan')      return { label: 'Recommended', style: 'good' }
@@ -507,10 +507,10 @@ function StepDelivery({
                 <label className="ck-label">Vehicle type</label>
                 <p className="ck-vehicle-hint">
                   {itemCount > 5
-                    ? `You have ${itemCount} items — a Crossover SUV is recommended.`
+                    ? `You have ${itemCount} pieces — a Crossover SUV is recommended.`
                     : itemCount === 1
                       ? 'Single item — Sedan is recommended. Motorcycle available for lightweight accessories only.'
-                      : `${itemCount} items — Sedan is recommended.`}
+                      : `${itemCount} pieces — Sedan is recommended.`}
                 </p>
                 <div className="ck-vehicle-options">
                   {LALAMOVE_VEHICLES.map(v => {
@@ -1042,8 +1042,8 @@ export default function CheckoutPage() {
     setItems(normalised)
     if (!normalised.length) { setLoadingGowns(false); return }
 
-    // Auto-select vehicle based on item count
-    const count = normalised.length
+    // Auto-select vehicle based on total quantity, not distinct product count
+    const count = normalised.reduce((sum, i) => sum + (Number(i.qty) || 1), 0)
     if (count > 5)       setLalamoveVehicle('suv')
     else if (count === 1) setLalamoveVehicle('sedan')  // sedan still recommended; motorcycle not auto-selected
     else                  setLalamoveVehicle('sedan')
