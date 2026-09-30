@@ -30,6 +30,10 @@ const CM_PER_INCH = 2.54
 // above the nose, and the ankle joint sits above the floor). Without this,
 // px/cm comes out ~12% low and every cm value comes out ~12% high.
 const NOSE_TO_ANKLE = 0.885
+
+// Waist width as a fraction of shoulder keypoint span. Typical proportions,
+// not measured on your users — tune against tape (see below).
+const WAIST_FROM_SHOULDER = { women: 0.72, men: 0.78, children: 0.75 }
 const cmToIn  = cm     => cm     != null ? Math.round((cm     / CM_PER_INCH) * 10) / 10 : null
 const inToCm  = inches => inches != null ? Math.round(inches  * CM_PER_INCH  * 10) / 10 : null
 const dispVal = (cm, unit) =>
@@ -408,7 +412,7 @@ export default function ScanPanel() {
 
             const estSwCm    = estSwPx  / pxPerCm
             const estHipCm   = estHipPx / pxPerCm
-            const estWaistCm = estSwCm * 0.80
+            const estWaistCm = estSwCm * (WAIST_FROM_SHOULDER[profile.segment] ?? 0.72)
 
             const { bust: estBust, waist: estWaist, hips: estHips } = estimateMeasurements({
               shoulderCm: estSwCm,
@@ -780,7 +784,7 @@ export default function ScanPanel() {
 
     const lockSwCm    = estSwPx  / pxPerCm
     const lockHipCm   = estHipPx / pxPerCm
-    const lockWaistCm = lockSwCm * 0.80
+    const lockWaistCm = lockSwCm * (WAIST_FROM_SHOULDER[profile.segment] ?? 0.72)
 
     const { bust: estBust, waist: estWaist, hips: estHips } = estimateMeasurements({
       shoulderCm: lockSwCm,
