@@ -115,7 +115,8 @@ export default function ScanPanel() {
   const bustDepthHistRef    = useRef([])
   const waistDepthHistRef   = useRef([])
   const hipDepthHistRef     = useRef([])
-  const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirrors bestSnapshotRef
+  const sideBadRef = useRef(0)
+const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirrors bestSnapshotRef
 
   // Unit state — reads from localStorage so all panels stay in sync
   const [unit, setUnit] = useState(() =>
@@ -575,9 +576,16 @@ export default function ScanPanel() {
       const hmX = hipPt.reduce((s, k) => s + k.x, 0) / hipPt.length
       const torsoH = hmY - smY
       const shoulderSpan = (ls?.score > CONF && rs?.score > CONF) ? dist(ls, rs) : 0
-      const notProfile   = shoulderSpan > torsoH * 0.15            // tune on real data
-      const wrongScale   = torsoHRef.current && Math.abs(torsoH / torsoHRef.current - 1) > 0.05
+      const notProfile   = shoulderSpan > torsoH * 0.25            // tune on real data
+      const wrongScale   = torsoHRef.current && Math.abs(torsoH / torsoHRef.current - 1) > 0.12
+      if (Math.random() < 0.1) console.log('[side gate]', { spanRatio: shoulderSpan / torsoH, torsoRatio: torsoHRef.current ? torsoH / torsoHRef.current : null, notProfile, wrongScale })
       if (notProfile || wrongScale) {
+        sideBadRef.current += 1
+        if (sideBadRef.current <= 15) {
+          setPoseFound(false); setPoseIssues([wrongScale ? 'side_scale' : 'not_profile'])
+          animRef.current = requestAnimationFrame(detectSide)
+          return
+        }
         bustDepthHistRef.current = []; waistDepthHistRef.current = []; hipDepthHistRef.current = []
         setSideSamples(0); setSideConfidence(0); setLiveSideDepth(null)
         setPoseFound(false); setPoseIssues([wrongScale ? 'side_scale' : 'not_profile'])
@@ -585,6 +593,7 @@ export default function ScanPanel() {
         return
       }
 
+      sideBadRef.current = 0
       if (torsoH > 20 && !bgColorRef.current) {
         bgColorRef.current = sampleBackgroundColor(ctx, vw, vh)
       }
@@ -602,6 +611,10 @@ export default function ScanPanel() {
         if (waistMeas) { if (waistMeas.widthPx / lockedPxPerCmRef.current >= 10 && waistMeas.widthPx / lockedPxPerCmRef.current <= 30) waistDepthHistRef.current.push(waistMeas.widthPx); if (waistDepthHistRef.current.length > HIST_SIZE) waistDepthHistRef.current.shift() }
         if (hipMeas)   { if (hipMeas.widthPx / lockedPxPerCmRef.current >= 14 && hipMeas.widthPx / lockedPxPerCmRef.current <= 34) hipDepthHistRef.current.push(hipMeas.widthPx);     if (hipDepthHistRef.current.length   > HIST_SIZE) hipDepthHistRef.current.shift() }
 
+        if (Math.random() < 0.1) {
+          const p = lockedPxPerCmRef.current
+          console.log('[side depth cm]', { bust: bustMeas?.widthPx / p, waist: waistMeas?.widthPx / p, hip: hipMeas?.widthPx / p })
+        }
         const sampleCount = bustDepthHistRef.current.length
         setSideSamples(sampleCount)
 
