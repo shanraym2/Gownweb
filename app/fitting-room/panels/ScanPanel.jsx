@@ -93,6 +93,7 @@ export default function ScanPanel() {
   const bestSnapshotRef   = useRef(null)
   const scanWrapRef       = useRef(null)
   const isStartingRef     = useRef(false)   // hard guard against concurrent startCamera() calls
+  const exactCmRef        = useRef({})      // exact cm behind each typed field, so unit toggles don't drift
 
   // ── Side-scan refs ─────────────────────────────────────────────────────────
   // Populated at front-scan lock time so the side-scan stage can convert its
@@ -111,11 +112,30 @@ export default function ScanPanel() {
   const [unit, setUnit] = useState(() =>
     typeof window !== 'undefined' ? (localStorage.getItem('fr_unit') || 'cm') : 'cm'
   )
-  const toggleUnit = () => setUnit(u => {
-    const n = u === 'cm' ? 'in' : 'cm'
-    localStorage.setItem('fr_unit', n)
-    return n
-  })
+  const toggleUnit = () => {
+    const from = unit
+    const to   = from === 'cm' ? 'in' : 'cm'
+    const conv = (key, text) => {
+      const n = parseFloat(text)
+      if (!Number.isFinite(n)) return text
+      const saved = exactCmRef.current[key]
+      // If the text is unchanged since the last conversion, reuse the exact cm value
+      const cm = saved && saved.shown === text
+        ? saved.cm
+        : (from === 'in' ? n * CM_PER_INCH : n)
+      const shown = to === 'in'
+        ? String(Math.round((cm / CM_PER_INCH) * 10) / 10)   // inches: 1 decimal
+        : String(Math.round(cm * 100) / 100)                 // cm: 2 decimals, keeps typed values intact
+      exactCmRef.current[key] = { cm, shown }
+      return shown
+    }
+    setHeightInput(conv('height_pre', heightInput))
+    setMBust(conv('bust', mBust)); setMWaist(conv('waist', mWaist))
+    setMHips(conv('hips', mHips)); setMHeight(conv('height', mHeight))
+    setMErrors({})
+    localStorage.setItem('fr_unit', to)
+    setUnit(to)
+  }
 
   const [scanMode,         setScanMode        ] = useState('front')   // 'front' | 'side'
   const [sideStage,        setSideStage       ] = useState('idle')    // 'idle' | 'capturing' | 'done' | 'skipped'

@@ -76,14 +76,16 @@ function MeasurementsCard({ userId }) {
   const [deleting,     setDeleting    ] = useState(false)
   const [msg,          setMsg         ] = useState(null)
   const [form, setForm] = useState({ bust: '', waist: '', hips: '', height: '', weight: '' })
+  const [draft, setDraft] = useState(null)   // { key, text }: raw text of the field being typed in
   const [unit, setUnit] = useState(() =>
   typeof window !== 'undefined' ? (localStorage.getItem('fr_unit') || 'cm') : 'cm'
   )
-  const toggleUnit = () => setUnit(u => {
-    const n = u === 'cm' ? 'in' : 'cm'
+  const toggleUnit = () => {
+    const n = unit === 'cm' ? 'in' : 'cm'
     localStorage.setItem('fr_unit', n)
-    return n
-  })
+    setDraft(null)
+    setUnit(n)
+  }
   const CM_PER_INCH = 2.54
   const cmToIn = cm => cm != null ? Math.round((cm / CM_PER_INCH) * 10) / 10 : null
   const inToCm = inches => inches != null ? Math.round(inches * CM_PER_INCH * 10) / 10 : null
@@ -91,15 +93,18 @@ function MeasurementsCard({ userId }) {
 
   const formDisplayVal = (key, cmStr) => {
     if (key === 'weight') return cmStr
+    if (draft?.key === key) return draft.text
     const cm = parseFloat(cmStr)
     if (!Number.isFinite(cm)) return ''
     return unit === 'in' ? String(cmToIn(cm) ?? '') : cmStr
   }
   const formOnChange = (key) => (e) => {
     if (key === 'weight') { setForm(p => ({ ...p, weight: e.target.value })); return }
-    const raw = parseFloat(e.target.value)
+    const text = e.target.value
+    setDraft({ key, text })
+    const raw = parseFloat(text)
     if (!Number.isFinite(raw)) { setForm(p => ({ ...p, [key]: '' })); return }
-    const cm = unit === 'in' ? String(inToCm(raw) ?? '') : String(raw)
+    const cm = unit === 'in' ? String(Math.round(raw * CM_PER_INCH * 100) / 100) : String(raw)
     setForm(p => ({ ...p, [key]: cm }))
   }
 
@@ -372,6 +377,7 @@ function MeasurementsCard({ userId }) {
                     type="number"
                     value={formDisplayVal(f.key, form[f.key])}
                     onChange={formOnChange(f.key)}
+                    onBlur={() => setDraft(null)}
                     placeholder={f.placeholder}
                     min={f.min} max={f.max}
                   />
