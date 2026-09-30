@@ -150,6 +150,8 @@ export default function ScanPanel() {
   const [camError,      setCamError     ] = useState('')
   const [locked,        setLocked       ] = useState(false)
   const [confidence,    setConfidence   ] = useState(0)
+  const [scanConf,      setScanConf     ] = useState(0)   // confidence of the locked capture
+  const [bestConf,      setBestConf     ] = useState(0)   // live-tracked best confidence this session
   const [poseIssues,    setPoseIssues   ] = useState([])
   const [poseFound,     setPoseFound    ] = useState(false)
   const [detectedTone,  setDetectedTone ] = useState(null)
@@ -423,12 +425,20 @@ export default function ScanPanel() {
             setConfidence(conf)
             setLiveEst({ bust: estBust, waist: estWaist, hips: estHips })
 
-            if (conf > (bestSnapshotRef.current?.confidence ?? 0) && conf >= 70) {
+            if (conf > (bestSnapshotRef.current?.confidence ?? 0) && conf >= 50) {
+              setBestConf(conf)
               const snap = document.createElement('canvas')
               snap.width = vw; snap.height = vh
               snap.getContext('2d').drawImage(canvas, 0, 0)
               bestSnapshotRef.current = {
                 dataUrl:    snap.toDataURL('image/jpeg', 0.82),
+                lock: {
+                  pxPerCm,
+                  shoulderCm: estSwCm,
+                  waistCm:    estWaistCm,
+                  hipCm:      estHipCm,
+                  torsoH,
+                },
                 confidence: conf,
                 est:        { bust: estBust, waist: estWaist, hips: estHips },
               }
@@ -704,6 +714,31 @@ export default function ScanPanel() {
   }, [detectedShape, profile.segment, stopCamera])
 
   const lockMeasurement = useCallback(() => {
+    // Prefer the highest-confidence capture so walking up to the device
+    // to press Lock can't corrupt the result.
+    const best = bestSnapshotRef.current
+    if (best?.lock) {
+      const { pxPerCm: bestPx, shoulderCm, waistCm, hipCm, torsoH: bestTorsoH } = best.lock
+      lockedPxPerCmRef.current = bestPx
+      lockedWidthsRef.current  = { shoulderCm, waistCm, hipCm }
+      torsoHRef.current        = bestTorsoH   // side-scan scale check compares against this
+
+      setAdjBust(String(best.est.bust))
+      setAdjWaist(String(best.est.waist))
+      setAdjHips(String(best.est.hips))
+      setScanConf(best.confidence)
+      setAdjEdited(false)
+      setLocked(true)
+      stopCamera()
+      setSnapshot(best)
+
+      const bestPatch = {}
+      if (detectedTone)  { bestPatch.skinTone = detectedTone.skinTone; bestPatch.undertone = detectedTone.undertone }
+      if (detectedShape) { bestPatch.bodyShape = detectedShape }
+      if (Object.keys(bestPatch).length) updateProfile(bestPatch)
+      return
+    }
+
     if (!swHistRef.current.length) return
     const kps  = liveKpsRef.current
     const nose = kps?.[KP.NOSE]
@@ -1000,7 +1035,13 @@ export default function ScanPanel() {
                       </div>
                       <button
                         className="fr-btn fr-btn--primary scan-btn-full"
-                        onClick={startCamera}
+                        onClick={() => {
+                          bestSnapshotRef.current = null
+                          swHistRef.current = []; hipHistRef.current = []; pxPerCmHistRef.current = []
+                          goodFrames.current = 0
+                          setBestConf(0)
+                          startCamera()
+                        }}
                         disabled={camState === 'starting' || !canScan}
                       >
                         {camState === 'starting'
@@ -1017,7 +1058,7 @@ export default function ScanPanel() {
                         onClick={lockMeasurement}
                         title={!canLock ? `Build more confidence (${confidence}% / 65% needed)` : ''}
                       >
-                        {canLock ? `Lock measurements (${confidence}%)` : `Need ${65 - confidence}% more…`}
+                        {bestConf > 0 ? `Lock best capture (${bestConf}%)` : `Lock measurements (${confidence}%)`}
                       </button>
                       <button className="fr-btn fr-btn--ghost" onClick={stopCamera}>Stop</button>
                     </div>
@@ -1179,7 +1220,7 @@ export default function ScanPanel() {
                     <button className="fr-btn fr-btn--ghost" onClick={() => {
                       setLocked(false); setConfidence(0); shapeVotesRef.current = {}
                       setDetectedShape(null); setDetectedTone(null); clearTimeout(skinDebounceRef.current)
-                      setSnapshot(null); bestSnapshotRef.current = null
+                      setSnapshot(null); bestSnapshotRef.current = null; setBestConf(0)
                       swHistRef.current = []; hipHistRef.current = []; pxPerCmHistRef.current = []
                       goodFrames.current = 0
                       // Reset side-scan state — a retaken front scan invalidates
