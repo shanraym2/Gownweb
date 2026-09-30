@@ -43,6 +43,8 @@ const GUIDANCE_MAP = {
   head_cut:     'Move down — your head is cut off.',
   tilted:       'Stand straight — shoulders and hips should be level.',
   rotated:      'Face the camera directly.',
+  not_profile: 'Turn 90° so you are side-on to the camera.',
+  side_scale:  'Stand at the same distance as the front scan.',
   too_dark:     'Too dark — move to better lighting or turn on a light.',
   too_bright:   'Too bright — avoid direct sunlight or bright backlighting.',
 }
@@ -85,6 +87,7 @@ export default function ScanPanel() {
   const prevKpsDisplayRef = useRef(null)
   const liveKpsRef        = useRef(null)
   const skinDebounceRef   = useRef(null)
+  const skinLastRef = useRef(0)
   const shapeVotesRef     = useRef({})
   const goodFrames        = useRef(0)
   const bestSnapshotRef   = useRef(null)
@@ -143,7 +146,7 @@ export default function ScanPanel() {
   const [adjBust,  setAdjBust ] = useState('')
   const [adjWaist, setAdjWaist] = useState('')
   const [adjHips,  setAdjHips ] = useState('')
-  const [scanConf, setScanConf] = useState(0)
+  const [adjEdited, setAdjEdited] = useState(false)
 
   const [mBust,   setMBust  ] = useState('')
   const [mWaist,  setMWaist ] = useState('')
@@ -155,12 +158,10 @@ export default function ScanPanel() {
   // When profile.height is loaded from saved profile, pre-fill height input
   // converting to the active unit for display
   useEffect(() => {
-    if (profile.height && !heightSet) {
-      const display = unit === 'in' ? String(cmToIn(profile.height) ?? '') : String(profile.height)
-      setHeightInput(display)
-      setHeightSet(true)
-    }
-  }, [profile.height, heightSet, unit])
+    if (!profile.height) return
+    setHeightInput(unit === 'in' ? String(cmToIn(profile.height) ?? '') : String(profile.height))
+    setHeightSet(true)
+  }, [profile.height])   // deliberately not keyed on unit
 
   const stopCamera = useCallback(() => {
     if (animRef.current) cancelAnimationFrame(animRef.current)
@@ -464,13 +465,11 @@ export default function ScanPanel() {
               }
             }
 
-            if (nose?.score > 0.4 && conf >= 65) {
-              clearTimeout(skinDebounceRef.current)
-              skinDebounceRef.current = setTimeout(() => {
-                const sp = _detectSkinProfileFixed(ctx, rawKps, vw, vh)
-                if (sp) setDetectedTone(sp)
-              }, 2000)
-            }
+            if (nose?.score > 0.4 && conf >= 65 && performance.now() - skinLastRef.current > 2000) {
+            skinLastRef.current = performance.now()
+            const sp = _detectSkinProfileFixed(ctx, rawKps, vw, vh)
+            if (sp) setDetectedTone(sp)
+          }
           }
         } else {
           goodFrames.current = Math.max(0, goodFrames.current - 2)
@@ -539,6 +538,14 @@ export default function ScanPanel() {
       const smX = shoulderPt.reduce((s, k) => s + k.x, 0) / shoulderPt.length
       const hmX = hipPt.reduce((s, k) => s + k.x, 0) / hipPt.length
       const torsoH = hmY - smY
+      const shoulderSpan = (ls?.score > CONF && rs?.score > CONF) ? dist(ls, rs) : 0
+      const notProfile   = shoulderSpan > torsoH * 0.35            // tune on real data
+      const wrongScale   = torsoHRef.current && Math.abs(torsoH / torsoHRef.current - 1) > 0.08
+      if (notProfile || wrongScale) {
+        setPoseFound(false); setPoseIssues([wrongScale ? 'side_scale' : 'not_profile'])
+        animRef.current = requestAnimationFrame(detectSide)
+        return
+      }
 
       if (torsoH > 20 && bgColorRef.current) {
         const bustRowY  = smY + torsoH * 0.15
@@ -671,6 +678,7 @@ export default function ScanPanel() {
     })
     if (bestSideSnapshotRef.current) setSideSnapshot(bestSideSnapshotRef.current)
     setSideStage('done')
+    setAdjEdited(false)
     stopCamera()
     setScanMode('front')
   }, [detectedShape, profile.segment, stopCamera])
@@ -724,6 +732,7 @@ export default function ScanPanel() {
     setAdjWaist(String(estWaist))
     setAdjHips(String(estHips))
     setScanConf(confidence)
+    setAdjEdited(false)
     setLocked(true)
     stopCamera()
 
@@ -741,11 +750,11 @@ export default function ScanPanel() {
       bust:   parseFloat(adjBust)  || null,
       waist:  parseFloat(adjWaist) || null,
       hips:   parseFloat(adjHips)  || null,
-      source: 'camera',
+      source: adjEdited ? 'manual' : 'camera',
       ...(detectedTone  ? { skinTone: detectedTone.skinTone, undertone: detectedTone.undertone } : {}),
       ...(detectedShape ? { bodyShape: detectedShape } : {}),
     })
-  }, [adjBust, adjWaist, adjHips, detectedTone, detectedShape, updateProfile])
+  }, [adjBust, adjWaist, adjHips, detectedTone, detectedShape, updateProfile, adjEdited])
 
   const confirmManual = useCallback(() => {
     const rawFields = { bust: mBust, waist: mWaist, hips: mHips, height: mHeight, weight: mWeight }
@@ -773,8 +782,8 @@ export default function ScanPanel() {
       bust:   toCm(mBust)   || null,
       waist:  toCm(mWaist)  || null,
       hips:   toCm(mHips)   || null,
-      height: toCm(mHeight) || null,
-      weight: parseFloat(mWeight) || null,   // weight always kg, no conversion
+      ...(mHeight ? { height: toCm(mHeight) } : {}),
+      ...(mWeight ? { weight: parseFloat(mWeight) || null } : {}),   // weight always kg, no conversion
       source: 'manual',
     })
   }, [mBust, mWaist, mHips, mHeight, mWeight, unit, updateProfile])
@@ -815,6 +824,7 @@ export default function ScanPanel() {
     return unit === 'in' ? String(cmToIn(cm) ?? '') : cmStr
   }
   const adjOnChange = (setter) => (e) => {
+    setAdjEdited(true)
     const raw = parseFloat(e.target.value)
     if (!Number.isFinite(raw)) { setter(''); return }
     const cm = unit === 'in' ? String(inToCm(raw) ?? '') : String(raw)
@@ -898,11 +908,11 @@ export default function ScanPanel() {
 
                 {camState === 'on' && scanMode === 'side' && (
                   <div className="fr-cam-hud">
-                    <span className="fr-hud-dot" style={{ background: sideSamples >= 20 ? '#1D9E75' : '#EF9F27' }}/>
+                    <span className="fr-hud-dot" style={{ background: sideSamples >= 30 ? '#1D9E75' : '#EF9F27' }}/>
                     <span className="fr-hud-text">
                       {poseFound
-                        ? `Turn to your side, keep the same distance — ${sideSamples}/20 samples`
-                        : 'Turn 90° so your side profile is visible'}
+                        ? `Turn to your side, keep the same distance — ${sideSamples}/30 samples`
+                        : (GUIDANCE_MAP[poseIssues[0]] ?? 'Turn 90° so your side profile is visible')}
                     </span>
                   </div>
                 )}
@@ -1026,10 +1036,10 @@ export default function ScanPanel() {
                         <button
                           className="fr-btn fr-btn--primary"
                           onClick={lockSideScan}
-                          disabled={sideSamples < 8}
-                          title={sideSamples < 8 ? `Hold your side pose — ${sideSamples}/8 samples needed` : ''}
+                          disabled={sideSamples < 30}
+                          title={sideSamples < 30 ? `Hold your side pose — ${sideSamples}/30 samples needed` : ''}
                         >
-                          {sideSamples < 8 ? `Hold still… ${sideSamples}/8` : `Lock side scan (${sideConfidence}%)`}
+                          {sideSamples < 30 ? `Hold still… ${sideSamples}/30` : `Lock side scan (${sideConfidence}%)`}
                         </button>
                         <button className="fr-btn fr-btn--ghost" onClick={() => { stopCamera(); setScanMode('front'); setSideStage('skipped') }}>
                           Cancel
@@ -1134,6 +1144,7 @@ export default function ScanPanel() {
                   <div className="fr-btn-row">
                     <button className="fr-btn fr-btn--ghost" onClick={() => {
                       setLocked(false); setConfidence(0); shapeVotesRef.current = {}
+                      setDetectedShape(null); setDetectedTone(null); clearTimeout(skinDebounceRef.current)
                       setSnapshot(null); bestSnapshotRef.current = null
                       swHistRef.current = []; hipHistRef.current = []; pxPerCmHistRef.current = []
                       goodFrames.current = 0

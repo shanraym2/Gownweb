@@ -89,7 +89,7 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
   // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!profile.bust && !profile.waist && !profile.hips) return
+   if (!profile.bust && !profile.waist && !profile.hips) { setSizeResult(null); return }
     if (!sizes?.length) return
 
     const { bust, waist, hips, source } = profile

@@ -182,7 +182,10 @@ export default function ProfileSidebar({ user, onSave, saving, saveMsg, open, on
                       onChange={e => {
                         const raw     = parseFloat(e.target.value)
                         const valueCm = unit === 'in' ? inToCm(raw) : raw
-                        updateProfile({ [k]: Number.isFinite(valueCm) ? valueCm : null })
+                        updateProfile({
+                          [k]: Number.isFinite(valueCm) ? valueCm : null,
+                          ...(k !== 'height' ? { source: 'manual' } : {}),
+                        })
                       }}
                     />
                     <span className="fr-manual-unit">{unit}</span>
