@@ -25,6 +25,11 @@ import { _detectSkinProfileFixed } from '../../utils/skinTone'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CM_PER_INCH = 2.54
+
+// Nose-to-ankle spans roughly 88-89% of standing height (the head top sits
+// above the nose, and the ankle joint sits above the floor). Without this,
+// px/cm comes out ~12% low and every cm value comes out ~12% high.
+const NOSE_TO_ANKLE = 0.885
 const cmToIn  = cm     => cm     != null ? Math.round((cm     / CM_PER_INCH) * 10) / 10 : null
 const inToCm  = inches => inches != null ? Math.round(inches  * CM_PER_INCH  * 10) / 10 : null
 const dispVal = (cm, unit) =>
