@@ -736,6 +736,15 @@ export default function ScanPanel() {
     setLocked(true)
     stopCamera()
 
+    if (!bestSnapshotRef.current && canvasRef.current) {
+      try {
+        bestSnapshotRef.current = {
+          dataUrl:    canvasRef.current.toDataURL('image/jpeg', 0.82),
+          confidence,
+          est:        { bust: estBust, waist: estWaist, hips: estHips },
+        }
+      } catch {}
+    }
     if (bestSnapshotRef.current) setSnapshot(bestSnapshotRef.current)
 
     const patch = {}
@@ -1082,6 +1091,11 @@ export default function ScanPanel() {
                       (bust {sideDepths.bust ?? '—'} cm · waist {sideDepths.waist ?? '—'} cm · hip {sideDepths.hip ?? '—'} cm deep).
                       <div style={{ marginTop:'6px' }}>
                         <button className="fr-btn fr-btn--ghost" onClick={startSideScan}>Redo side scan</button>
+                        {sideSnapshot && (
+                          <button className="fr-btn fr-btn--ghost" style={{ marginLeft:'8px' }} onClick={() => setShowSideSnapshot(true)}>
+                            Best side snapshot ({sideSnapshot.confidence}%)
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
