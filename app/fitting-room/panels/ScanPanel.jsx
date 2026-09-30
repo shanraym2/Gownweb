@@ -598,9 +598,9 @@ export default function ScanPanel() {
         const waistMeas = measureSilhouetteWidth(ctx, waistRowY, vw, bgColorRef.current)
         const hipMeas   = measureSilhouetteWidth(ctx, hipRowY,   vw, bgColorRef.current)
 
-        if (bustMeas)  { bustDepthHistRef.current.push(bustMeas.widthPx);   if (bustDepthHistRef.current.length  > HIST_SIZE) bustDepthHistRef.current.shift() }
-        if (waistMeas) { waistDepthHistRef.current.push(waistMeas.widthPx); if (waistDepthHistRef.current.length > HIST_SIZE) waistDepthHistRef.current.shift() }
-        if (hipMeas)   { hipDepthHistRef.current.push(hipMeas.widthPx);     if (hipDepthHistRef.current.length   > HIST_SIZE) hipDepthHistRef.current.shift() }
+        if (bustMeas)  { if (bustMeas.widthPx / lockedPxPerCmRef.current >= 12 && bustMeas.widthPx / lockedPxPerCmRef.current <= 32) bustDepthHistRef.current.push(bustMeas.widthPx);   if (bustDepthHistRef.current.length  > HIST_SIZE) bustDepthHistRef.current.shift() }
+        if (waistMeas) { if (waistMeas.widthPx / lockedPxPerCmRef.current >= 10 && waistMeas.widthPx / lockedPxPerCmRef.current <= 30) waistDepthHistRef.current.push(waistMeas.widthPx); if (waistDepthHistRef.current.length > HIST_SIZE) waistDepthHistRef.current.shift() }
+        if (hipMeas)   { if (hipMeas.widthPx / lockedPxPerCmRef.current >= 14 && hipMeas.widthPx / lockedPxPerCmRef.current <= 34) hipDepthHistRef.current.push(hipMeas.widthPx);     if (hipDepthHistRef.current.length   > HIST_SIZE) hipDepthHistRef.current.shift() }
 
         const sampleCount = bustDepthHistRef.current.length
         setSideSamples(sampleCount)
@@ -702,6 +702,7 @@ export default function ScanPanel() {
     const hipDepthCm   = hipPx   > 0 ? hipPx   / pxPerCm : null
 
     const { shoulderCm, waistCm, hipCm } = lockedWidthsRef.current
+    console.log('[side lock]', { pxPerCm, bustPx, waistPx, hipPx, bustDepthCm, waistDepthCm, hipDepthCm, shoulderCm, waistCm, hipCm })
 
     const { bust: estBust, waist: estWaist, hips: estHips } = estimateMeasurementsWithDepth({
       shoulderCm, waistCm, hipCm,
