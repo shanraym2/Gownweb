@@ -566,9 +566,11 @@ export default function ScanPanel() {
       const hmX = hipPt.reduce((s, k) => s + k.x, 0) / hipPt.length
       const torsoH = hmY - smY
       const shoulderSpan = (ls?.score > CONF && rs?.score > CONF) ? dist(ls, rs) : 0
-      const notProfile   = shoulderSpan > torsoH * 0.35            // tune on real data
-      const wrongScale   = torsoHRef.current && Math.abs(torsoH / torsoHRef.current - 1) > 0.08
+      const notProfile   = shoulderSpan > torsoH * 0.15            // tune on real data
+      const wrongScale   = torsoHRef.current && Math.abs(torsoH / torsoHRef.current - 1) > 0.05
       if (notProfile || wrongScale) {
+        bustDepthHistRef.current = []; waistDepthHistRef.current = []; hipDepthHistRef.current = []
+        setSideSamples(0); setSideConfidence(0); setLiveSideDepth(null)
         setPoseFound(false); setPoseIssues([wrongScale ? 'side_scale' : 'not_profile'])
         animRef.current = requestAnimationFrame(detectSide)
         return
@@ -1250,7 +1252,7 @@ export default function ScanPanel() {
                 <p className="scan-tip-heading">Scanning for {segLabel}</p>
                 <p className="scan-tip-body">
                   {scanMode === 'side'
-                    ? 'Turn 90° to the side, arms relaxed at your sides, same distance as the front scan. It locks automatically.'
+                    ? 'Turn 90° to the side, put your hands on your head so your arms are out of the way, and stay at the same distance as the front scan. It locks automatically.'
                     : 'Stand 1.5–2 m away, arms slightly out, full body visible.'}
                 </p>
                 {!hasHeight && camState === 'off' && (
