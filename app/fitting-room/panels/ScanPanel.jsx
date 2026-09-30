@@ -533,10 +533,7 @@ export default function ScanPanel() {
     const ctx = canvas.getContext('2d')
     ctx.save(); ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, vw, vh); ctx.restore()
 
-    // Background sample taken once on the first usable frame.
-    if (!bgColorRef.current) {
-      bgColorRef.current = sampleBackgroundColor(ctx, vw, vh)
-    }
+    // Background is sampled later, once a valid profile pose is in view.
 
     try {
       const poses = await detectorRef.current.estimatePoses(video)
@@ -575,6 +572,10 @@ export default function ScanPanel() {
         setPoseFound(false); setPoseIssues([wrongScale ? 'side_scale' : 'not_profile'])
         animRef.current = requestAnimationFrame(detectSide)
         return
+      }
+
+      if (torsoH > 20 && !bgColorRef.current) {
+        bgColorRef.current = sampleBackgroundColor(ctx, vw, vh)
       }
 
       if (torsoH > 20 && bgColorRef.current) {
@@ -712,6 +713,13 @@ export default function ScanPanel() {
     stopCamera()
     setScanMode('front')
   }, [detectedShape, profile.segment, stopCamera])
+
+  // Hands-free: lock automatically once enough clean side samples are in.
+  // The scale/profile gates in detectSide already reject frames while you
+  // turn or walk, so only valid frames count toward the 30.
+  useEffect(() => {
+    if (sideStage === 'capturing' && camState === 'on' && sideSamples >= 30) lockSideScan()
+  }, [sideSamples, sideStage, camState, lockSideScan])
 
   const lockMeasurement = useCallback(() => {
     // Prefer the highest-confidence capture so walking up to the device
@@ -1240,7 +1248,11 @@ export default function ScanPanel() {
             <div className="scan-info-col">
               <div className="scan-tip-card">
                 <p className="scan-tip-heading">Scanning for {segLabel}</p>
-                <p className="scan-tip-body">Stand 1.5–2 m away, arms slightly out, full body visible.</p>
+                <p className="scan-tip-body">
+                  {scanMode === 'side'
+                    ? 'Turn 90° to the side, arms relaxed at your sides, same distance as the front scan. It locks automatically.'
+                    : 'Stand 1.5–2 m away, arms slightly out, full body visible.'}
+                </p>
                 {!hasHeight && camState === 'off' && (
                   <p className="scan-tip-height-hint">↑ Enter height above before scanning for best results.</p>
                 )}
@@ -1279,7 +1291,7 @@ export default function ScanPanel() {
                 ))}
               </div>
 
-              {camState === 'on' && (
+              {camState === 'on' && scanMode === 'front' && (
                 <div className="scan-buffer-status">
                   <p className="scan-detects-heading">Clean frames</p>
                   <div className="scan-buffer-bar-wrap">
