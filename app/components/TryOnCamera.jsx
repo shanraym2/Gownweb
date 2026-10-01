@@ -138,7 +138,9 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
     const km = mid(lk, rk), legH = km.y - hm.y
     bottomY = km.y + legH * 1.1
   } else {
-    bottomY = sm.y + torsoH * 4.8
+    const byTorso    = sm.y + torsoH * 4.8
+    const byShoulder = sm.y + sw * 4.0
+    bottomY = (byTorso + byShoulder) / 2
   }
   if (cal.hemY != null) {
     const fullH = sm.y + torsoH * 4.8 - topY
@@ -149,7 +151,7 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const topW = sw * shoulderPad
   const botW = Math.max(hw * 1.55, topW) * skirtFlare
   const cx = (sm.x + hm.x) / 2
-  return { topY, bottomY, cx, topW, botW, torsoH }
+  return { topY, bottomY, cx, topW, botW, torsoH, widthScale: cal.widthScale ?? 1 }
 }
 
 function drawGown(ctx, img, layout, opacity) {
@@ -164,11 +166,11 @@ function drawGown(ctx, img, layout, opacity) {
   oc.width = vw; oc.height = vh
   const octx = oc.getContext('2d')
 
-  octx.beginPath()
-  octx.moveTo(cx - topW / 2, topY); octx.lineTo(cx + topW / 2, topY)
-  octx.lineTo(cx + botW / 2, bottomY); octx.lineTo(cx - botW / 2, bottomY)
-  octx.closePath(); octx.clip()
-  octx.drawImage(img, cx - botW / 2, topY, botW, h)
+  // Uniform scale: height comes from the body, width follows the image's
+  // own aspect ratio, so the gown can't be stretched flat.
+  const aspect = (img.naturalWidth || img.width) / (img.naturalHeight || img.height)
+  const imgW   = h * aspect * (layout.widthScale ?? 1)
+  octx.drawImage(img, cx - imgW / 2, topY, imgW, h)
 
   ctx.save()
   ctx.globalAlpha = opacity
