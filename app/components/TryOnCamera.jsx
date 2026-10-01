@@ -127,7 +127,7 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const lk = kps[KP.LK], rk = kps[KP.RK], la = kps[KP.LA], ra = kps[KP.RA]
   if ([ls, rs, lh, rh].some(k => !k || k.score < CONF)) return null
   const sm = mid(ls, rs), hm = mid(lh, rh), torsoH = hm.y - sm.y
-  const rawSw = dist(ls, rs), sw = Math.min(Math.max(rawSw, vw * 0.28), vw * 0.80)
+    const rawSw = dist(ls, rs), sw = Math.min(rawSw, vw * 0.80)
   const rawHw = dist(lh, rh), hw = Math.max(rawHw, sw * 0.90)
   const neckOff = cal.necklineY ?? 0.18
   const topY = sm.y - torsoH * neckOff
@@ -447,7 +447,7 @@ export default function TryOnCamera({
 
   // ── Mobile orientation ─────────────────────────────────────────────────────
   useEffect(() => {
-    const mq      = window.matchMedia('(orientation: landscape)')
+    const mq      = window.matchMedia('(orientation: landscape) and (pointer: coarse)')
     const handler = e => setIsLandscape(e.matches)
     setIsLandscape(mq.matches)
     mq.addEventListener('change', handler)
@@ -478,7 +478,7 @@ export default function TryOnCamera({
         // Ensure the TFJS engine/backend exists before touching bodySegmentation —
         // it's never loaded elsewhere when the pose detector is the external
         // MediaPipe PoseLandmarker (see TFJS_CORE_SCRIPTS comment above).
-        Promise.all(TFJS_CORE_SCRIPTS.map(loadScript))
+        Promise.all(POSE_SCRIPTS.slice(0, 3).map(loadScript))
           .then(() => window.tf.ready())
           .then(() => window.tf.setBackend('webgl').catch(() => window.tf.setBackend('cpu')))
           .then(() => loadScript(SEG_SCRIPT))
