@@ -70,6 +70,7 @@ function loadScript(src) {
 
 // ── Keypoints ─────────────────────────────────────────────────────────────────
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
+import { drawGownWarped, createKpFilter } from '../../lib/fitting-room/gownWarp.js'
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -151,10 +152,20 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const topW = sw * shoulderPad
   const botW = Math.max(hw * 1.55, topW) * skirtFlare
   const cx = (sm.x + hm.x) / 2
-  return { topY, bottomY, cx, topW, botW, torsoH, widthScale: cal.widthScale ?? 1 }
+  // Editor values are px in its 220×400 preview; normalise by the preview
+  // body (shoulder span 88px, torso 108px) so they carry over to live video.
+  const calSX = cal.scaleX ?? 1, calSY = cal.scaleY ?? 1
+  const dxPx  = ((cal.offsetX ?? 0) / 88)  * sw
+  const dyPx  = ((cal.offsetY ?? 0) / 108) * torsoH
+  const top2  = topY + dyPx
+  const bot2  = top2 + (bottomY - topY) * calSY
+  return { topY: top2, bottomY: bot2, cx: cx + dxPx, topW: topW * calSX, botW: botW * calSX,
+           torsoH, widthScale: cal.widthScale ?? 1, sm, hm, sw, hw, cal,
+           dx: dxPx, dy: dyPx, scaleX: calSX }
 }
 
 function drawGown(ctx, img, layout, opacity) {
+  if (drawGownWarped(ctx, img, layout, opacity)) return
   const { topY, bottomY, cx, topW, botW } = layout
   const h = bottomY - topY; if (h <= 0) return
 
@@ -220,6 +231,7 @@ export default function TryOnCamera({
   const streamRef     = useRef(null)
   const animRef       = useRef(null)
   const prevKpsRef    = useRef(null)
+  const kpFilterRef   = useRef(createKpFilter())
   const isStartingRef = useRef(false)
   const cancelledRef  = useRef(null)   // set by startCamera(); called on unmount
   const tcWrapRef     = useRef(null)   // fullscreen target — wraps the viewport
@@ -339,7 +351,7 @@ export default function TryOnCamera({
     if (animRef.current) cancelAnimationFrame(animRef.current)
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
-    prevKpsRef.current = null; goodFrames.current = 0; facingFrames.current = 0
+    prevKpsRef.current = null; kpFilterRef.current.reset(); goodFrames.current = 0; facingFrames.current = 0
     setCamState('off'); setPoseFound(false); setPoseLocked(false); setPoseIssues([])
   }, [])
 
@@ -532,7 +544,7 @@ export default function TryOnCamera({
       if (poses?.length > 0) {
         // Flip keypoints to match the mirrored canvas
         let kps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
-        kps = smoothKps(prevKpsRef.current, kps); prevKpsRef.current = kps
+        kps = kpFilterRef.current.apply(kps, performance.now()); prevKpsRef.current = kps
 
         const analysis = analyzePose(kps, vw, vh)
         setPoseIssues(analysis.issues)
@@ -578,7 +590,7 @@ export default function TryOnCamera({
         }
       } else {
         setPoseFound(false); setPoseIssues(['no_pose'])
-        prevKpsRef.current = null; goodFrames.current = 0; setPoseLocked(false)
+        prevKpsRef.current = null; kpFilterRef.current.reset(); goodFrames.current = 0; setPoseLocked(false)
       }
     } catch { /* skip frame */ }
 

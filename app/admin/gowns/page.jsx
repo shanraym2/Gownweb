@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRoleGuard } from '../../utils/useRoleGuard'
 import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
+import { drawGownWarped } from '@/lib/fitting-room/gownWarp'
 
 /* ─────────────────────────────────────────────
    Constants & helpers
@@ -635,7 +636,15 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
 
     // Draw dress with offset + scale overrides applied
     if (dressImg) {
-      drawCalDressImageEx(ctx, dressImg, lay, CW, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
+      const sy2  = cal.scaleY ?? 1
+      const top2 = lay.topY + doy
+      const warped = drawGownWarped(ctx, dressImg, {
+        topY: top2, bottomY: top2 + (lay.bottomY - lay.topY) * sy2,
+        sm: { x: lay.cx, y: lay.smY }, hm: { x: lay.cx, y: lay.hmY },
+        sw: lay.swPx, hw: (B.rh[0] - B.lh[0]) * CW, torsoH: lay.torsoH,
+        cal, dx: dox, dy: doy, scaleX: cal.scaleX ?? 1,
+      }, 0.93, { w: CW, h: CH })
+      if (!warped) drawCalDressImageEx(ctx, dressImg, lay, CW, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
     } else {
       drawCalDressTrapezoidEx(ctx, lay, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
     }
