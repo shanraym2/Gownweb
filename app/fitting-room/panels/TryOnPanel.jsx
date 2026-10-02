@@ -6,7 +6,7 @@ import TryOnCamera from '../../components/TryOnCamera'
 import { getCurrentUser } from '../../utils/authClient'
 
 export default function TryOnPanel({ initialGownId }) {
-  const { gowns, detectorRef, segmenterRef, modelState } = useFittingRoom()
+    const { gowns, detectorRef, segmenterRef, modelState, profile } = useFittingRoom()
   const [selectedGown, setSelectedGown] = useState(null)
   const [saving,       setSaving      ] = useState(false)
   const [saveMsg,      setSaveMsg     ] = useState('')
@@ -51,6 +51,7 @@ export default function TryOnPanel({ initialGownId }) {
         externalSegmenter={segmenterRef}
         modelState={modelState}
         onSave={saveTryon}
+        bodyMeasures={{ bust: profile?.bust, waist: profile?.waist, hips: profile?.hips }}
       />
       {saveMsg && (
         <p

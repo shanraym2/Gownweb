@@ -935,6 +935,34 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
                 )
               })}
 
+              <p className="ce-group-label" style={{marginTop:6}}>Body fit (warp)</p>
+              {[
+                { key:'waistRow',  label:'Waist position', min:0.10, max:0.80, step:0.01, def:0.30, auto:true,
+                  hint:'Where the bodice pinches, as a fraction of the dress image height. Auto finds the narrowest point; set it by hand for A-line gowns.' },
+                { key:'waistEase', label:'Waist ease', min:0.80, max:1.40, step:0.01, def:1.05,
+                  hint:'Bodice width at the waist. Raise it if the bodice looks too tight.' },
+                { key:'hipEase',   label:'Hip ease',   min:0.80, max:1.40, step:0.01, def:1.10,
+                  hint:'Dress width at the hips. Raise it if the dress looks too tight.' },
+              ].map(s => {
+                const raw = calibration?.[s.key]
+                const val = raw ?? s.def
+                return (
+                  <div key={s.key} className="ce-row">
+                    <div className="ce-row-head">
+                      <span className="ce-row-label">{s.label}</span>
+                      <span className="ce-row-val">{raw == null && s.auto ? 'auto' : Number(val).toFixed(2)}</span>
+                    </div>
+                    <input type="range" min={s.min} max={s.max} step={s.step} value={val}
+                      onChange={e => onChange({ ...cal, [s.key]: parseFloat(e.target.value) })}
+                      className="ce-range"/>
+                    <p className="ce-row-hint">{s.hint}</p>
+                  </div>
+                )
+              })}
+              {cal.waistRow != null && (
+                <button type="button" className="ce-ghost" onClick={() => onChange({ ...cal, waistRow: null })}>Auto waist</button>
+              )}
+
               <div className="ce-btns">
                 <button type="button" className="ce-ghost" onClick={() => onChange(null)}>
                   Reset defaults

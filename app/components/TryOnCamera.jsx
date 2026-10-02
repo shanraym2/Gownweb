@@ -134,7 +134,14 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const topY = sm.y - torsoH * neckOff
   let bottomY
   if (la?.score > CONF && ra?.score > CONF) {
-    bottomY = Math.max(la.y, ra.y) + torsoH * 0.15
+    // Prefer heel / foot-index landmarks so the hem lands on the floor.
+    // Falls back to the ankle when they are missing (e.g. a 17-point model).
+    const feet = [kps[KP.LHEEL ?? 29], kps[KP.RHEEL ?? 30], kps[KP.LFOOT ?? 31], kps[KP.RFOOT ?? 32]]
+      .filter(k => k && k.score > CONF)
+    const floorY = feet.length
+      ? Math.max(...feet.map(k => k.y))
+      : Math.max(la.y, ra.y) + torsoH * 0.12
+    bottomY = floorY + torsoH * 0.03
   } else if (lk?.score > CONF && rk?.score > CONF) {
     const km = mid(lk, rk), legH = km.y - hm.y
     bottomY = km.y + legH * 1.1
@@ -160,7 +167,7 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const top2  = topY + dyPx
   const bot2  = top2 + (bottomY - topY) * calSY
   return { topY: top2, bottomY: bot2, cx: cx + dxPx, topW: topW * calSX, botW: botW * calSX,
-           torsoH, widthScale: cal.widthScale ?? 1, sm, hm, sw, hw, cal,
+           torsoH, widthScale: cal.widthScale ?? 1, sm, hm, sw, hw, rawHw, cal,
            dx: dxPx, dy: dyPx, scaleX: calSX }
 }
 
@@ -190,7 +197,7 @@ function drawGown(ctx, img, layout, opacity) {
   ctx.restore()
 }
 
-async function applySegmentation(segmenter, video, ctx, w, h) {
+async function applySegmentation(segmenter, video, ctx, w, h, kps) {
   if (!segmenter) return
   try {
     const result = await segmenter.segmentPeople(video, {
@@ -208,7 +215,23 @@ async function applySegmentation(segmenter, video, ctx, w, h) {
     )
     const mc = Object.assign(document.createElement('canvas'), { width: w, height: h })
     mc.getContext('2d').putImageData(maskData, 0, 0)
-    octx.globalCompositeOperation = 'destination-in'; octx.drawImage(mc, 0, 0)
+    octx.globalCompositeOperation = 'destination-in'
+    octx.save(); octx.translate(w, 0); octx.scale(-1, 1); octx.drawImage(mc, 0, 0); octx.restore()
+    // keep only the arms, so the gown still covers the torso
+    if (kps) {
+      const ac   = Object.assign(document.createElement('canvas'), { width: w, height: h })
+      const actx = ac.getContext('2d')
+      const armW = Math.max(12, dist(kps[KP.LS], kps[KP.RS]) * 0.3)
+      actx.strokeStyle = '#fff'; actx.lineWidth = armW; actx.lineCap = 'round'; actx.lineJoin = 'round'
+      const chains = [[KP.LS, KP.LE ?? 13, KP.LW ?? 15], [KP.RS, KP.RE ?? 14, KP.RW ?? 16]]
+      for (const ch of chains) {
+        const [s, e, wr] = ch.map(i => kps[i])
+        if (![s, e, wr].every(k => k && k.score > CONF)) continue
+        const st = lerpPt(s, e, 0.45)            // start below the shoulder so the bodice stays covered
+        actx.beginPath(); actx.moveTo(st.x, st.y); actx.lineTo(e.x, e.y); actx.lineTo(wr.x, wr.y); actx.stroke()
+      }
+      octx.globalCompositeOperation = 'destination-in'; octx.drawImage(ac, 0, 0)
+    }
     octx.globalCompositeOperation = 'source-over'; ctx.drawImage(oc, 0, 0)
   } catch (e) { console.warn('Segmentation error:', e) }
 }
@@ -225,6 +248,7 @@ export default function TryOnCamera({
   externalSegmenter = null,   // { current: segmenter | null }
   modelState: externalModelState = null,  // passed from context when using externalDetector
   onSave,
+  bodyMeasures = null,
 }) {
   const videoRef      = useRef(null)
   const canvasRef     = useRef(null)
@@ -248,11 +272,17 @@ export default function TryOnCamera({
   const opacityRef    = useRef(0.88)
   const enhancedRef   = useRef(false)
   const gownRef       = useRef(gown)
+  const measRef       = useRef(bodyMeasures)
   const gownImgRef    = useRef(null)
   const gownBackRef   = useRef(null)
 
   const goodFrames    = useRef(0)
   const facingFrames  = useRef(0)
+  const lastLayoutRef = useRef(null)   // last layout that passed the sanity check
+  const lightRef      = useRef(1)      // smoothed brightness factor for the gown
+  const dbgRef        = useRef(null)
+  const lightCanvas   = useRef(null)
+  const badLayoutRef  = useRef(0)      // consecutive rejected frames
 
   // Internal model loading (only used when no external detector is provided)
   const [internalModelState, setInternalModelState] = useState(
@@ -291,6 +321,7 @@ export default function TryOnCamera({
   useEffect(() => { opacityRef.current = opacity },   [opacity])
   useEffect(() => { enhancedRef.current = enhanced }, [enhanced])
   useEffect(() => { gownRef.current = gown },         [gown])
+  useEffect(() => { measRef.current = bodyMeasures }, [bodyMeasures?.bust, bodyMeasures?.waist, bodyMeasures?.hips])
 
   // ── Load gown image when gown changes ──────────────────────────────────────
   useEffect(() => {
@@ -525,7 +556,16 @@ export default function TryOnCamera({
       animRef.current = requestAnimationFrame(detect); return
     }
 
-    const dpr = window.devicePixelRatio || 1
+    // 5-tap moving average so neighbouring bands never differ sharply
+  const smoothBand = arr => arr.map((_, i) => {
+    let s = 0
+    for (let k = -2; k <= 2; k++) s += arr[clamp(i + k, 0, BANDS - 1)]
+    return s / 5
+  })
+  const gwS = smoothBand(prof.right.map((r, i) => r - prof.left[i]))
+  const cS  = smoothBand(prof.right.map((r, i) => (r + prof.left[i]) / 2))
+
+  const dpr = window.devicePixelRatio || 1
     const vw  = video.videoWidth  || 640
     const vh  = video.videoHeight || 480
     canvas.width  = vw * dpr; canvas.height = vh * dpr
@@ -570,16 +610,49 @@ export default function TryOnCamera({
 
         const activeImg = isBack && gownBackRef.current ? gownBackRef.current : gownImgRef.current
         const cal    = { ...(gownRef.current?.tryonCalibration || {}) }
-        const layout = getGownLayout(kps, cal, vw, vh)
+        const rawLayout = getGownLayout(kps, cal, vw, vh)
+        if (rawLayout) rawLayout.meas = measRef.current
+        let layout = rawLayout
+        if (rawLayout) {
+          const prev   = lastLayoutRef.current
+          const ratio  = rawLayout.torsoH / Math.max(rawLayout.sw, 1)   // normal adult front view is roughly 1.0-1.6
+          const jump   = prev
+            ? Math.max(Math.abs(rawLayout.sw / Math.max(prev.sw, 1) - 1),
+                       Math.abs(rawLayout.torsoH / Math.max(prev.torsoH, 1) - 1))
+            : 0
+          const glitch = ratio < 0.7 || ratio > 3 || jump > 0.35
+          if (glitch && prev && badLayoutRef.current < 6) {
+            badLayoutRef.current += 1
+            layout = prev                       // hold the last good frame for up to 6 frames
+          } else {
+            badLayoutRef.current = 0
+            lastLayoutRef.current = rawLayout   // real movement is accepted after 6 frames
+          }
+        }
 
         if (layout && activeImg && analysis.shouldersOk && analysis.hipsOk) {
           setPoseFound(true)
+          try {
+            const lc = lightCanvas.current || (lightCanvas.current = Object.assign(document.createElement('canvas'), { width: 8, height: 8 }))
+            const lg = lc.getContext('2d', { willReadFrequently: true })
+            const bx = Math.max(0, layout.cx - layout.sw / 2) * dpr
+            const by = Math.max(0, layout.sm.y) * dpr
+            lg.drawImage(canvas, bx, by, Math.max(8, layout.sw * dpr), Math.max(8, layout.torsoH * dpr), 0, 0, 8, 8)
+            const px = lg.getImageData(0, 0, 8, 8).data
+            let sum = 0
+            for (let i = 0; i < px.length; i += 4) sum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]
+            const L = sum / (64 * 255)
+            const target = Math.min(1.1, Math.max(0.75, 0.6 + 0.8 * L))   // mid-grey room = 1.0
+            lightRef.current += (target - lightRef.current) * 0.08
+          } catch { /* ignore a failed sample */ }
+          layout.brightness = lightRef.current
+          dbgRef.current = { kps, sw: layout.sw, torsoH: layout.torsoH, bright: layout.brightness, bad: badLayoutRef.current }
           goodFrames.current = Math.min(goodFrames.current + 1, 8)
           if (goodFrames.current >= 8) setPoseLocked(true)
 
           if (enhancedRef.current && segmenterRef.current) {
             drawGown(ctx, activeImg, layout, opacityRef.current)
-            await applySegmentation(segmenterRef.current, video, ctx, vw, vh)
+            await applySegmentation(segmenterRef.current, video, ctx, vw, vh, kps)
           } else {
             drawGown(ctx, activeImg, layout, opacityRef.current)
           }
@@ -593,6 +666,19 @@ export default function TryOnCamera({
         prevKpsRef.current = null; kpFilterRef.current.reset(); goodFrames.current = 0; setPoseLocked(false)
       }
     } catch { /* skip frame */ }
+    if (dbgRef.current && window.location.search.includes('tryondebug')) {
+      const d = dbgRef.current
+      ctx.save(); ctx.fillStyle = 'lime'
+      ;[KP.LS, KP.RS, KP.LH, KP.RH, 15, 16, 27, 28, 29, 30, 31, 32].forEach(i => {
+        const k = d.kps?.[i]
+        if (k && k.score > CONF) { ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, Math.PI * 2); ctx.fill() }
+      })
+      ctx.font = '12px monospace'; ctx.fillStyle = '#fff'; ctx.shadowColor = '#000'; ctx.shadowBlur = 3
+      ;[`pts ${d.kps?.length}  sw ${d.sw | 0}  torso ${d.torsoH | 0}  ratio ${(d.torsoH / d.sw).toFixed(2)}`,
+        `light ${d.bright?.toFixed(2)}  heldFrames ${d.bad}`
+      ].forEach((t, i) => ctx.fillText(t, 8, vh - 28 + i * 14))
+      ctx.restore()
+    }
 
     animRef.current = requestAnimationFrame(detect)
   }, [detectorRef, segmenterRef])   // eslint-disable-line react-hooks/exhaustive-deps
@@ -808,6 +894,11 @@ export default function TryOnCamera({
             <>
               <button className="tc-btn tc-btn--ghost" onClick={retake}>↩ Retake</button>
               <button className="tc-btn tc-btn--primary" onClick={downloadPhoto}>Download ↓</button>
+              {onSave && (
+                <button className="tc-btn tc-btn--outline" onClick={() => onSave(captured)}>
+                  ♡ Save to profile
+                </button>
+              )}
               {gown && (
                 <Link href={`/gowns/${gown.id}`} className="tc-btn tc-btn--outline">
                   View gown →
