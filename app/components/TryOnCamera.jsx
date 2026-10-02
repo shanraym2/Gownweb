@@ -49,6 +49,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
+
 // ── CDN scripts ───────────────────────────────────────────────────────────────
 const POSE_SCRIPTS = [
   'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.10.0/dist/tf-core.min.js',
@@ -70,7 +71,7 @@ function loadScript(src) {
 
 // ── Keypoints ─────────────────────────────────────────────────────────────────
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
-import { drawGownWarped, createKpFilter } from '../../lib/fitting-room/gownWarp.js'
+import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -241,6 +242,8 @@ async function applySegmentation(segmenter, video, ctx, w, h, kps) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function TryOnCamera({
+  calibrate = false,
+  onSaveCalibration = null,
   gown,
   gowns         = [],
   onGownChange,
@@ -259,6 +262,8 @@ export default function TryOnCamera({
   const isStartingRef = useRef(false)
   const cancelledRef  = useRef(null)   // set by startCamera(); called on unmount
   const tcWrapRef     = useRef(null)   // fullscreen target — wraps the viewport
+  const liveCalRef    = useRef(null)   // live calibration values (calibrate mode only)
+  const [liveCal, setLiveCal] = useState(null)
 
   // Internal refs — used when NOT sharing via context
   const internalDetectorRef  = useRef(null)
@@ -321,6 +326,18 @@ export default function TryOnCamera({
   useEffect(() => { opacityRef.current = opacity },   [opacity])
   useEffect(() => { enhancedRef.current = enhanced }, [enhanced])
   useEffect(() => { gownRef.current = gown },         [gown])
+
+  // Calibrate mode: start from the gown's saved calibration, edit live
+  useEffect(() => {
+    if (!calibrate) { liveCalRef.current = null; setLiveCal(null); return }
+    const base = { ...(gown?.tryonCalibration || {}) }
+    liveCalRef.current = base; setLiveCal(base)
+  }, [calibrate, gown?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setCalKey = (k, v) => {
+    const next = { ...(liveCalRef.current || {}), [k]: v }
+    liveCalRef.current = next; setLiveCal(next)
+  }
   useEffect(() => { measRef.current = bodyMeasures }, [bodyMeasures?.bust, bodyMeasures?.waist, bodyMeasures?.hips])
 
   // ── Load gown image when gown changes ──────────────────────────────────────
@@ -602,7 +619,7 @@ export default function TryOnCamera({
         setFacingBack(isBack)
 
         const activeImg = isBack && gownBackRef.current ? gownBackRef.current : gownImgRef.current
-        const cal    = { ...(gownRef.current?.tryonCalibration || {}) }
+        const cal    = { ...autoCalibration(gownRef.current), ...(gownRef.current?.tryonCalibration || {}), ...(liveCalRef.current || {}) }
         const rawLayout = getGownLayout(kps, cal, vw, vh)
         if (rawLayout) rawLayout.meas = measRef.current
         let layout = rawLayout
@@ -945,6 +962,40 @@ export default function TryOnCamera({
             </>
           )}
         </div>
+
+        {calibrate && liveCal && camState === 'on' && (
+          <div className="tc-settings" style={{ borderTop: '2px solid #c9a96e' }}>
+            <span className="tc-enhanced-label">Calibration mode — {gown?.name}</span>
+            {[
+              { k: 'necklineY',   label: 'Top position',   min: -0.15, max: 0.5, step: 0.01, def: 0.18 },
+              { k: 'waistRow',    label: 'Waist position', min: 0.1,   max: 0.8, step: 0.01, def: 0.3  },
+              { k: 'shoulderPad', label: 'Shoulder width', min: 0.6,   max: 2.0, step: 0.01, def: 1.15 },
+              { k: 'waistEase',   label: 'Waist ease',     min: 0.8,   max: 1.4, step: 0.01, def: 1.05 },
+              { k: 'hipEase',     label: 'Hip ease',       min: 0.8,   max: 1.4, step: 0.01, def: 1.1  },
+              { k: 'skirtFlare',  label: 'Skirt flare',    min: 0.7,   max: 2.0, step: 0.01, def: 1.1  },
+            ].map(s => {
+              const v = liveCal[s.k] ?? autoCalibration(gown)[s.k] ?? s.def
+              return (
+                <div key={s.k} className="tc-opacity-row">
+                  <label className="tc-opacity-label" style={{ width: 110 }}>{s.label}</label>
+                  <input type="range" className="tc-slider" min={s.min} max={s.max} step={s.step}
+                    value={v} onChange={e => setCalKey(s.k, parseFloat(e.target.value))}/>
+                  <span className="tc-opacity-val" style={{ width: 40 }}>
+                    {s.k === 'waistRow' && liveCal.waistRow == null ? 'auto' : Number(v).toFixed(2)}
+                  </span>
+                </div>
+              )
+            })}
+            <div className="tc-ctrl-row">
+              <button className="tc-btn tc-btn--primary" onClick={() => onSaveCalibration?.(liveCalRef.current || {})}>
+                Save calibration
+              </button>
+              <button className="tc-btn tc-btn--ghost" onClick={() => { liveCalRef.current = {}; setLiveCal({}) }}>
+                Reset to auto
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Overlay settings — only shown while camera is active */}
         {camState === 'on' && !captured && (

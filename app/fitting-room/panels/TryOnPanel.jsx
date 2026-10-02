@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFittingRoom } from '../FittingRoomProvider'
 import TryOnCamera from '../../components/TryOnCamera'
 import { getCurrentUser } from '../../utils/authClient'
+import { adminFetch } from '../../admin/adminFetch'
 
 export default function TryOnPanel({ initialGownId }) {
     const { gowns, detectorRef, segmenterRef, modelState, profile } = useFittingRoom()
@@ -16,6 +17,31 @@ export default function TryOnPanel({ initialGownId }) {
     const chosen = (initialGownId ? gowns.find(g => String(g.id) === String(initialGownId)) : null) || gowns[0]
     setSelectedGown(chosen)
   }, [gowns, initialGownId])
+
+  // Calibrate mode: staff/admin only, opened with ?calibrate in the URL
+  const [calibrate, setCalibrate] = useState(false)
+  useEffect(() => {
+    const u = getCurrentUser()
+    const isStaff = ['admin', 'staff'].includes(u?.role)
+    setCalibrate(isStaff && new URLSearchParams(window.location.search).has('calibrate'))
+  }, [])
+
+  const saveCalibration = useCallback(async (cal) => {
+    if (!selectedGown?.id) return
+    setSaveMsg('Saving calibration…')
+    try {
+      const res = await adminFetch('/api/admin/gowns', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedGown.id, tryonCalibration: Object.keys(cal || {}).length ? cal : null }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Save failed')
+      setSaveMsg('✓ Calibration saved for ' + (selectedGown.name || 'gown'))
+    } catch (e) {
+      setSaveMsg(e.message)
+    }
+  }, [selectedGown])
 
   const saveTryon = useCallback(async (imageDataUrl) => {
     const user = getCurrentUser()
@@ -51,6 +77,8 @@ export default function TryOnPanel({ initialGownId }) {
         externalSegmenter={segmenterRef}
         modelState={modelState}
         onSave={saveTryon}
+        calibrate={calibrate}
+        onSaveCalibration={saveCalibration}
         bodyMeasures={{ bust: profile?.bust, waist: profile?.waist, hips: profile?.hips }}
       />
       {saveMsg && (
