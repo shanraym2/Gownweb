@@ -580,6 +580,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
   const canvasRef = useRef(null)
   const dragging  = useRef(false)
   const CW = 220, CH = 400
+  const EDPR = () => (typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1)
 
   const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
 
@@ -606,6 +607,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
+    ctx.setTransform(EDPR(), 0, 0, EDPR(), 0, 0)
     ctx.clearRect(0, 0, CW, CH)
 
     ctx.fillStyle = '#0c0804'
@@ -853,7 +855,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
 
               <canvas
                 ref={canvasRef}
-                width={CW} height={CH}
+                width={Math.round(CW * EDPR())} height={Math.round(CH * EDPR())}
                 className="ce-canvas"
                 onMouseDown={onDown}
                 onMouseMove={onMove}
