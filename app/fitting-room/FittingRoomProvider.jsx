@@ -110,7 +110,7 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
     const idx = sizes.findIndex(s => s.label === best.label)
     let finalIdx = idx
 
-    if (source === 'camera' && idx < sizes.length - 1) {
+    if (source === 'camera' && (profile.segment ?? 'women') === 'women' && idx < sizes.length - 1) {
       finalIdx = idx + 1
       best = sizes[finalIdx]
     } else if (source !== 'camera' && bestScore > 2.0 && bestScore < 8.0 && idx < sizes.length - 1) {
@@ -139,9 +139,11 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
   // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!gowns?.length || !profile.bodyShape) return
+        if (!gowns?.length) return
 
     const seg = profile.segment ?? 'women'
+    // Suits are scored without body shape, so men don't need one to get results.
+    if (!profile.bodyShape && seg !== 'men') { setStyleResults(null); return }
 
     // ── Dev diagnostic — remove before shipping ───────────────────────────
     if (process.env.NODE_ENV === 'development') {

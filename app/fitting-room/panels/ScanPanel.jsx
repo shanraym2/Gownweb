@@ -167,6 +167,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   const [detectedTone,  setDetectedTone ] = useState(null)
   const [detectedShape, setDetectedShape] = useState(null)
   const [liveEst,       setLiveEst      ] = useState(null)
+  const [framingHint,   setFramingHint  ] = useState(null)
   const [fullscreen,    setFullscreen   ] = useState(false)
   const [snapshot,      setSnapshot     ] = useState(null)
   const [showSnapshot,  setShowSnapshot ] = useState(false)
@@ -375,6 +376,22 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
           const hasFullHeight = profile.height && nose?.score > CONF && la?.score > CONF && ra?.score > CONF
 
+          // Framing hint from the head-to-floor span. Gaps are estimated from
+          // nose and ankle positions (head top ~9% above nose, floor ~5% below ankle).
+          let hint = null
+          if (nose?.score > CONF && la?.score > CONF && ra?.score > CONF) {
+            const feetY  = Math.max(la.y, ra.y)
+            const bodyPx = feetY - nose.y
+            const topM   = (nose.y - bodyPx * 0.09) / vh
+            const botM   = (vh - (feetY + bodyPx * 0.05)) / vh
+            const full   = 1 - topM - botM
+            if (full > 0.90)             hint = 'Step back a little'
+            else if (full < 0.74)        hint = 'Step closer a little'
+            else if (topM - botM > 0.08) hint = 'Tilt the camera down: you are low in the frame'
+            else if (botM - topM > 0.08) hint = 'Tilt the camera up: you are high in the frame'
+          }
+          setFramingHint(hint)
+
           const pxPerCm = (() => {
             if (hasFullHeight) {
               const ankleMid     = mid(la, ra)
@@ -520,6 +537,18 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
         setConfidence(0); setLiveEst(null); liveKpsRef.current = null
       }
     } catch {}
+
+    // Framing guide: head and feet should land on these marks
+    ctx.save()
+    ctx.setLineDash([6, 6]); ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'
+    ctx.fillStyle   = 'rgba(255,255,255,0.6)'
+    ctx.font        = '11px system-ui'
+    ;[[vh * 0.08, 'head'], [vh * 0.92, 'feet']].forEach(([y, label]) => {
+      ctx.beginPath(); ctx.moveTo(vw * 0.35, y); ctx.lineTo(vw * 0.65, y); ctx.stroke()
+      ctx.fillText(label, vw * 0.35, y + (label === 'head' ? 14 : -5))
+    })
+    ctx.restore()
 
     animRef.current = requestAnimationFrame(detect)
   }, [detectorRef, profile.height, profile.segment, detectedShape])
@@ -1021,6 +1050,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                       {issue ? issue
                         : poseIssues.some(i => HIGH_SEVERITY_ISSUES.has(i))
                           ? GUIDANCE_MAP[poseIssues.find(i => HIGH_SEVERITY_ISSUES.has(i))]
+                          : framingHint ? framingHint
                           : confidence > 0
                             ? (confidence < 65 ? 'Hold still — building confidence…' : 'Good — ready to lock')
                             : 'Detecting pose…'}
@@ -1276,7 +1306,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                 <p className="scan-tip-body">
                   {scanMode === 'side'
                     ? 'Turn 90° to the side, put your hands on your head so your arms are out of the way, and stay at the same distance as the front scan. It locks automatically.'
-                    : 'Stand 1.5–2 m away, arms slightly out, full body visible.'}
+                    : 'Put the laptop on a table with the screen near upright, so the camera sits around hip height. Arms slightly out. Step back until your head and feet touch the dashed marks. Camera up means open the screen further. Camera down means close it a little.'}
                 </p>
                 {!hasHeight && camState === 'off' && (
                   <p className="scan-tip-height-hint">↑ Enter height above before scanning for best results.</p>
