@@ -556,14 +556,7 @@ export default function TryOnCamera({
       animRef.current = requestAnimationFrame(detect); return
     }
 
-    // 5-tap moving average so neighbouring bands never differ sharply
-  const smoothBand = arr => arr.map((_, i) => {
-    let s = 0
-    for (let k = -2; k <= 2; k++) s += arr[clamp(i + k, 0, BANDS - 1)]
-    return s / 5
-  })
-  const gwS = smoothBand(prof.right.map((r, i) => r - prof.left[i]))
-  const cS  = smoothBand(prof.right.map((r, i) => (r + prof.left[i]) / 2))
+
 
   const dpr = window.devicePixelRatio || 1
     const vw  = video.videoWidth  || 640
