@@ -73,6 +73,7 @@ function loadScript(src) {
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
+import { resolveCal, guessTags, NECKLINES, SLEEVES } from '../../lib/fitting-room/calibration.js'
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -270,7 +271,7 @@ export default function TryOnCamera({
   const segmenterRef = externalSegmenter ?? internalSegmenterRef
 
   // Stable refs for values consumed inside the detect loop
-  const opacityRef    = useRef(0.88)
+    const opacityRef    = useRef(1)
   const enhancedRef   = useRef(false)
   const gownRef       = useRef(gown)
   const measRef       = useRef(bodyMeasures)
@@ -308,7 +309,7 @@ export default function TryOnCamera({
   const [facingBack, setFacingBack] = useState(false)
 
   // Overlay controls
-  const [opacity,    setOpacity   ] = useState(0.88)
+    const [opacity,    setOpacity   ] = useState(1)
   const [enhanced,   setEnhanced  ] = useState(false)
   const [segLoading, setSegLoading] = useState(false)
   const [segError,   setSegError  ] = useState('')
@@ -617,7 +618,7 @@ export default function TryOnCamera({
         setFacingBack(isBack)
 
         const activeImg = isBack && gownBackRef.current ? gownBackRef.current : gownImgRef.current
-        const cal    = { ...autoCalibration(gownRef.current), ...(gownRef.current?.tryonCalibration || {}), ...(liveCalRef.current || {}) }
+        const cal    = resolveCal({ ...autoCalibration(gownRef.current), ...(gownRef.current?.tryonCalibration || {}), ...(liveCalRef.current || {}) }, gownRef.current)
         const rawLayout = getGownLayout(kps, cal, vw, vh)
         if (rawLayout) rawLayout.meas = measRef.current
         let layout = rawLayout
@@ -999,6 +1000,52 @@ export default function TryOnCamera({
         {calibrate && liveCal && camState === 'on' && (
           <div className="tc-settings" style={{ borderTop: '2px solid #c9a96e' }}>
             <span className="tc-enhanced-label">Calibration mode — {gown?.name}</span>
+                        <div className="tc-ctrl-row">
+              {['simple', 'enhanced'].map(m => (
+                <button key={m} type="button"
+                  className={`tc-btn ${(liveCal.mode || 'simple') === m ? 'tc-btn--primary' : 'tc-btn--ghost'}`}
+                  aria-pressed={(liveCal.mode || 'simple') === m}
+                  onClick={() => setCalKey('mode', m)}>
+                  {m === 'simple' ? 'Simple' : 'Enhanced'}
+                </button>
+              ))}
+            </div>
+            {liveCal.mode === 'enhanced' && (() => {
+              const r = resolveCal(liveCal, gown), e = r.enh
+              const setEnh = (k, v) => setCalKey('enhanced', { ...(liveCalRef.current?.enhanced || {}), [k]: v })
+              const rows = [
+                { k: 'topAt',        label: 'Top edge',     min: -0.4, max: 0.4, step: 0.01, v: -r.necklineY },
+                { k: 'shoulderEase', label: 'Top width',    min: 0.8,  max: 2.0, step: 0.01, v: r.shoulderPad },
+                { k: 'seamL',        label: 'Left sleeve',  min: 0,    max: 0.4, step: 0.01, v: e.seamL },
+                { k: 'seamR',        label: 'Right sleeve', min: 0,    max: 0.4, step: 0.01, v: e.seamR },
+              ]
+              return (
+                <>
+                  <div className="tc-ctrl-row">
+                    <select aria-label="Neckline" value={e.neckline} onChange={ev => setEnh('neckline', ev.target.value)}
+                      style={{ padding: '6px 8px', fontSize: 12, borderRadius: 6, border: '1px solid #ddd' }}>
+                      {NECKLINES.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                    </select>
+                    <select aria-label="Sleeves" value={e.sleeves} onChange={ev => setEnh('sleeves', ev.target.value)}
+                      style={{ padding: '6px 8px', fontSize: 12, borderRadius: 6, border: '1px solid #ddd' }}>
+                      {SLEEVES.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                    </select>
+                    <button type="button" className="tc-btn tc-btn--ghost"
+                      onClick={() => setCalKey('enhanced', { neckline: e.neckline, sleeves: e.sleeves })}>
+                      Reset to tag defaults
+                    </button>
+                  </div>
+                  {rows.map(s => (
+                    <div key={s.k} className="tc-opacity-row">
+                      <label className="tc-opacity-label" style={{ width: 110 }}>{s.label}</label>
+                      <input type="range" className="tc-slider" min={s.min} max={s.max} step={s.step}
+                        value={s.v} onChange={ev => setEnh(s.k, parseFloat(ev.target.value))}/>
+                      <span className="tc-opacity-val" style={{ width: 40 }}>{Number(s.v).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </>
+              )
+            })()}
             {[
               { k: 'necklineY',   label: 'Top position',   min: -0.15, max: 0.5, step: 0.01, def: 0.18 },
               { k: 'waistRow',    label: 'Waist position', min: 0.1,   max: 0.8, step: 0.01, def: 0.3  },
@@ -1007,6 +1054,7 @@ export default function TryOnCamera({
               { k: 'hipEase',     label: 'Hip ease',       min: 0.8,   max: 1.4, step: 0.01, def: 1.1  },
               { k: 'skirtFlare',  label: 'Skirt flare',    min: 0.7,   max: 2.0, step: 0.01, def: 1.1  },
             ].map(s => {
+                            if (liveCal.mode === 'enhanced' && (s.k === 'necklineY' || s.k === 'shoulderPad')) return null
               const v = liveCal[s.k] ?? autoCalibration(gown)[s.k] ?? s.def
               return (
                 <div key={s.k} className="tc-opacity-row">

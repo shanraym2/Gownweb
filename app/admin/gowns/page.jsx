@@ -5,7 +5,9 @@ import Link from 'next/link'
 import { useRoleGuard } from '../../utils/useRoleGuard'
 import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
-import { drawGownWarped } from '@/lib/fitting-room/gownWarp'
+import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
+import { drawGownGL, ensureProfile } from '@/lib/fitting-room/glGownRenderer'
+import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
 
 /* ─────────────────────────────────────────────
@@ -500,6 +502,82 @@ function AutoMatteModal({ displayImage, onDone, onClose }) {
     </div>
   )
 }
+
+/* ─────────────────────────────────────────────
+   SeamPreview — draggable sleeve-seam lines over the cut-out image
+───────────────────────────────────────────── */
+function SeamPreview({ src, cal, rc, onSeam }) {
+  const [img, setImg] = useState(null)
+  const boxRef  = useRef(null)
+  const dragRef = useRef(null)
+
+  useEffect(() => {
+    if (!src) { setImg(null); return }
+    let cancelled = false, objectUrl = null
+    toSafeUrl(src)
+      .then(safe => {
+        if (cancelled) return
+        if (safe !== src) objectUrl = safe
+        const im = new Image()
+        im.onload  = () => { if (!cancelled) setImg(im) }
+        im.onerror = () => { if (!cancelled) setImg(null) }
+        im.src = safe
+      })
+      .catch(() => { if (!cancelled) setImg(null) })
+    return () => { cancelled = true; if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000) }
+  }, [src])
+
+  const prof = useMemo(() => {
+    if (!img) return null
+    try { const p = getProfile(img); if (p) ensureProfile(p); return p } catch { return null }
+  }, [img])
+
+  if (!img) return null
+  if (!prof) return <p className="ce-row-hint">Seam lines need a try-on image with a transparent background. Use Auto cut-out first.</p>
+
+  const clampN = (v, a, b) => Math.min(Math.max(v, a), b)
+  const wf  = clampN(cal.waistRow ?? prof.waistFrac, 0.1, 0.8)
+  const ex  = bodiceExtent(prof.glL, prof.glR, wf)
+  if (!ex) return null
+  const e   = rc.enh
+  const xL  = ex.lo + e.seamL * ex.W
+  const xR  = ex.hi - e.seamR * ex.W
+  const bad = !seamsFor(prof.glL, prof.glR, wf, e)
+  const pct = x => `${(x / prof.iw) * 100}%`
+  const yWaist = ((prof.srcTop + wf * prof.srcH) / prof.ih) * 100
+
+  const move = ev => {
+    const side = dragRef.current; if (!side || !boxRef.current) return
+    const r = boxRef.current.getBoundingClientRect()
+    const x = ((ev.clientX - r.left) / r.width) * prof.iw
+    onSeam(side, side === 'L' ? clampN((x - ex.lo) / ex.W, 0, 0.4) : clampN((ex.hi - x) / ex.W, 0, 0.4))
+  }
+  const line = (side, x) => (
+    <div key={side}
+      role="slider" aria-label={side === 'L' ? 'Left sleeve seam' : 'Right sleeve seam'}
+      aria-valuenow={Number((side === 'L' ? e.seamL : e.seamR).toFixed(2))} aria-valuemin={0} aria-valuemax={0.4}
+      onPointerDown={ev => { dragRef.current = side; ev.currentTarget.setPointerCapture(ev.pointerId) }}
+      onPointerMove={move}
+      onPointerUp={() => { dragRef.current = null }}
+      onPointerCancel={() => { dragRef.current = null }}
+      style={{ position:'absolute', top:0, bottom:0, left:pct(x), width:16, marginLeft:-8, cursor:'ew-resize', touchAction:'none' }}>
+      <div style={{ position:'absolute', top:0, bottom:0, left:7, width:2, background: bad ? '#e24b4a' : '#c9a96e' }}/>
+    </div>
+  )
+
+  return (
+    <div>
+      <p className="ce-row-label" style={{marginBottom:4}}>Sleeve seams: drag the gold lines to where the bodice ends and the sleeves begin</p>
+      <div ref={boxRef} style={{ position:'relative', background:'repeating-conic-gradient(#d9d6d0 0% 25%, #f4f2ee 0% 50%) 50% / 16px 16px', borderRadius:8, overflow:'hidden', userSelect:'none' }}>
+        <img src={img.src} alt="Try-on image with sleeve seam lines" draggable={false} style={{ width:'100%', display:'block' }}/>
+        <div style={{ position:'absolute', left:0, right:0, top:`${yWaist}%`, borderTop:'1px dashed rgba(74,127,212,.8)' }} aria-hidden="true"/>
+        {line('L', xL)}
+        {line('R', xR)}
+      </div>
+      {bad && <p className="field-error">The seams are too close together. Move them apart.</p>}
+    </div>
+  )
+}
 /* ─────────────────────────────────────────────
    CalibrationEditor  v2
    Skeleton-anchored interactive canvas editor.
@@ -705,7 +783,7 @@ function drawCalHandles(ctx, hmap, active, hover) {
   }
 }
 
-function CalibrationEditor({ calibration, onChange, tryonImage }) {
+function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
   const [open,        setOpen      ] = useState(false)
   const [dressImg,    setDressImg  ] = useState(null)
   const [active,      setActive    ] = useState(null)
@@ -726,6 +804,10 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
   const EDPR = () => (typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1)
 
   const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
+    const isEnh   = cal.mode === 'enhanced'
+  const rc      = resolveCal(cal, gown)          // used for geometry only, never saved
+  const setMode = m => onChange({ ...cal, mode: m })
+  const setEnh  = (k, v) => onChange({ ...cal, enhanced: { ...(cal.enhanced || {}), [k]: v } })
 
   // Load dress image
   useEffect(() => {
@@ -773,7 +855,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     const dox = cal.offsetX || 0
     const doy = cal.offsetY || 0
 
-    const lay  = calLayout(cal, CW, CH)
+        const lay  = calLayout(rc, CW, CH)
     const hmap = calHandles(lay)
 
     drawCalGuides(ctx, lay, CW)
@@ -783,12 +865,14 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     if (dressImg) {
       const sy2  = cal.scaleY ?? 1
       const top2 = lay.topY + doy
-      const warped = drawGownWarped(ctx, dressImg, {
+      const L = {
         topY: top2, bottomY: top2 + (lay.bottomY - lay.topY) * sy2,
         sm: { x: lay.cx, y: lay.smY }, hm: { x: lay.cx, y: lay.hmY },
         sw: lay.swPx, hw: (B.rh[0] - B.lh[0]) * CW, torsoH: lay.torsoH,
-        cal, dx: dox, dy: doy, scaleX: cal.scaleX ?? 1,
-      }, 0.93, { w: CW, h: CH })
+        cal: rc, dx: dox, dy: doy, scaleX: cal.scaleX ?? 1, noCloth: true,
+      }
+      const warped = drawGownGL(ctx, dressImg, L, 0.93, { w: CW, h: CH })
+                  || drawGownWarped(ctx, dressImg, L, 0.93, { w: CW, h: CH })
       if (!warped) drawCalDressImageEx(ctx, dressImg, lay, CW, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
     } else {
       drawCalDressTrapezoidEx(ctx, lay, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
@@ -829,7 +913,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
   }
 
   function hitTest(x, y) {
-    const lay  = calLayout(cal, CW, CH)
+    const lay  = calLayout(rc, CW, CH)
     const hmap = calHandles(lay)
     for (const [key, h] of Object.entries(hmap)) {
       if (Math.hypot(x - h.x, y - h.y) < 11 / zoom) return key
@@ -910,7 +994,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
     const dx   = x - dragOrigin.x
     const dy   = y - dragOrigin.y
     const snap = calSnapshot
-    const lay0 = calLayout(snap, CW, CH)
+        const lay0 = calLayout(resolveCal(snap, gown), CW, CH)
     let next   = { ...snap }
 
     switch (active) {
@@ -948,8 +1032,13 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
         break
       }
     }
+    if (isEnh && (active === 'neckline' || active === 'shoulderL' || active === 'shoulderR')) {
+      // route the drag into the enhanced values and leave the simple ones as saved
+      const patch = active === 'neckline' ? { topAt: -next.necklineY } : { shoulderEase: next.shoulderPad }
+      next = { ...snap, enhanced: { ...(snap.enhanced || {}), ...patch } }
+    }
     onChange(next)
-  }, [active, dragOrigin, calSnapshot, onChange, panning, zoom])
+  }, [active, dragOrigin, calSnapshot, onChange, panning, zoom, isEnh, gown])
 
   const onUp = useCallback(() => {
     dragging.current = false
@@ -1024,7 +1113,55 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
                 Drag handles on the canvas for quick alignment, or use sliders for precision.
                 Scroll to zoom · drag background to pan · arrow keys to nudge view.
               </p>
-
+                            <p className="ce-group-label">Mode</p>
+              <div className="ce-btns">
+                {['simple', 'enhanced'].map(m => {
+                  const on = (isEnh ? 'enhanced' : 'simple') === m
+                  return (
+                    <button key={m} type="button" className="ce-ghost" aria-pressed={on} onClick={() => setMode(m)}
+                      style={on ? { background:'rgba(200,169,110,.18)', color:'#c9a96e', borderColor:'rgba(200,169,110,.45)' } : undefined}>
+                      {m === 'simple' ? 'Simple' : 'Enhanced'}
+                    </button>
+                  )
+                })}
+              </div>
+              {isEnh && (
+                <>
+                  <p className="ce-desc">Pick the neckline and sleeves for starting values, then fine-tune. Switching back to Simple keeps these values.</p>
+                  <div className="form-grid-2">
+                    <select aria-label="Neckline" className="field-input" value={rc.enh.neckline} onChange={e => setEnh('neckline', e.target.value)}>
+                      {NECKLINES.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                    </select>
+                    <select aria-label="Sleeves" className="field-input" value={rc.enh.sleeves} onChange={e => setEnh('sleeves', e.target.value)}>
+                      {SLEEVES.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
+                    </select>
+                  </div>
+                  {[
+                    { key:'topAt',        label:'Top edge',     min:-0.4, max:0.4, step:0.01, v:-rc.necklineY,  hint:'Where the top edge sits against the shoulders. Higher = toward the neck.' },
+                    { key:'shoulderEase', label:'Top width',    min:0.8,  max:2.0, step:0.01, v:rc.shoulderPad, hint:'Width of the top edge relative to the shoulder span.' },
+                    { key:'seamL',        label:'Left sleeve',  min:0,    max:0.4, step:0.01, v:rc.enh.seamL,   hint:'How much of the left side is sleeve.' },
+                    { key:'seamR',        label:'Right sleeve', min:0,    max:0.4, step:0.01, v:rc.enh.seamR,   hint:'How much of the right side is sleeve.' },
+                  ].map(s => (
+                    <div key={s.key} className="ce-row">
+                      <div className="ce-row-head">
+                        <span className="ce-row-label">{s.label}</span>
+                        <span className="ce-row-val">{Number(s.v).toFixed(2)}</span>
+                      </div>
+                      <input type="range" min={s.min} max={s.max} step={s.step} value={s.v}
+                        onChange={e => setEnh(s.key, parseFloat(e.target.value))} className="ce-range"/>
+                      <p className="ce-row-hint">{s.hint}</p>
+                    </div>
+                  ))}
+                  {tryonImage && (
+                    <SeamPreview src={tryonImage} cal={cal} rc={rc}
+                      onSeam={(side, v) => setEnh(side === 'L' ? 'seamL' : 'seamR', v)} />
+                  )}
+                  <button type="button" className="ce-ghost"
+                    onClick={() => onChange({ ...cal, enhanced: { neckline: rc.enh.neckline, sleeves: rc.enh.sleeves } })}>
+                    Reset to tag defaults
+                  </button>
+                </>
+              )}
               <p className="ce-group-label">Shape</p>
               {[
                 { key:'necklineY',   label:'Neckline offset', min:0.02, max:0.55, step:0.01,
@@ -1036,6 +1173,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage }) {
                 { key:'hemY',        label:'Hem length',       min:0.35, max:1.30, step:0.01,
                   hint:'Override hem position. Drag the blue ↕ handle or use slider.', isHem:true },
               ].map(s => {
+                                if (isEnh && (s.key === 'necklineY' || s.key === 'shoulderPad')) return null
                 const raw = cal[s.key]
                 const val = s.isHem ? (raw ?? 1.0) : raw
                 const display = raw == null && s.isHem ? 'auto' : Number(val).toFixed(2)
@@ -1590,7 +1728,8 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
             <CalibrationEditor
               calibration={form.tryonCalibration}
               onChange={cal=>setForm(p=>({...p,tryonCalibration:cal}))}
-              tryonImage={form.tryonImage}
+                            tryonImage={form.tryonImage}
+              gown={form}
             />
           </div>
 
@@ -1661,7 +1800,55 @@ function InlineInventoryEditor({ inventory, onChange, segmentPresets }) {
     </div>
   )
 }
+/* ─────────────────────────────────────────────
+   Try-on image status (transparent corners = fast GL path in the fitting room)
+───────────────────────────────────────────── */
+const alphaCache = new Map()          // url -> 'ok' | 'opaque' | 'error'
+const alphaQueue = []
+let alphaActive = 0
 
+async function runAlphaCheck(url) {
+  let obj = null
+  try {
+    const safe = await toSafeUrl(url)
+    if (safe !== url) obj = safe
+    const img = await new Promise((res, rej) => {
+      const im = new Image()
+      im.onload = () => res(im); im.onerror = rej; im.src = safe
+    })
+    return getProfile(img) ? 'ok' : 'opaque'     // same test the renderer uses
+  } catch { return 'error' }
+  finally { if (obj) URL.revokeObjectURL(obj) }
+}
+function pumpAlpha() {
+  while (alphaActive < 2 && alphaQueue.length) {
+    const { url, resolve } = alphaQueue.shift()
+    alphaActive++
+    runAlphaCheck(url)
+      .then(r => { alphaCache.set(url, r); resolve(r) })
+      .finally(() => { alphaActive--; pumpAlpha() })
+  }
+}
+function checkAlpha(url) {
+  if (alphaCache.has(url)) return Promise.resolve(alphaCache.get(url))
+  return new Promise(resolve => { alphaQueue.push({ url, resolve }); pumpAlpha() })
+}
+function useTryonStatus(url) {
+  const ref = useRef(null)
+  const [st, setSt] = useState(url ? (alphaCache.get(url) || null) : null)
+  useEffect(() => {
+    if (!url) { setSt(null); return }
+    if (alphaCache.has(url)) { setSt(alphaCache.get(url)); return }
+    let cancelled = false
+    const go = () => checkAlpha(url).then(r => { if (!cancelled) setSt(r) })
+    const el = ref.current
+    if (!el || typeof IntersectionObserver === 'undefined') { go(); return () => { cancelled = true } }
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); go() } })
+    io.observe(el)
+    return () => { cancelled = true; io.disconnect() }
+  }, [url])
+  return [ref, st]
+}
 /* ─────────────────────────────────────────────
    Gown Card
 ───────────────────────────────────────────── */
@@ -1671,9 +1858,10 @@ function GownCard({ g, onEdit, onView, onSaveStock, onArchive, onPermanentDelete
   const outSizes=inv.filter(i=>(i.stock-(i.reserved||0))<=0)
   const lowSizes=inv.filter(i=>{const a=i.stock-(i.reserved||0);return a>0&&a<=2})
   const segmentLabel = SEGMENTS.find(s=>s.id===g.segment)?.label
+    const [tryRef, tryStatus] = useTryonStatus(archived ? '' : g.tryonImage)
   return(
     <div className={`gown-card${archived?' gown-card--archived':''}`}>
-      <div className="gown-card-img">
+            <div className="gown-card-img" ref={tryRef}>
         <img src={g.image} alt={g.alt||g.name} onError={e=>{e.target.style.display='none'}}/>
         {g.tryonImage&&<div className="vto-badge">VTO</div>}
         {g.tryonImageBack&&<div className="vto-badge vto-badge--back">↩</div>}
@@ -1682,6 +1870,7 @@ function GownCard({ g, onEdit, onView, onSaveStock, onArchive, onPermanentDelete
         <div className="gown-card-name">
           {g.name}
           {archived&&<span className="badge badge--warning">Archived</span>}
+                    {tryStatus==='opaque'&&<span className="badge badge--warning" title="This try-on image has no transparent background, so the fitting room draws it the slow, low-quality way. Open the gown and use Auto cut-out.">Needs cut-out</span>}
           {g.tryonCalibration&&<span className="badge badge--neutral">⚙ Cal</span>}
           {segmentLabel&&segmentLabel!=='Women'&&<span className="badge badge--blue">{segmentLabel}</span>}
         </div>
