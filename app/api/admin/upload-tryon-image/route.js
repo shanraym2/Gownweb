@@ -82,8 +82,12 @@ export async function POST(request) {
         )
       }
 
-      mimeType = file.type || 'image/jpeg'
-      const ext = path.extname(file.name || '') || '.jpg'
+      mimeType = file.type || ''
+      const EXT = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }
+      const ext = EXT[mimeType]
+      if (!ext) {
+        return NextResponse.json({ ok: false, error: 'Only PNG, JPEG, WebP or GIF images are allowed.' }, { status: 400 })
+      }
 
       filename = `upload-${Date.now()}-${Math.random()
         .toString(36)

@@ -14,7 +14,7 @@ import { SEGMENTS } from '../constants/sizeConstants'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const WASM_BASE  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-const MODEL_PATH = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task'
+const MODEL_PATH = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task'
 
 // Adapter: wraps PoseLandmarker so the rest of the codebase (ScanPanel's
 // detect loop) can keep calling `detectorRef.current.estimatePoses(video)`
@@ -22,23 +22,62 @@ const MODEL_PATH = 'https://storage.googleapis.com/mediapipe-models/pose_landmar
 // normalised (0–1); we convert to pixel space here so downstream pixel-based
 // geometry in poseUtils.js / measurementUtils.js needs no changes.
 function wrapPoseLandmarker(landmarker) {
-  return {
+  let maskOn = false
+  let maskCanvas = null, maskImg = null
+  const STEP = 4                         // sample the mask at 1/4 res; drawImage upscales (soft edge for free)
+
+  const maskToCanvas = (m) => {
+    const W = m.width, H = m.height
+    const w = Math.ceil(W / STEP), h = Math.ceil(H / STEP)
+    if (!maskCanvas) maskCanvas = document.createElement('canvas')
+    if (maskCanvas.width !== w || maskCanvas.height !== h) { maskCanvas.width = w; maskCanvas.height = h; maskImg = null }
+    const g = maskCanvas.getContext('2d')
+    if (!maskImg) maskImg = g.createImageData(w, h)
+    const f = m.getAsFloat32Array(), d = maskImg.data
+    let on = 0
+    for (let y = 0; y < h; y++) {
+      const row = Math.min(y * STEP, H - 1) * W
+      for (let x = 0; x < w; x++) {
+        const val = (f[row + Math.min(x * STEP, W - 1)] - 0.4) * 5   // tighten the soft edge
+        const a = val <= 0 ? 0 : val >= 1 ? 255 : val * 255
+        d[(y * w + x) * 4 + 3] = a
+        if (a > 127) on++
+      }
+    }
+    g.putImageData(maskImg, 0, 0)
+    api.coverage = on / (w * h)
+    return maskCanvas
+  }
+
+  const api = {
     landmarker,
+    coverage: null,                      // fraction of the frame that is "person"; null = no mask this frame
+    setMask(on) {
+      maskOn = !!on
+      Promise.resolve(landmarker.setOptions({ outputSegmentationMasks: maskOn })).catch(() => {})
+    },
     estimatePoses: (video) => {
       const vw = video.videoWidth || 640
       const vh = video.videoHeight || 480
+      api.coverage = null
       const result = landmarker.detectForVideo(video, performance.now())
+      let segmentation = null
+      const masks = result?.segmentationMasks
+      if (masks?.length) {
+        try { if (maskOn) segmentation = maskToCanvas(masks[0]) } catch { /* keypoints still work */ }
+        masks.forEach(m => m.close())
+      }
       if (!result?.landmarks?.length) return Promise.resolve([])
       const keypoints = result.landmarks[0].map(lm => ({
         x: lm.x * vw,
         y: lm.y * vh,
         score: lm.visibility ?? 0,
       }))
-      return Promise.resolve([{ keypoints }])
+      return Promise.resolve([{ keypoints, segmentation }])
     },
   }
+  return api
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CONTEXT
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,11 +243,15 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
 
     setModelState('loading')
     FilesetResolver.forVisionTasks(WASM_BASE)
-      .then(vision => PoseLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
-        runningMode: 'VIDEO',
-        numPoses: 1,
-      }))
+      .then(async vision => {
+        const make = delegate => PoseLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: MODEL_PATH, delegate },
+          runningMode: 'VIDEO',
+          outputSegmentationMasks: false,   // toggled at runtime via detector.setMask()
+          numPoses: 1,
+        })
+        try { return await make('GPU') } catch { return await make('CPU') }
+      })
       .then(landmarker => {
         detectorRef.current = wrapPoseLandmarker(landmarker)
         setModelState('ready')

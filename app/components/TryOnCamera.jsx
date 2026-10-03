@@ -57,7 +57,7 @@ const POSE_SCRIPTS = [
   'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.10.0/dist/tf-backend-webgl.min.js',
   'https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js',
 ]
-const SEG_SCRIPT = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.1/dist/body-segmentation.min.js'
+
 
 
 function loadScript(src) {
@@ -72,6 +72,7 @@ function loadScript(src) {
 // ── Keypoints ─────────────────────────────────────────────────────────────────
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
+import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -173,6 +174,7 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
 }
 
 function drawGown(ctx, img, layout, opacity) {
+  if (drawGownGL(ctx, img, layout, opacity)) return
   if (drawGownWarped(ctx, img, layout, opacity)) return
   const { topY, bottomY, cx, topW, botW } = layout
   const h = bottomY - topY; if (h <= 0) return
@@ -197,46 +199,40 @@ function drawGown(ctx, img, layout, opacity) {
   ctx.drawImage(oc, 0, 0, vw, vh)
   ctx.restore()
 }
-
-async function applySegmentation(segmenter, video, ctx, w, h, kps) {
-  if (!segmenter) return
+let segOC = null, segAC = null
+function applySegmentation(maskCanvas, video, ctx, w, h, kps) {
   try {
-    const result = await segmenter.segmentPeople(video, {
-      multiSegmentation: false, segmentBodyParts: false,
-    })
-    if (!result?.length) return
-    const oc   = Object.assign(document.createElement('canvas'), { width: w, height: h })
-    const octx = oc.getContext('2d')
+    if (!segOC) { segOC = document.createElement('canvas'); segAC = document.createElement('canvas') }
+    if (segOC.width !== w || segOC.height !== h) {
+      segOC.width = w; segOC.height = h; segAC.width = w; segAC.height = h
+    }
+    const octx = segOC.getContext('2d')
+    octx.globalCompositeOperation = 'source-over'
+    octx.clearRect(0, 0, w, h)
+    // mirrored video, then keep only person pixels (mask mirrored the same way)
     octx.save(); octx.translate(w, 0); octx.scale(-1, 1); octx.drawImage(video, 0, 0, w, h); octx.restore()
-    const maskData = await window.bodySegmentation.toBinaryMask(
-      result,
-      { r: 255, g: 255, b: 255, a: 255 },
-      { r: 0,   g: 0,   b: 0,   a: 0   },
-      false
-    )
-    const mc = Object.assign(document.createElement('canvas'), { width: w, height: h })
-    mc.getContext('2d').putImageData(maskData, 0, 0)
     octx.globalCompositeOperation = 'destination-in'
-    octx.save(); octx.translate(w, 0); octx.scale(-1, 1); octx.drawImage(mc, 0, 0); octx.restore()
+    octx.save(); octx.translate(w, 0); octx.scale(-1, 1); octx.drawImage(maskCanvas, 0, 0, w, h); octx.restore()
     // keep only the arms, so the gown still covers the torso
     if (kps) {
-      const ac   = Object.assign(document.createElement('canvas'), { width: w, height: h })
-      const actx = ac.getContext('2d')
+      const actx = segAC.getContext('2d')
+      actx.clearRect(0, 0, w, h)
       const armW = Math.max(12, dist(kps[KP.LS], kps[KP.RS]) * 0.3)
       actx.strokeStyle = '#fff'; actx.lineWidth = armW; actx.lineCap = 'round'; actx.lineJoin = 'round'
       const chains = [[KP.LS, KP.LE ?? 13, KP.LW ?? 15], [KP.RS, KP.RE ?? 14, KP.RW ?? 16]]
       for (const ch of chains) {
         const [s, e, wr] = ch.map(i => kps[i])
         if (![s, e, wr].every(k => k && k.score > CONF)) continue
-        const st = lerpPt(s, e, 0.45)            // start below the shoulder so the bodice stays covered
-        actx.beginPath(); actx.moveTo(st.x, st.y); actx.lineTo(e.x, e.y); actx.lineTo(wr.x, wr.y); actx.stroke()
+        const st = lerpPt(s, e, 0.45)
+        const hand = lerpPt(e, wr, 1.3)   // extend past the wrist so hands survive the background reveal
+        actx.beginPath(); actx.moveTo(st.x, st.y); actx.lineTo(e.x, e.y); actx.lineTo(hand.x, hand.y); actx.stroke()
       }
-      octx.globalCompositeOperation = 'destination-in'; octx.drawImage(ac, 0, 0)
+      octx.globalCompositeOperation = 'destination-in'; octx.drawImage(segAC, 0, 0)
     }
-    octx.globalCompositeOperation = 'source-over'; ctx.drawImage(oc, 0, 0)
+    octx.globalCompositeOperation = 'source-over'
+    ctx.drawImage(segOC, 0, 0, w, h)
   } catch (e) { console.warn('Segmentation error:', e) }
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TryOnCamera component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -288,6 +284,13 @@ export default function TryOnCamera({
   const dbgRef        = useRef(null)
   const lightCanvas   = useRef(null)
   const badLayoutRef  = useRef(0)      // consecutive rejected frames
+  const smoothLayoutRef = useRef(null) // low-pass filtered layout scalars
+  const smoothTRef      = useRef(0)
+    const lastVidTimeRef  = useRef(-1)   // skip pose when no new video frame
+  const plateRef        = useRef(null) // clean background (mirrored), captured when the person leaves frame
+  const noPoseFrames    = useRef(0)
+  const lightTintRef    = useRef([1, 1, 1])
+  const [plateReady, setPlateReady] = useState(false)
 
   // Internal model loading (only used when no external detector is provided)
   const [internalModelState, setInternalModelState] = useState(
@@ -349,6 +352,7 @@ export default function TryOnCamera({
     const img = new Image(); img.crossOrigin = 'anonymous'
     img.onload  = () => {
       gownImgRef.current = img
+      prepareGownGL(img)
       setCaptured(null)
       goodFrames.current = 0
       setPoseLocked(false)
@@ -400,6 +404,7 @@ export default function TryOnCamera({
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     prevKpsRef.current = null; kpFilterRef.current.reset(); goodFrames.current = 0; facingFrames.current = 0
+        plateRef.current = null; noPoseFrames.current = 0; setPlateReady(false)
     setCamState('off'); setPoseFound(false); setPoseLocked(false); setPoseIssues([])
   }, [])
 
@@ -532,34 +537,21 @@ export default function TryOnCamera({
   }, [])
 
   // ── Enhanced mode ──────────────────────────────────────────────────────────
-  const toggleEnhanced = useCallback(() => {
-    setEnhanced(v => {
-      const next = !v; enhancedRef.current = next; setSegError('')
-      if (next && !segmenterRef.current) {
-        setSegLoading(true)
-        // Ensure the TFJS engine/backend exists before touching bodySegmentation —
-        // it's never loaded elsewhere when the pose detector is the external
-        // MediaPipe PoseLandmarker (see TFJS_CORE_SCRIPTS comment above).
-        Promise.all(POSE_SCRIPTS.slice(0, 3).map(loadScript))
-          .then(() => window.tf.ready())
-          .then(() => window.tf.setBackend('webgl').catch(() => window.tf.setBackend('cpu')))
-          .then(() => loadScript(SEG_SCRIPT))
-          .then(() => window.bodySegmentation.createSegmenter(
-            window.bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation,
-            { runtime: 'tfjs' }
-          ))
-          .then(s => { segmenterRef.current = s })
-          .catch(e => {
-            console.warn('Segmentation load failed:', e)
-            // FIX: surface error instead of silently failing
-            setSegError('Could not load enhanced mode. Try refreshing.')
-            setEnhanced(false); enhancedRef.current = false
-          })
-          .finally(() => setSegLoading(false))
-      }
-      return next
-    })
-  }, [segmenterRef])
+    const toggleEnhanced = useCallback(() => {
+    setSegError('')
+    const det = detectorRef.current
+    if (!enhancedRef.current && !det?.setMask) {
+      setSegError('Enhanced mode needs the MediaPipe model.')
+      return
+    }
+    const next = !enhancedRef.current
+    enhancedRef.current = next
+    setEnhanced(next)
+    det?.setMask?.(next)
+  }, [detectorRef])
+
+  // release the mask on unmount (shared detector outlives this component)
+  useEffect(() => () => { detectorRef.current?.setMask?.(false) }, [detectorRef])
 
   // ── Detect loop ────────────────────────────────────────────────────────────
   // FIX: stable callback with empty dep array — all changing values via refs
@@ -568,6 +560,10 @@ export default function TryOnCamera({
     if (!video || !canvas || video.readyState < 2) {
       animRef.current = requestAnimationFrame(detect); return
     }
+        if (video.currentTime === lastVidTimeRef.current) {
+      animRef.current = requestAnimationFrame(detect); return
+    }
+    lastVidTimeRef.current = video.currentTime
     // FIX: gate on detectorRef being populated — never spin on null detector
     if (!detectorRef.current) {
       animRef.current = requestAnimationFrame(detect); return
@@ -578,7 +574,8 @@ export default function TryOnCamera({
   const dpr = window.devicePixelRatio || 1
     const vw  = video.videoWidth  || 640
     const vh  = video.videoHeight || 480
-    canvas.width  = vw * dpr; canvas.height = vh * dpr
+    const cw = Math.round(vw * dpr), ch = Math.round(vh * dpr)
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch }
     // Do NOT set canvas.style.width/height here — that would overwrite the
     // 100%/objectFit:contain styling set via the JSX style prop on every
     // single frame (this runs 60x/sec), which is what was silently
@@ -593,6 +590,7 @@ export default function TryOnCamera({
       const poses = await detectorRef.current?.estimatePoses(video)
       if (poses?.length > 0) {
         // Flip keypoints to match the mirrored canvas
+                noPoseFrames.current = 0
         let kps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
         kps = kpFilterRef.current.apply(kps, performance.now()); prevKpsRef.current = kps
 
@@ -639,32 +637,55 @@ export default function TryOnCamera({
             lastLayoutRef.current = rawLayout   // real movement is accepted after 6 frames
           }
         }
-
+                if (layout) {
+          const now = performance.now()
+          const gap = now - smoothTRef.current
+          smoothTRef.current = now
+          const sp = gap < 500 ? smoothLayoutRef.current : null   // reset after a pose dropout
+          const a  = 1 - Math.exp(-Math.min(gap, 100) / 1000 / 0.12)   // frame-rate independent, ~120ms
+          const out = { ...layout }
+          if (sp) for (const k of ['topY', 'bottomY', 'cx', 'sw', 'hw', 'rawHw', 'torsoH', 'topW', 'botW']) {
+            if (typeof layout[k] === 'number' && typeof sp[k] === 'number') out[k] = sp[k] + (layout[k] - sp[k]) * a
+          }
+          smoothLayoutRef.current = out
+          layout = out
+        }
         if (layout && activeImg && analysis.shouldersOk && analysis.hipsOk) {
           setPoseFound(true)
-          try {
-            const lc = lightCanvas.current || (lightCanvas.current = Object.assign(document.createElement('canvas'), { width: 8, height: 8 }))
+                    try {
+            // Sample the ROOM, not the person: the two outer edge strips of the frame.
+            const lc = lightCanvas.current || (lightCanvas.current = Object.assign(document.createElement('canvas'), { width: 16, height: 8 }))
             const lg = lc.getContext('2d', { willReadFrequently: true })
-            const bx = Math.max(0, layout.cx - layout.sw / 2) * dpr
-            const by = Math.max(0, layout.sm.y) * dpr
-            lg.drawImage(canvas, bx, by, Math.max(8, layout.sw * dpr), Math.max(8, layout.torsoH * dpr), 0, 0, 8, 8)
-            const px = lg.getImageData(0, 0, 8, 8).data
-            let sum = 0
-            for (let i = 0; i < px.length; i += 4) sum += 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]
-            const L = sum / (64 * 255)
+            const cw = canvas.width, ch = canvas.height, sx = Math.max(8, Math.round(cw * 0.1))
+            lg.drawImage(canvas, 0, 0, sx, ch, 0, 0, 8, 8)
+            lg.drawImage(canvas, cw - sx, 0, sx, ch, 8, 0, 8, 8)
+            const px = lg.getImageData(0, 0, 16, 8).data
+            let R = 0, Gc = 0, B = 0
+            for (let i = 0; i < px.length; i += 4) { R += px[i]; Gc += px[i + 1]; B += px[i + 2] }
+            const n = (px.length / 4) * 255
+            R /= n; Gc /= n; B /= n
+            const L = 0.299 * R + 0.587 * Gc + 0.114 * B
             const target = Math.min(1.1, Math.max(0.75, 0.6 + 0.8 * L))   // mid-grey room = 1.0
             lightRef.current += (target - lightRef.current) * 0.08
+            // colour cast: lean the gown 40% toward the room's tint, capped at ±12%
+            const tt = [R, Gc, B].map(c => Math.min(1.12, Math.max(0.88, 1 + 0.4 * (c / Math.max(L, 0.02) - 1))))
+            const tc = lightTintRef.current
+            for (let i = 0; i < 3; i++) tc[i] += (tt[i] - tc[i]) * 0.08
           } catch { /* ignore a failed sample */ }
           layout.brightness = lightRef.current
+          layout.tint = lightTintRef.current
           dbgRef.current = { kps, sw: layout.sw, torsoH: layout.torsoH, bright: layout.brightness, bad: badLayoutRef.current }
           goodFrames.current = Math.min(goodFrames.current + 1, 8)
           if (goodFrames.current >= 8) setPoseLocked(true)
 
-          if (enhancedRef.current && segmenterRef.current) {
-            drawGown(ctx, activeImg, layout, opacityRef.current)
-            await applySegmentation(segmenterRef.current, video, ctx, vw, vh, kps)
-          } else {
-            drawGown(ctx, activeImg, layout, opacityRef.current)
+          const seg = poses[0].segmentation
+          const plate = plateRef.current
+          layout.reveal = (enhancedRef.current && seg && plate && plate.width === vw && plate.height === vh)
+            ? { plate, mask: seg, margin: layout.sw * 0.1 }
+            : null
+          drawGown(ctx, activeImg, layout, opacityRef.current)
+          if (enhancedRef.current && seg) {
+            applySegmentation(poses[0].segmentation, video, ctx, vw, vh, kps)
           }
         } else {
           setPoseFound(false)
@@ -674,6 +695,18 @@ export default function TryOnCamera({
       } else {
         setPoseFound(false); setPoseIssues(['no_pose'])
         prevKpsRef.current = null; kpFilterRef.current.reset(); goodFrames.current = 0; setPoseLocked(false)
+                // clean background plate: person out of frame for ~1s while Enhanced is on
+        if (enhancedRef.current) {
+          const cov = detectorRef.current?.coverage
+          if (cov != null && cov > 0.01) noPoseFrames.current = 0
+          else if (++noPoseFrames.current === 30) {
+            const pc = (plateRef.current && plateRef.current.width === vw && plateRef.current.height === vh)
+              ? plateRef.current
+              : (plateRef.current = Object.assign(document.createElement('canvas'), { width: vw, height: vh }))
+            pc.getContext('2d').drawImage(canvas, 0, 0, vw, vh)
+            setPlateReady(true)
+          }
+        }
       }
     } catch { /* skip frame */ }
     if (dbgRef.current && window.location.search.includes('tryondebug')) {
@@ -691,7 +724,7 @@ export default function TryOnCamera({
     }
 
     animRef.current = requestAnimationFrame(detect)
-  }, [detectorRef, segmenterRef])   // eslint-disable-line react-hooks/exhaustive-deps
+    }, [detectorRef])   // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (camState === 'on') detect()
@@ -1014,7 +1047,7 @@ export default function TryOnCamera({
               <div>
                 <span className="tc-enhanced-label">Enhanced mode</span>
                 <span className="tc-enhanced-sub">
-                  {segLoading ? 'Loading…' : 'Layers gown behind your arms'}
+                  {segLoading ? 'Loading…' : !enhanced ? 'Layers gown behind your arms' : plateReady ? 'Background captured' : 'Step out of frame ~1s to capture background'}
                 </span>
               </div>
               <button

@@ -6,6 +6,7 @@ import { useRoleGuard } from '../../utils/useRoleGuard'
 import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
 import { drawGownWarped } from '@/lib/fitting-room/gownWarp'
+import { matteGown } from '@/lib/fitting-room/matte'
 
 /* ─────────────────────────────────────────────
    Constants & helpers
@@ -357,6 +358,148 @@ function BgRemover({ src, onDone, onClose }) {
   )
 }
 
+/* ─────────────────────────────────────────────
+   AutoMatteModal — ML cut-out (BiRefNet + person removal), runs in the browser
+───────────────────────────────────────────── */
+function AutoMatteModal({ displayImage, onDone, onClose }) {
+  const [srcUrl,     setSrcUrl    ] = useState(null)
+  const [removeSkin, setRemoveSkin] = useState(true)
+  const [busy,       setBusy      ] = useState(false)
+  const [status,     setStatus    ] = useState('')
+  const [result,     setResult    ] = useState(null)
+  const [error,      setError     ] = useState('')
+  const [saving,     setSaving    ] = useState(false)
+  const [dark,       setDark      ] = useState(false)
+  const inputRef = useRef(null)
+  const fileRef  = useRef(null)
+  const urlsRef  = useRef([])
+
+  useEffect(() => {
+    const fn = e => { if (e.key === 'Escape' && !busy && !saving) onClose() }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  }, [busy, saving, onClose])
+  useEffect(() => () => urlsRef.current.forEach(u => URL.revokeObjectURL(u)), [])
+
+  const run = useCallback(async (file, skin) => {
+    setBusy(true); setError(''); setResult(null); setStatus('Starting…')
+    try {
+      const r = await matteGown(file, { removeSkin: skin, format: 'webp', onStatus: setStatus })
+      if (r.url) urlsRef.current.push(r.url)
+      setResult(r)
+    } catch (e) {
+      console.error('[AutoMatte]', e)
+      setError(e?.message || 'Cut-out failed. See the browser console.')
+    } finally { setBusy(false); setStatus('') }
+  }, [])
+
+  const pickFile = useCallback(file => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setError('Please choose an image file.'); return }
+    const u = URL.createObjectURL(file); urlsRef.current.push(u)
+    fileRef.current = file; setSrcUrl(u)
+    run(file, removeSkin)
+  }, [run, removeSkin])
+
+  const useDisplay = async () => {
+    setError('')
+    try {
+      const safe = await toSafeUrl(displayImage)
+      const res  = await fetch(safe)
+      if (!res.ok) throw new Error('Could not read the display image.')
+      const blob = await res.blob()
+      if (safe !== displayImage && safe.startsWith('blob:')) URL.revokeObjectURL(safe)
+      pickFile(new File([blob], 'display-image', { type: blob.type || 'image/jpeg' }))
+    } catch (e) { setError(e.message) }
+  }
+
+  const upload = async blob => {
+    const fd = new FormData()
+    fd.append('file', new File([blob], `tryon-${Date.now()}.${blob.type === 'image/webp' ? 'webp' : 'png'}`, { type: blob.type }))
+    const res  = await adminFetch('/api/admin/upload-tryon-image', { method: 'POST', body: fd })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.error || 'Upload failed')
+    return data.url
+  }
+
+  const save = async () => {
+    if (!result?.blob) return
+    setSaving(true); setError('')
+    try {
+      let url
+      try { url = await upload(result.blob) }
+      catch (e) {
+        if (result.blob.type === 'image/png') throw e
+        const png = await new Promise(r => result.canvas.toBlob(r, 'image/png'))   // route may not accept WebP
+        url = await upload(png)
+      }
+      onDone(url)
+    } catch (e) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  const checker = 'repeating-conic-gradient(#d9d6d0 0% 25%, #f4f2ee 0% 50%) 50% / 20px 20px'
+  const hasDisplay = displayImage && displayImage !== '/images/'
+
+  return (
+    <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget && !busy && !saving) onClose() }}>
+      <div className="modal-box modal-box--wide">
+        <div className="modal-header">
+          <span className="modal-title">Auto cut-out</span>
+          <button className="modal-close" onClick={onClose} disabled={busy || saving}>×</button>
+        </div>
+        <div className="modal-body">
+          <p className="modal-hint">
+            Cuts the gown out on this computer (nothing is sent anywhere until you save). The first run downloads the model (~200 MB, then cached); Chrome or Edge on desktop is fastest.
+          </p>
+
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:12}}>
+            <input ref={inputRef} type="file" accept="image/*" style={{display:'none'}}
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; pickFile(f) }} />
+            <button type="button" className="btn-sm" disabled={busy || saving} onClick={() => inputRef.current?.click()}>Choose photo…</button>
+            {hasDisplay && <button type="button" className="btn-sm" disabled={busy || saving} onClick={useDisplay}>Use display image</button>}
+            <label style={{display:'flex',gap:6,alignItems:'center',fontSize:12,color:'var(--c-muted)'}}>
+              <input type="checkbox" checked={removeSkin} disabled={busy || saving} onChange={e => setRemoveSkin(e.target.checked)} />
+              Remove model (face, hair, skin)
+            </label>
+            {fileRef.current && !busy && (
+              <button type="button" className="btn-xs" disabled={saving} onClick={() => run(fileRef.current, removeSkin)}>Run again</button>
+            )}
+          </div>
+
+          {busy && <p role="status" aria-live="polite" className="modal-hint" style={{color:'var(--c-gold)'}}>{status || 'Working…'}</p>}
+          {error && <p className="field-error" role="alert">{error}</p>}
+          {result && !result.ok && result.warnings.map((w, i) => <p key={i} className="field-error">{w}</p>)}
+          {result?.ok && result.warnings.length > 0 && (
+            <div className="archive-note" role="status">{result.warnings.map((w, i) => <div key={i}>• {w}</div>)}</div>
+          )}
+
+          {(srcUrl || result?.ok) && (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div>
+                <p className="field-label" style={{marginBottom:4}}>Original</p>
+                {srcUrl && <img src={srcUrl} alt="Original" style={{width:'100%',maxHeight:360,objectFit:'contain',background:'var(--c-surface2)',borderRadius:8}} />}
+              </div>
+              <div>
+                <p className="field-label" style={{marginBottom:4,display:'flex',justifyContent:'space-between'}}>
+                  <span>Cut-out{result?.ok ? ` · ${result.width}×${result.height} · ${(result.blob.size/1024).toFixed(0)} KB` : ''}</span>
+                  <button type="button" className="btn-xs" onClick={() => setDark(d => !d)}>{dark ? 'Checkerboard' : 'Dark'}</button>
+                </p>
+                <div style={{background: dark ? '#0d0a07' : checker, borderRadius:8, minHeight:120}}>
+                  {result?.ok && <img src={result.url} alt="Cut-out preview" style={{width:'100%',maxHeight:360,objectFit:'contain',display:'block'}} />}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose} disabled={busy || saving}>Cancel</button>
+          <button className="btn-primary" onClick={save} disabled={!result?.ok || busy || saving}>{saving ? 'Saving…' : 'Use as try-on image'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 /* ─────────────────────────────────────────────
    CalibrationEditor  v2
    Skeleton-anchored interactive canvas editor.
@@ -1216,6 +1359,7 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
   const [tryonBackImgError,setTryonBackImgError] = useState(false)
   const [bgRemoverSrc,setBgRemoverSrc]           = useState(null)
   const [bgRemoverTarget,setBgRemoverTarget]     = useState('front')
+    const [matteTarget,setMatteTarget]             = useState(null)   // 'front' | 'back' | null
   const [confirm,setConfirm]                     = useState(null)
   const isEdit = !!editingGown
 
@@ -1315,7 +1459,17 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
       )}
       {confirm&&<ConfirmModal {...confirm} onClose={()=>setConfirm(null)}/>}
 
-      <div className={`sidebar-backdrop${open?' sidebar-backdrop--open':''}`} onClick={onClose}/>
+            {matteTarget&&(
+        <AutoMatteModal
+          displayImage={form.image}
+          onDone={path=>{
+            if(matteTarget==='back'){setForm(p=>({...p,tryonImageBack:path}));setTryonBackImgError(false)}
+            else{setForm(p=>({...p,tryonImage:path}));setTryonImgError(false)}
+            setMatteTarget(null); showToast('Cut-out saved as try-on image')
+          }}
+          onClose={()=>setMatteTarget(null)}
+        />
+      )}
 
       <aside className={`sidebar${open?' sidebar--open':''}`}>
         <div className="sidebar-header">
@@ -1406,6 +1560,10 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
                   onClick={()=>{ setBgRemoverTarget('front'); setBgRemoverSrc(form.tryonImage) }}>
                   ✂ Remove background…
                 </button>
+                 <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
+                  onClick={()=>setMatteTarget('front')}>
+                  ✨ Auto cut-out…
+                </button>
               </div>
               <div>
                 <ImageUploader
@@ -1421,6 +1579,10 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
                   disabled={!form.tryonImageBack}
                   onClick={()=>{ setBgRemoverTarget('back'); setBgRemoverSrc(form.tryonImageBack) }}>
                   ✂ Remove background…
+                </button>
+                  <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
+                  onClick={()=>setMatteTarget('back')}>
+                  ✨ Auto cut-out…
                 </button>
               </div>
             </div>
