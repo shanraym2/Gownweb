@@ -1,6 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack: (config, { isServer }) => {
+    // The cut-out model only runs in the browser. Keep its Node build out of the server bundle.
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'sharp$': false,
+      'onnxruntime-node$': false,
+    }
+    if (isServer) {
+      config.externals = [...(config.externals || []), '@huggingface/transformers']
+    }
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
