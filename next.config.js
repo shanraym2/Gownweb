@@ -41,7 +41,7 @@ const nextConfig = {
           { key: 'Permissions-Policy',         value: 'camera=(self), microphone=(), geolocation=(), payment=()' },
           { key: 'Content-Security-Policy',    value: [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
+            "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "img-src 'self' data: blob: https://*.digitaloceanspaces.com https://*.fbcdn.net",
             "font-src 'self' data: https://fonts.gstatic.com",
