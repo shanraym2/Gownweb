@@ -49,7 +49,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
-
+const MAX_RENDER_SCALE = 2     // canvas pixels per camera pixel; lower to 1.5 if a phone gets slow
 // ── CDN scripts ───────────────────────────────────────────────────────────────
 const POSE_SCRIPTS = [
   'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.10.0/dist/tf-core.min.js',
@@ -73,7 +73,7 @@ function loadScript(src) {
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
-import { resolveCal, guessTags, NECKLINES, SLEEVES } from '../../lib/fitting-room/calibration.js'
+import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS } from '../../lib/fitting-room/calibration.js'
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -175,15 +175,17 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
 }
 
 function drawGown(ctx, img, layout, opacity) {
-  if (drawGownGL(ctx, img, layout, opacity)) return
-  if (drawGownWarped(ctx, img, layout, opacity)) return
+  const t = ctx.getTransform()
+  const size = { w: ctx.canvas.width / t.a, h: ctx.canvas.height / t.d }   // logical (camera-pixel) size at any render scale
+  if (drawGownGL(ctx, img, layout, opacity, size)) return
+  if (drawGownWarped(ctx, img, layout, opacity, size)) return
   const { topY, bottomY, cx, topW, botW } = layout
   const h = bottomY - topY; if (h <= 0) return
 
   // Off-screen canvas at logical pixel size (no DPR scaling) so the
   // trapezoid clip doesn't bleed into subsequent frames on the main canvas
-  const vw = ctx.canvas.width  / (window.devicePixelRatio || 1)
-  const vh = ctx.canvas.height / (window.devicePixelRatio || 1)
+    const vw = size.w
+  const vh = size.h
   const oc = document.createElement('canvas')
   oc.width = vw; oc.height = vh
   const octx = oc.getContext('2d')
@@ -292,6 +294,9 @@ export default function TryOnCamera({
   const noPoseFrames    = useRef(0)
   const lightTintRef    = useRef([1, 1, 1])
   const [plateReady, setPlateReady] = useState(false)
+    const frozenRef  = useRef(null)    // { frame, kps, seg } while a frame is frozen (calibrate mode)
+  const lastSegRef = useRef(null)    // latest person mask, copied into the freeze
+  const [frozen, setFrozen] = useState(false)
 
   // Internal model loading (only used when no external detector is provided)
   const [internalModelState, setInternalModelState] = useState(
@@ -406,6 +411,7 @@ export default function TryOnCamera({
     streamRef.current = null
     prevKpsRef.current = null; kpFilterRef.current.reset(); goodFrames.current = 0; facingFrames.current = 0
         plateRef.current = null; noPoseFrames.current = 0; setPlateReady(false)
+            frozenRef.current = null; setFrozen(false)
     setCamState('off'); setPoseFound(false); setPoseLocked(false); setPoseIssues([])
   }, [])
 
@@ -442,7 +448,7 @@ export default function TryOnCamera({
       try {
         // Tier 1 — full quality: resolution, framerate, and front camera
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } },
+                video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: 'user', frameRate: { ideal: 30 } },
           audio: false,
         })
         setCamQuality('requested')
@@ -521,6 +527,20 @@ export default function TryOnCamera({
     mq.addEventListener('change', handler)
     return () => mq.removeEventListener('change', handler)
   }, [])
+  const freezeFrame = useCallback(() => {
+    const video = videoRef.current
+    if (!video || !prevKpsRef.current) return
+    const vw = video.videoWidth || 640, vh = video.videoHeight || 480
+    const fc = document.createElement('canvas'); fc.width = vw; fc.height = vh
+    const fx = fc.getContext('2d')
+    fx.save(); fx.translate(vw, 0); fx.scale(-1, 1); fx.drawImage(video, 0, 0, vw, vh); fx.restore()
+    let seg = null
+    const ls = lastSegRef.current
+    if (ls) { seg = document.createElement('canvas'); seg.width = ls.width; seg.height = ls.height; seg.getContext('2d').drawImage(ls, 0, 0) }
+    frozenRef.current = { frame: fc, kps: prevKpsRef.current.map(k => ({ ...k })), seg }
+    setFrozen(true)
+  }, [])
+  const unfreezeFrame = useCallback(() => { frozenRef.current = null; setFrozen(false) }, [])
 
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenEnabled) { setFullscreen(v => !v); return }
@@ -575,25 +595,35 @@ export default function TryOnCamera({
   const dpr = window.devicePixelRatio || 1
     const vw  = video.videoWidth  || 640
     const vh  = video.videoHeight || 480
-    const cw = Math.round(vw * dpr), ch = Math.round(vh * dpr)
+    // Render at the size the canvas is actually shown, so the gown stays sharp on big screens.
+    const rect = canvas.getBoundingClientRect()
+    const fit  = Math.min(rect.width / vw, rect.height / vh) || 1       // CSS px per camera px (object-fit: contain)
+    const S    = Math.round(Math.min(MAX_RENDER_SCALE, Math.max(1, fit * dpr)) * 4) / 4
+    const cw = Math.round(vw * S), ch = Math.round(vh * S)
     if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch }
     // Do NOT set canvas.style.width/height here — that would overwrite the
     // 100%/objectFit:contain styling set via the JSX style prop on every
     // single frame (this runs 60x/sec), which is what was silently
     // cancelling out the CSS fullscreen/centering fix.
     const ctx = canvas.getContext('2d')
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        ctx.setTransform(S, 0, 0, S, 0, 0)
 
     // Draw mirrored video
-    ctx.save(); ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, vw, vh); ctx.restore()
+        if (frozenRef.current) ctx.drawImage(frozenRef.current.frame, 0, 0, vw, vh)
+    else { ctx.save(); ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0, vw, vh); ctx.restore() }
 
     try {
-      const poses = await detectorRef.current?.estimatePoses(video)
+            const frozen = frozenRef.current
+      const poses = frozen ? [{ keypoints: [], segmentation: frozen.seg }] : await detectorRef.current?.estimatePoses(video)
       if (poses?.length > 0) {
         // Flip keypoints to match the mirrored canvas
                 noPoseFrames.current = 0
-        let kps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
-        kps = kpFilterRef.current.apply(kps, performance.now()); prevKpsRef.current = kps
+        let kps
+        if (frozen) kps = frozen.kps          // stored, already mirrored and filtered
+        else {
+          kps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
+          kps = kpFilterRef.current.apply(kps, performance.now()); prevKpsRef.current = kps
+        }
 
         const analysis = analyzePose(kps, vw, vh)
         setPoseIssues(analysis.issues)
@@ -680,7 +710,9 @@ export default function TryOnCamera({
           if (goodFrames.current >= 8) setPoseLocked(true)
 
           const seg = poses[0].segmentation
+                    if (!frozen) lastSegRef.current = seg || null
           const plate = plateRef.current
+                    layout.noCloth = !!frozen
           layout.reveal = (enhancedRef.current && seg && plate && plate.width === vw && plate.height === vh)
             ? { plate, mask: seg, margin: layout.sw * 0.1 }
             : null
@@ -719,8 +751,9 @@ export default function TryOnCamera({
       })
       ctx.font = '12px monospace'; ctx.fillStyle = '#fff'; ctx.shadowColor = '#000'; ctx.shadowBlur = 3
       ;[`pts ${d.kps?.length}  sw ${d.sw | 0}  torso ${d.torsoH | 0}  ratio ${(d.torsoH / d.sw).toFixed(2)}`,
-        `light ${d.bright?.toFixed(2)}  heldFrames ${d.bad}`
-      ].forEach((t, i) => ctx.fillText(t, 8, vh - 28 + i * 14))
+        `light ${d.bright?.toFixed(2)}  heldFrames ${d.bad}`,
+        `video ${vw}x${vh}  canvas ${canvas.width}x${canvas.height}  scale ${S}  shown ${rect.width | 0}x${rect.height | 0} css px`
+      ].forEach((t, i) => ctx.fillText(t, 8, vh - 42 + i * 14))
       ctx.restore()
     }
 
@@ -871,7 +904,12 @@ export default function TryOnCamera({
             <span>{issue.text}</span>
           </div>
         )}
-
+        {frozen && camState === 'on' && (
+          <div className="tc-hint tc-hint--warn" role="status">
+            <span aria-hidden="true">❄</span>
+            <span>Frame frozen. Adjust the sliders, then press Resume live.</span>
+          </div>
+        )}
         {/* Landscape warning */}
         {isLandscape && camState === 'on' && (
           <div className="tc-hint tc-hint--warn" role="alert">
@@ -1043,6 +1081,14 @@ export default function TryOnCamera({
                       <span className="tc-opacity-val" style={{ width: 40 }}>{Number(s.v).toFixed(2)}</span>
                     </div>
                   ))}
+                                    {ADV_FIELDS.map(f => (
+                    <div key={f.k} className="tc-opacity-row">
+                      <label className="tc-opacity-label" style={{ width: 110 }}>{f.label}</label>
+                      <input type="range" className="tc-slider" min={f.min} max={f.max} step={f.step}
+                        value={r.enh.adv[f.k]} onChange={ev => setEnh(f.k, parseFloat(ev.target.value))}/>
+                      <span className="tc-opacity-val" style={{ width: 40 }}>{Number(r.enh.adv[f.k]).toFixed(2)}</span>
+                    </div>
+                  ))}
                 </>
               )
             })()}
@@ -1068,6 +1114,12 @@ export default function TryOnCamera({
               )
             })}
             <div className="tc-ctrl-row">
+              {frozen
+                ? <button type="button" className="tc-btn tc-btn--outline" onClick={unfreezeFrame}>▶ Resume live</button>
+                : <button type="button" className="tc-btn tc-btn--outline" onClick={freezeFrame} disabled={!poseFound}
+                    title="Freeze the current frame and pose, so you can adjust sliders without holding still">
+                    ❄ Freeze frame
+                  </button>}
               <button className="tc-btn tc-btn--primary" onClick={() => onSaveCalibration?.(liveCalRef.current || {})}>
                 Save calibration
               </button>

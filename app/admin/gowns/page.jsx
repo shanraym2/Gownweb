@@ -7,7 +7,7 @@ import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
 import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile } from '@/lib/fitting-room/glGownRenderer'
-import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES } from '@/lib/fitting-room/calibration'
+import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
 
 /* ─────────────────────────────────────────────
@@ -597,7 +597,7 @@ const DEFAULT_CAL = {
   scaleY:      1.0,    // vertical stretch multiplier
 }
 // Synthetic body in normalised coords (0..1) for canvas W=220 H=400
-const B = {
+const B_AVG = {
   head: [0.50, 0.055],
   ls:   [0.30, 0.175], rs:  [0.70, 0.175],
   lh:   [0.36, 0.445], rh:  [0.64, 0.445],
@@ -606,6 +606,39 @@ const B = {
   le:   [0.19, 0.315], re:  [0.81, 0.315],
   lw:   [0.15, 0.435], rw:  [0.85, 0.435],
 }
+
+function makeBody({ sh, hh, shY, hipY, kneeY, ankleY, headY }) {
+  const torso = hipY - shY
+  const elY = shY + torso * 0.52, wrY = shY + torso * 0.96
+  const L = (half, y) => [0.5 - half, y], R = (half, y) => [0.5 + half, y]
+  return {
+    head: [0.5, headY],
+    ls: L(sh, shY),            rs: R(sh, shY),
+    lh: L(hh, hipY),           rh: R(hh, hipY),
+    lk: L(hh * 0.857, kneeY),  rk: R(hh * 0.857, kneeY),
+    la: L(hh * 0.786, ankleY), ra: R(hh * 0.786, ankleY),
+    le: L(sh * 1.55, elY),     re: R(sh * 1.55, elY),
+    lw: L(sh * 1.75, wrY),     rw: R(sh * 1.75, wrY),
+  }
+}
+const BODY_D = { sh: .20, hh: .14, shY: .175, hipY: .445, kneeY: .66, ankleY: .875, headY: .055 }
+const BODIES = {
+  average: B_AVG,
+  narrow:  makeBody({ ...BODY_D, sh: .17, hh: .12 }),
+  broad:   makeBody({ ...BODY_D, sh: .23 }),
+  widehip: makeBody({ ...BODY_D, sh: .19, hh: .18 }),
+  tall:    makeBody({ ...BODY_D, shY: .14, hipY: .43, ankleY: .90, headY: .035 }),
+  petite:  makeBody({ ...BODY_D, sh: .19, hh: .13, shY: .215, hipY: .46, kneeY: .665, ankleY: .86, headY: .09 }),
+}
+const BODY_OPTIONS = [
+  { id: 'average', label: 'Average' }, { id: 'narrow', label: 'Narrow' }, { id: 'broad', label: 'Broad shoulders' },
+  { id: 'widehip', label: 'Wide hip' }, { id: 'tall', label: 'Tall' }, { id: 'petite', label: 'Petite' },
+]
+// The draw helpers read `B` at call time; the editor sets it from the selected preview body.
+let B = B_AVG
+const setBody = k => { B = BODIES[k] || B_AVG }
+const CE_ACTIVE = { background: 'rgba(200,169,110,.18)', color: '#c9a96e', borderColor: 'rgba(200,169,110,.45)' }
+
 const bpx = (key, W, H) => ({ x: B[key][0] * W, y: B[key][1] * H })
 
 function calLayout(cal, W, H) {
@@ -783,7 +816,7 @@ function drawCalHandles(ctx, hmap, active, hover) {
   }
 }
 
-function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
+function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalibration }) {
   const [open,        setOpen      ] = useState(false)
   const [dressImg,    setDressImg  ] = useState(null)
   const [active,      setActive    ] = useState(null)
@@ -805,7 +838,12 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
 
   const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
     const isEnh   = cal.mode === 'enhanced'
-  const rc      = resolveCal(cal, gown)          // used for geometry only, never saved
+  const [showSaved, setShowSaved] = useState(false)
+  const [bodyKey,   setBodyKey  ] = useState('average')
+  setBody(bodyKey)                               // preview body for the draw helpers
+  const savedCal = { ...DEFAULT_CAL, ...(savedCalibration || {}) }
+  const viewCal  = showSaved && savedCalibration ? savedCal : cal
+  const rc       = resolveCal(viewCal, gown)     // geometry only, never saved
   const setMode = m => onChange({ ...cal, mode: m })
   const setEnh  = (k, v) => onChange({ ...cal, enhanced: { ...(cal.enhanced || {}), [k]: v } })
 
@@ -832,6 +870,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
+        const cal = viewCal      // shadows the outer `cal` inside this effect: offsets and scale follow the viewed calibration
     ctx.setTransform(EDPR(), 0, 0, EDPR(), 0, 0)
     ctx.clearRect(0, 0, CW, CH)
 
@@ -888,7 +927,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-  }, [open, cal, dressImg, active, hover, zoom, panX, panY])
+    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -950,6 +989,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
   }, [open])
 
   const onDown = useCallback(e => {
+        if (showSaved) return
     e.preventDefault()
     const { x, y } = canvasXY(e)
     const hit = hitTest(x, y)
@@ -963,7 +1003,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
       setPanning(true)
       panOrigin.current = rawCanvasXY(e)
     }
-  }, [cal, zoom, panX, panY])
+    }, [cal, zoom, panX, panY, showSaved])
 
   const onMove = useCallback(e => {
     e.preventDefault()
@@ -1113,6 +1153,22 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
                 Drag handles on the canvas for quick alignment, or use sliders for precision.
                 Scroll to zoom · drag background to pan · arrow keys to nudge view.
               </p>
+                            <p className="ce-group-label">Preview body</p>
+              <div className="ce-btns">
+                {BODY_OPTIONS.map(o => (
+                  <button key={o.id} type="button" className="ce-ghost" aria-pressed={bodyKey === o.id}
+                    style={bodyKey === o.id ? CE_ACTIVE : undefined} onClick={() => setBodyKey(o.id)}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <p className="ce-row-hint">Check that the fit holds across body types. Preview only; nothing here is saved.</p>
+              <div className="ce-btns">
+                <button type="button" className="ce-ghost" aria-pressed={showSaved} disabled={!savedCalibration}
+                  style={showSaved ? CE_ACTIVE : undefined} onClick={() => setShowSaved(v => !v)}>
+                  {!savedCalibration ? 'No saved calibration to compare' : showSaved ? 'Showing saved (editing paused)' : 'Compare with saved'}
+                </button>
+              </div>
                             <p className="ce-group-label">Mode</p>
               <div className="ce-btns">
                 {['simple', 'enhanced'].map(m => {
@@ -1156,6 +1212,22 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown }) {
                     <SeamPreview src={tryonImage} cal={cal} rc={rc}
                       onSeam={(side, v) => setEnh(side === 'L' ? 'seamL' : 'seamR', v)} />
                   )}
+                                    <p className="ce-group-label" style={{marginTop:6}}>Advanced</p>
+                  {ADV_FIELDS.map(f => (
+                    <div key={f.k} className="ce-row">
+                      <div className="ce-row-head">
+                        <span className="ce-row-label">{f.label}</span>
+                        <span className="ce-row-val">{Number(rc.enh.adv[f.k]).toFixed(2)}</span>
+                      </div>
+                      <input type="range" min={f.min} max={f.max} step={f.step} value={rc.enh.adv[f.k]}
+                        onChange={e => setEnh(f.k, parseFloat(e.target.value))} className="ce-range"/>
+                      <p className="ce-row-hint">{f.hint}</p>
+                    </div>
+                  ))}
+                  <button type="button" className="ce-ghost"
+                    onClick={() => onChange({ ...cal, enhanced: Object.fromEntries(Object.entries(cal.enhanced || {}).filter(([k]) => !ADV_FIELDS.some(f => f.k === k))) })}>
+                    Reset advanced
+                  </button>
                   <button type="button" className="ce-ghost"
                     onClick={() => onChange({ ...cal, enhanced: { neckline: rc.enh.neckline, sleeves: rc.enh.sleeves } })}>
                     Reset to tag defaults
@@ -1729,7 +1801,8 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
               calibration={form.tryonCalibration}
               onChange={cal=>setForm(p=>({...p,tryonCalibration:cal}))}
                             tryonImage={form.tryonImage}
-              gown={form}
+                            gown={form}
+              savedCalibration={editingGown?.tryonCalibration||null}
             />
           </div>
 

@@ -24,7 +24,7 @@ const MODEL_PATH = 'https://storage.googleapis.com/mediapipe-models/pose_landmar
 function wrapPoseLandmarker(landmarker) {
   let maskOn = false
   let maskCanvas = null, maskImg = null
-  const STEP = 4                         // sample the mask at 1/4 res; drawImage upscales (soft edge for free)
+    const STEP = 2                         // sample the mask at 1/2 res (was 1/4): sharper arm edges, still cheap                         // sample the mask at 1/4 res; drawImage upscales (soft edge for free)
 
   const maskToCanvas = (m) => {
     const W = m.width, H = m.height
