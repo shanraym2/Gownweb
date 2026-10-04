@@ -77,22 +77,7 @@ import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } fro
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
-// Stand-in background when no clean plate exists: left/right edge colours blended across the frame.
-let edgeTmp = null, edgePlate = null
-function edgePlateFor(src, vw, vh) {
-  if (!edgeTmp) { edgeTmp = document.createElement('canvas'); edgeTmp.width = 2; edgeTmp.height = 24 }
-  const g = edgeTmp.getContext('2d')
-  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'
-  const sx = Math.max(4, Math.round(src.width * 0.06))
-  g.drawImage(src, 0, 0, sx, src.height, 0, 0, 1, 24)
-  g.drawImage(src, src.width - sx, 0, sx, src.height, 1, 0, 1, 24)
-  if (!edgePlate) edgePlate = document.createElement('canvas')
-  if (edgePlate.width !== vw || edgePlate.height !== vh) { edgePlate.width = vw; edgePlate.height = vh }
-  const p = edgePlate.getContext('2d')
-  p.imageSmoothingEnabled = true
-  p.drawImage(edgeTmp, 0, 0, 2, 24, 0, 0, vw, vh)
-  return edgePlate
-}
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) }
 function mid(a, b)  { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }
 function lerpPt(a, b, t) { return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, score: b.score } }
 function smoothKps(prev, curr, t = 0.35) {
@@ -753,9 +738,8 @@ export default function TryOnCamera({
                     if (!frozen) lastSegRef.current = seg || null
           const plate = plateRef.current
                     layout.noCloth = !!frozen
-                    const realPlate = (plate && plate.width === vw && plate.height === vh) ? plate : null
-          layout.reveal = (enhancedRef.current && seg)
-            ? { plate: realPlate || edgePlateFor(canvas, vw, vh), mask: seg, margin: layout.sw * 0.1 }
+          layout.reveal = (enhancedRef.current && seg && plate && plate.width === vw && plate.height === vh)
+            ? { plate, mask: seg, margin: layout.sw * 0.1 }
             : null
           drawGown(ctx, activeImg, layout, opacityRef.current)
           if (enhancedRef.current && seg) {
@@ -1201,7 +1185,7 @@ export default function TryOnCamera({
               <div>
                 <span className="tc-enhanced-label">Enhanced mode</span>
                 <span className="tc-enhanced-sub">
-                  {segLoading ? 'Loading…' : !enhanced ? 'Layers gown behind your arms' : plateReady ? 'Background captured' : 'Using room colour. Step out of frame ~1s for a cleaner result'}
+                  {segLoading ? 'Loading…' : !enhanced ? 'Layers gown behind your arms' : plateReady ? 'Background captured' : 'Step out of frame ~1s to capture background'}
                 </span>
               </div>
               <button
