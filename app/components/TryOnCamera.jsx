@@ -309,6 +309,7 @@ export default function TryOnCamera({
   const facingFrames  = useRef(0)
   const lastLayoutRef = useRef(null)   // last layout that passed the sanity check
   const lightRef      = useRef(1)      // smoothed brightness factor for the gown
+  const lightSlopeRef = useRef(0)      // smoothed left-vs-right room brightness (+ = brighter on the right)
   const dbgRef        = useRef(null)
   const lightCanvas   = useRef(null)
   const badLayoutRef  = useRef(0)      // consecutive rejected frames
@@ -720,6 +721,13 @@ export default function TryOnCamera({
             for (let i = 0; i < px.length; i += 4) { R += px[i]; Gc += px[i + 1]; B += px[i + 2] }
             const n = (px.length / 4) * 255
             R /= n; Gc /= n; B /= n
+            let lL = 0, lR = 0
+            for (let i = 0; i < px.length; i += 4) {
+              const yl = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]
+              if (((i / 4) % 16) < 8) lL += yl; else lR += yl
+            }
+            const slopeT = Math.max(-0.15, Math.min(0.15, ((lR - lL) / Math.max(lR + lL, 1)) * 1.5))
+            lightSlopeRef.current += (slopeT - lightSlopeRef.current) * 0.05
             const L = 0.299 * R + 0.587 * Gc + 0.114 * B
             const target = Math.min(1.1, Math.max(0.75, 0.6 + 0.8 * L))   // mid-grey room = 1.0
             lightRef.current += (target - lightRef.current) * 0.08
@@ -729,6 +737,7 @@ export default function TryOnCamera({
             for (let i = 0; i < 3; i++) tc[i] += (tt[i] - tc[i]) * 0.08
           } catch { /* ignore a failed sample */ }
           layout.brightness = lightRef.current
+          layout.lightSlope = lightSlopeRef.current
           layout.tint = lightTintRef.current
           dbgRef.current = { kps, sw: layout.sw, torsoH: layout.torsoH, bright: layout.brightness, bad: badLayoutRef.current }
           goodFrames.current = Math.min(goodFrames.current + 1, 8)
