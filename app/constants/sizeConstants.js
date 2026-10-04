@@ -27,7 +27,10 @@ export const SIZES_WOMEN = [
   { label: '4XL', bust_min: 122, bust_max: 130, waist_min: 106, waist_max: 115, hip_min: 128, hip_max: 136 },
 ]
 
-// Men — chest/waist/hips in cm; waist also used for trouser sizing
+// Men — baseline chest/waist/hip ranges in cm, not a universal Philippine
+// national size chart. Prefer a supplier's chart when one is configured.
+export const MEN_FALLBACK_SIZE_CHART_NAME = "Men's baseline guide"
+
 export const SIZES_MEN = [
   { label: 'XS',  bust_min: 78,  bust_max: 83,  waist_min: 68,  waist_max: 73,  hip_min: 76,  hip_max: 81  },
   { label: 'S',   bust_min: 84,  bust_max: 89,  waist_min: 74,  waist_max: 79,  hip_min: 82,  hip_max: 87  },

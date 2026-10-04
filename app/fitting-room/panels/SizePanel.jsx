@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useFittingRoom } from '../FittingRoomProvider'
-import { SEGMENTS } from '../../constants/sizeConstants'
+import { MEN_FALLBACK_SIZE_CHART_NAME, SEGMENTS } from '../../constants/sizeConstants'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UNIT CONVERSION
@@ -49,6 +49,7 @@ export default function SizePanel() {
   const scoreConf  = sizeResult ? Math.min(95, Math.max(10, Math.round(100 - sizeResult.score * 3))) : 0
   const scoreColor = scoreConf >= 75 ? '#1D9E75' : scoreConf >= 55 ? '#EF9F27' : '#E24B4A'
   const segLabel   = SEGMENTS.find(s => s.id === (profile.segment ?? 'women'))?.label || 'Women'
+  const chartName  = supplierName || (profile.segment === 'men' ? MEN_FALLBACK_SIZE_CHART_NAME : 'Philippine Standard')
 
   if (!profile.bust && !profile.waist && !profile.hips) {
     return (
@@ -81,7 +82,7 @@ export default function SizePanel() {
         <div>
           <p className="fr-size-hero-label">Recommended size · {segLabel}</p>
           <p className="fr-size-hero-value">{sizeResult.size?.label ?? '—'}</p>
-          <p className="fr-size-hero-supplier">{supplierName || 'Philippine Standard'} size chart</p>
+          <p className="fr-size-hero-supplier">{chartName} size chart</p>
         </div>
         <div className="fr-size-conf-block">
           <p className="fr-size-hero-label">Match confidence</p>
@@ -133,7 +134,7 @@ export default function SizePanel() {
       {sizeResult.size && (
         <div className="fr-size-chart-ref">
           <p className="fr-size-section-label">
-            {supplierName || 'Standard'} chart for {sizeResult.size.label}
+            {chartName} chart for {sizeResult.size.label}
             {unit === 'in' ? ' (in)' : ' (cm)'}
           </p>
           <div className="fr-chart-row">

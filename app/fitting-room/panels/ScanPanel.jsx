@@ -14,7 +14,7 @@ import {
   iqm, dist, mid, KP, CONF, HIGH_SEVERITY_ISSUES,
   HIST_SIZE,
 } from '../../../lib/fitting-room/poseUtils'
-import { estimateMeasurements, estimateMeasurementsWithDepth, getTorsoAnchor, MEAS_VARIANCE } from '../../../lib/fitting-room/measurementUtils'
+import { aggregateMenScanSamples, estimateMeasurements, estimateMeasurementsWithDepth, getFullHeightPxPerCm, getTorsoAnchor, MEAS_VARIANCE } from '../../../lib/fitting-room/measurementUtils'
 import { sampleBackgroundColor, measureSilhouetteWidth } from '../../../lib/fitting-room/silhouetteUtils'
 import { _detectSkinProfileFixed } from '../../utils/skinTone'
 
@@ -26,14 +26,10 @@ import { _detectSkinProfileFixed } from '../../utils/skinTone'
 
 const CM_PER_INCH = 2.54
 
-// Nose-to-ankle spans roughly 88-89% of standing height (the head top sits
-// above the nose, and the ankle joint sits above the floor). Without this,
-// px/cm comes out ~12% low and every cm value comes out ~12% high.
-const NOSE_TO_ANKLE = 0.885
-
 // Waist width as a fraction of shoulder keypoint span. Typical proportions,
 // not measured on your users — tune against tape (see below).
 const WAIST_FROM_SHOULDER = { women: 0.72, men: 0.78, children: 0.75 }
+const MIN_MEN_SCAN_SAMPLES = 60
 const cmToIn  = cm     => cm     != null ? Math.round((cm     / CM_PER_INCH) * 10) / 10 : null
 const inToCm  = inches => inches != null ? Math.round(inches  * CM_PER_INCH  * 10) / 10 : null
 const dispVal = (cm, unit) =>
@@ -92,6 +88,7 @@ export default function ScanPanel() {
   const swHistRef         = useRef([])
   const hipHistRef        = useRef([])
   const pxPerCmHistRef    = useRef([])
+  const menScanSamplesRef = useRef([])
   const torsoHRef         = useRef(null)
   const prevKpsDisplayRef = useRef(null)
   const liveKpsRef        = useRef(null)
@@ -201,7 +198,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     if (videoRef.current) videoRef.current.srcObject = null
-    swHistRef.current = []; hipHistRef.current = []; pxPerCmHistRef.current = []
+    swHistRef.current = []; hipHistRef.current = []; pxPerCmHistRef.current = []; menScanSamplesRef.current = []
     prevKpsDisplayRef.current = null; shapeVotesRef.current = {}
     goodFrames.current = 0; liveKpsRef.current = null
     setCamState('off'); setPoseFound(false); setConfidence(0); setPoseIssues([])
@@ -396,7 +393,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
             if (hasFullHeight) {
               const ankleMid     = mid(la, ra)
               const fullHeightPx = ankleMid.y - nose.y
-              return fullHeightPx / profile.height
+              return getFullHeightPxPerCm(fullHeightPx, profile.height, profile.segment)
             }
             const torsoAnchor = getTorsoAnchor(profile.segment, profile.height)
             const torsoH      = mid(lh, rh).y - mid(ls, rs).y
@@ -408,9 +405,14 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
           if (torsoH > 20 && pxPerCm > 0) {
             torsoHRef.current = torsoH
 
-            const prevMeanPxPerCm = pxPerCmHistRef.current.length
-              ? pxPerCmHistRef.current.reduce((a, b) => a + b, 0) / pxPerCmHistRef.current.length
-              : pxPerCm
+            const menSamplesBefore = profile.segment === 'men'
+              ? aggregateMenScanSamples(menScanSamplesRef.current)
+              : null
+            const prevMeanPxPerCm = profile.segment === 'men'
+              ? (menSamplesBefore?.pxPerCm || pxPerCm)
+              : pxPerCmHistRef.current.length
+                ? pxPerCmHistRef.current.reduce((a, b) => a + b, 0) / pxPerCmHistRef.current.length
+                : pxPerCm
             const scaleOk = Math.abs(pxPerCm - prevMeanPxPerCm) / prevMeanPxPerCm < 0.06
             pxPerCmHistRef.current.push(pxPerCm)
             if (pxPerCmHistRef.current.length > 30) pxPerCmHistRef.current.shift()
@@ -423,13 +425,25 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
               if (swHistRef.current.length > HIST_SIZE) swHistRef.current.shift()
               hipHistRef.current.push(hwPx)
               if (hipHistRef.current.length > HIST_SIZE) hipHistRef.current.shift()
+              if (profile.segment === 'men') {
+                menScanSamplesRef.current.push({
+                  shoulderCm: swPx / pxPerCm,
+                  hipCm: hwPx / pxPerCm,
+                  pxPerCm,
+                })
+                if (menScanSamplesRef.current.length > HIST_SIZE) menScanSamplesRef.current.shift()
+              }
             }
 
             const estSwPx  = iqm(swHistRef.current) || swPx
             const estHipPx = iqm(hipHistRef.current) || hwPx
 
-            const estSwCm    = estSwPx  / pxPerCm
-            const estHipCm   = estHipPx / pxPerCm
+            const menSamples = profile.segment === 'men'
+              ? aggregateMenScanSamples(menScanSamplesRef.current)
+              : null
+            const measurementPxPerCm = menSamples?.pxPerCm || pxPerCm
+            const estSwCm    = menSamples?.shoulderCm || estSwPx / measurementPxPerCm
+            const estHipCm   = menSamples?.hipCm || estHipPx / measurementPxPerCm
             const estWaistCm = estSwCm * (WAIST_FROM_SHOULDER[profile.segment] ?? 0.72)
 
             const { bust: estBust, waist: estWaist, hips: estHips } = estimateMeasurements({
@@ -460,7 +474,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
               bestSnapshotRef.current = {
                 dataUrl:    snap.toDataURL('image/jpeg', 0.82),
                 lock: {
-                  pxPerCm,
+                  pxPerCm: measurementPxPerCm,
                   shoulderCm: estSwCm,
                   waistCm:    estWaistCm,
                   hipCm:      estHipCm,
@@ -776,6 +790,37 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   }, [sideSamples, sideStage, camState, lockSideScan])
 
   const lockMeasurement = useCallback(() => {
+    if (profile.segment === 'men') {
+      if (menScanSamplesRef.current.length < MIN_MEN_SCAN_SAMPLES) return
+      const stable = aggregateMenScanSamples(menScanSamplesRef.current)
+      if (!stable) return
+
+      const waistCm = stable.shoulderCm * WAIST_FROM_SHOULDER.men
+      const estimated = estimateMeasurements({
+        shoulderCm: stable.shoulderCm,
+        waistCm,
+        hipCm: stable.hipCm,
+        bodyShape: null,
+        segment: 'men',
+      })
+      lockedPxPerCmRef.current = stable.pxPerCm
+      lockedWidthsRef.current = { shoulderCm: stable.shoulderCm, waistCm, hipCm: stable.hipCm }
+      setAdjBust(String(estimated.bust))
+      setAdjWaist(String(estimated.waist))
+      setAdjHips(String(estimated.hips))
+      setScanConf(bestSnapshotRef.current?.confidence ?? confidence)
+      setAdjEdited(false)
+      setLocked(true)
+      stopCamera()
+      setSnapshot(bestSnapshotRef.current)
+
+      const bestPatch = {}
+      if (detectedTone) { bestPatch.skinTone = detectedTone.skinTone; bestPatch.undertone = detectedTone.undertone }
+      if (detectedShape) bestPatch.bodyShape = detectedShape
+      if (Object.keys(bestPatch).length) updateProfile(bestPatch)
+      return
+    }
+
     // Prefer the highest-confidence capture so walking up to the device
     // to press Lock can't corrupt the result.
     const best = bestSnapshotRef.current
@@ -811,10 +856,13 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
       nose?.score > CONF && la?.score > CONF && ra?.score > CONF
 
     const pxPerCm = (() => {
+      if (profile.segment === 'men' && pxPerCmHistRef.current.length > 0) {
+        return iqm(pxPerCmHistRef.current)
+      }
       if (hasFullHeight) {
         const ankleMid     = mid(la, ra)
         const fullHeightPx = ankleMid.y - nose.y
-        return fullHeightPx / profile.height
+        return getFullHeightPxPerCm(fullHeightPx, profile.height, profile.segment)
       }
       if (pxPerCmHistRef.current.length > 0) return iqm(pxPerCmHistRef.current)
       const torsoH      = torsoHRef.current ?? 0
@@ -917,7 +965,8 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   const confColor = confidence >= 70 ? '#1D9E75' : confidence >= 50 ? '#EF9F27' : '#E24B4A'
   const issue     = poseFound ? null : (poseIssues[0] ? GUIDANCE_MAP[poseIssues[0]] : null)
   const canScan   = modelState === 'ready'
-  const canLock   = true
+  const menSampleCount = menScanSamplesRef.current.length
+  const canLock   = profile.segment !== 'men' || menSampleCount >= MIN_MEN_SCAN_SAMPLES
   const toneHex   = detectedTone ? SKIN_TONES.find(t => t.id === detectedTone.skinTone)?.hex : null
   const segLabel  = SEGMENTS.find(s => s.id === (profile.segment ?? 'women'))?.label || 'Women'
   const hasHeight = !!profile.height
@@ -1119,9 +1168,12 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                       <button
                         className="fr-btn fr-btn--primary"
                         onClick={lockMeasurement}
-                        title={!canLock ? `Build more confidence (${confidence}% / 65% needed)` : ''}
+                        title={!canLock ? `Hold still for ${MIN_MEN_SCAN_SAMPLES} stable frames (${menSampleCount}/${MIN_MEN_SCAN_SAMPLES})` : ''}
+                        disabled={!canLock}
                       >
-                        {bestConf > 0 ? `Lock best capture (${bestConf}%)` : `Lock measurements (${confidence}%)`}
+                        {!canLock
+                          ? `Hold still (${menSampleCount}/${MIN_MEN_SCAN_SAMPLES})`
+                          : bestConf > 0 ? `Lock best capture (${bestConf}%)` : `Lock measurements (${confidence}%)`}
                       </button>
                       <button className="fr-btn fr-btn--ghost" onClick={stopCamera}>Stop</button>
                     </div>
@@ -1328,7 +1380,11 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     </div>
                     <span className="scan-conf-label" style={{ color: confColor }}>{confidence}%</span>
                   </div>
-                  <p className="scan-conf-hint">Lock available at any time. best frame is saved automatically.</p>
+                  <p className="scan-conf-hint">
+                    {profile.segment === 'men'
+                      ? canLock ? 'Stable sample collected. Lock the scan when ready.' : `Hold still until ${MIN_MEN_SCAN_SAMPLES} stable frames are collected.`
+                      : 'Lock available at any time. best frame is saved automatically.'}
+                  </p>
                 </div>
               )}
 
@@ -1348,21 +1404,21 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
               {camState === 'on' && scanMode === 'front' && (
                 <div className="scan-buffer-status">
-                  <p className="scan-detects-heading">Clean frames</p>
+                  <p className="scan-detects-heading">{profile.segment === 'men' ? 'Stable frames' : 'Clean frames'}</p>
                   <div className="scan-buffer-bar-wrap">
                     <div className="scan-buffer-track">
                       <div
                         className="scan-buffer-fill"
                         style={{
-                          width: `${Math.min((swHistRef.current.length / 60) * 100, 100)}%`,
-                          background: swHistRef.current.length >= 60 ? '#1D9E75' : '#EF9F27',
+                          width: `${Math.min(((profile.segment === 'men' ? menSampleCount : swHistRef.current.length) / MIN_MEN_SCAN_SAMPLES) * 100, 100)}%`,
+                          background: (profile.segment === 'men' ? menSampleCount : swHistRef.current.length) >= MIN_MEN_SCAN_SAMPLES ? '#1D9E75' : '#EF9F27',
                         }}
                       />
                     </div>
-                    <span className="scan-conf-label">{swHistRef.current.length}/60</span>
+                    <span className="scan-conf-label">{profile.segment === 'men' ? menSampleCount : swHistRef.current.length}/60</span>
                   </div>
-                  {swHistRef.current.length < 60 && (
-                    <p className="scan-conf-hint">Tilted/rotated/dark frames are excluded</p>
+                  {(profile.segment === 'men' ? menSampleCount : swHistRef.current.length) < MIN_MEN_SCAN_SAMPLES && (
+                    <p className="scan-conf-hint">{profile.segment === 'men' ? 'Tilted, moving, or low-quality frames are excluded.' : 'Tilted/rotated/dark frames are excluded'}</p>
                   )}
                 </div>
               )}

@@ -1,6 +1,6 @@
 // api/size-chart/route.js
 import { NextResponse } from 'next/server'
-import { SIZES_BY_SEGMENT, SIZES_WOMEN, formatSizeRow } from '@/app/constants/sizeConstants'
+import { MEN_FALLBACK_SIZE_CHART_NAME, SIZES_BY_SEGMENT, SIZES_WOMEN, formatSizeRow } from '@/app/constants/sizeConstants'
 
 // ── GET /api/size-chart?supplierId=xxx&segment=women ─────────────────────────
 // segment: 'women' | 'men' | 'children'  (default: 'women')
@@ -12,12 +12,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const VALID_SEGMENTS = new Set(['women', 'men', 'children'])
 const USE_DB = process.env.USE_DB === 'true'
 
-function fallback(segment, supplierId = null, supplierName = 'Philippine Standard') {
+function fallback(segment, supplierId = null, supplierName = null) {
   const sizes = SIZES_BY_SEGMENT[segment] ?? SIZES_WOMEN
   return {
     ok:           true,
     supplierId,
-    supplierName,
+    supplierName: supplierName ?? (segment === 'men' ? MEN_FALLBACK_SIZE_CHART_NAME : 'Philippine Standard'),
     segment,
     sizes:        sizes.map(formatSizeRow),
     isFallback:   true,
@@ -82,9 +82,9 @@ export async function GET(request) {
     const supplier = supplierRows[0]
     if (!supplier) return NextResponse.json(fallback(segment))
 
-    // Supplier exists but no size rows for this segment → PH standard
+    // Supplier exists but has no rows for this segment → use fallback chart.
     if (sizeRows.length === 0) {
-      return NextResponse.json(fallback(segment, sid, 'Philippine Standard'))
+      return NextResponse.json(fallback(segment, sid))
     }
 
     return NextResponse.json({
