@@ -73,7 +73,7 @@ function loadScript(src) {
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
-import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS } from '../../lib/fitting-room/calibration.js'
+import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '../../lib/fitting-room/calibration.js'
 
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
@@ -169,9 +169,14 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const dyPx  = ((cal.offsetY ?? 0) / 108) * torsoH
   const top2  = topY + dyPx
   const bot2  = top2 + (bottomY - topY) * calSY
+  // arm / leg anchors: how far each wrist sits outside its shoulder (screen-left / screen-right), ankle midpoint
+  const A = [[ls, kps[KP.LW ?? 15]], [rs, kps[KP.RW ?? 16]]].sort((a, b) => a[0].x - b[0].x)
+  const reach = (s, wr, dir) => (wr && wr.score > CONF) ? Math.min(1, Math.max(-0.5, dir * (wr.x - s.x) / Math.max(sw, 1))) : 0.1
+  const arms = { l: reach(A[0][0], A[0][1], -1), r: reach(A[1][0], A[1][1], 1) }
+  const legX = (la?.score > CONF && ra?.score > CONF) ? (la.x + ra.x) / 2 : null
   return { topY: top2, bottomY: bot2, cx: cx + dxPx, topW: topW * calSX, botW: botW * calSX,
            torsoH, widthScale: cal.widthScale ?? 1, sm, hm, sw, hw, rawHw, cal,
-           dx: dxPx, dy: dyPx, scaleX: calSX }
+           dx: dxPx, dy: dyPx, scaleX: calSX, arms, legX }
 }
 
 function drawGown(ctx, img, layout, opacity) {
@@ -203,7 +208,7 @@ function drawGown(ctx, img, layout, opacity) {
   ctx.restore()
 }
 let segOC = null, segAC = null
-function applySegmentation(maskCanvas, video, ctx, w, h, kps) {
+function applySegmentation(maskCanvas, video, ctx, w, h, kps, rawKps, layout) {
   try {
     if (!segOC) { segOC = document.createElement('canvas'); segAC = document.createElement('canvas') }
     if (segOC.width !== w || segOC.height !== h) {
@@ -220,17 +225,37 @@ function applySegmentation(maskCanvas, video, ctx, w, h, kps) {
     if (kps) {
       const actx = segAC.getContext('2d')
       actx.clearRect(0, 0, w, h)
-      const armW = Math.max(12, dist(kps[KP.LS], kps[KP.RS]) * 0.3)
-      actx.strokeStyle = '#fff'; actx.lineWidth = armW; actx.lineCap = 'round'; actx.lineJoin = 'round'
+      const sw0  = dist(kps[KP.LS], kps[KP.RS])
+      const armW = Math.max(12, sw0 * 0.3)
+      actx.strokeStyle = '#fff'; actx.lineCap = 'round'; actx.lineJoin = 'round'
       const chains = [[KP.LS, KP.LE ?? 13, KP.LW ?? 15], [KP.RS, KP.RE ?? 14, KP.RW ?? 16]]
-      for (const ch of chains) {
-        const [s, e, wr] = ch.map(i => kps[i])
-        if (![s, e, wr].every(k => k && k.score > CONF)) continue
-        const st = lerpPt(s, e, 0.45)
-        const hand = lerpPt(e, wr, 1.3)   // extend past the wrist so hands survive the background reveal
-        actx.beginPath(); actx.moveTo(st.x, st.y); actx.lineTo(e.x, e.y); actx.lineTo(hand.x, hand.y); actx.stroke()
+      const sleeves = layout?.cal?.enh?.sleeves || 'none'
+      const sleeveCoversUpper = sleeves !== 'none' && sleeves !== 'straps'   // the gown's own sleeve is drawn there
+      const sleeveCoversFore  = sleeves === 'long' || sleeves === 'cape'
+      const hz = [KP.LH, KP.RH].map(i => rawKps?.[i]?.z).filter(z => typeof z === 'number')
+      const hipZ = hz.length ? hz.reduce((a, b) => a + b, 0) / hz.length : null
+      const cx0 = layout?.cx ?? (kps[KP.LS].x + kps[KP.RS].x) / 2
+      const halfW = Math.max(layout?.hw ?? 0, layout?.sw ?? sw0) * 0.62
+      // a segment shows over the gown when it is beside the body, or nearer the camera than the hips
+      const show = (ia, ib, a, b) => {
+        if (Math.abs((a.x + b.x) / 2 - cx0) > halfW) return true
+        const za = rawKps?.[ia]?.z, zb = rawKps?.[ib]?.z
+        if (hipZ == null || typeof za !== 'number' || typeof zb !== 'number') return true   // no depth: old behaviour
+        return (za + zb) / 2 < hipZ - sw0 * 0.12
       }
-      octx.globalCompositeOperation = 'destination-in'; octx.drawImage(segAC, 0, 0)
+      const stroke = (a, b, wd) => { actx.lineWidth = wd; actx.beginPath(); actx.moveTo(a.x, a.y); actx.lineTo(b.x, b.y); actx.stroke() }
+      for (const [si, ei, wi] of chains) {
+        const s = kps[si], e = kps[ei], wr = kps[wi]
+        if (![s, e, wr].every(k => k && k.score > CONF)) continue
+        const hand = lerpPt(e, wr, 1.3)   // extend past the wrist so hands survive the background reveal
+        if (!sleeveCoversUpper && show(si, ei, s, e)) stroke(lerpPt(s, e, 0.45), e, armW)
+        if (show(ei, wi, e, wr)) {
+          if (!sleeveCoversFore) stroke(e, wr, armW)
+          stroke(wr, hand, armW * 1.2)    // hands always
+        }
+      }
+      octx.globalCompositeOperation = 'destination-in'
+      octx.filter = 'blur(1.5px)'; octx.drawImage(segAC, 0, 0); octx.filter = 'none'
     }
     octx.globalCompositeOperation = 'source-over'
     ctx.drawImage(segOC, 0, 0, w, h)
@@ -718,7 +743,7 @@ export default function TryOnCamera({
             : null
           drawGown(ctx, activeImg, layout, opacityRef.current)
           if (enhancedRef.current && seg) {
-            applySegmentation(poses[0].segmentation, video, ctx, vw, vh, kps)
+            applySegmentation(poses[0].segmentation, video, ctx, vw, vh, kps, poses[0].keypoints, layout)
           }
         } else {
           setPoseFound(false)
@@ -1081,7 +1106,20 @@ export default function TryOnCamera({
                       <span className="tc-opacity-val" style={{ width: 40 }}>{Number(s.v).toFixed(2)}</span>
                     </div>
                   ))}
-                                    {ADV_FIELDS.map(f => (
+                                    {GEO_GROUPS.map(g => (
+                    <div key={g.id}>
+                      <span className="tc-enhanced-label">{g.title}</span>
+                      {g.fields.map(f => (
+                        <div key={f.k} className="tc-opacity-row">
+                          <label className="tc-opacity-label" style={{ width: 110 }}>{f.label}</label>
+                          <input type="range" className="tc-slider" min={f.min} max={f.max} step={f.step}
+                            value={r.enh.geo[f.k]} onChange={ev => setEnh(f.k, parseFloat(ev.target.value))}/>
+                          <span className="tc-opacity-val" style={{ width: 40 }}>{Number(r.enh.geo[f.k]).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  {ADV_FIELDS.map(f => (
                     <div key={f.k} className="tc-opacity-row">
                       <label className="tc-opacity-label" style={{ width: 110 }}>{f.label}</label>
                       <input type="range" className="tc-slider" min={f.min} max={f.max} step={f.step}
@@ -1100,7 +1138,7 @@ export default function TryOnCamera({
               { k: 'hipEase',     label: 'Hip ease',       min: 0.8,   max: 1.4, step: 0.01, def: 1.1  },
               { k: 'skirtFlare',  label: 'Skirt flare',    min: 0.7,   max: 2.0, step: 0.01, def: 1.1  },
             ].map(s => {
-                            if (liveCal.mode === 'enhanced' && (s.k === 'necklineY' || s.k === 'shoulderPad')) return null
+                            if (liveCal.mode === 'enhanced' && (s.k === 'necklineY' || s.k === 'shoulderPad' || s.k === 'skirtFlare')) return null
               const v = liveCal[s.k] ?? autoCalibration(gown)[s.k] ?? s.def
               return (
                 <div key={s.k} className="tc-opacity-row">

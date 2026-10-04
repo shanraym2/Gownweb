@@ -7,7 +7,7 @@ import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
 import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile } from '@/lib/fitting-room/glGownRenderer'
-import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS } from '@/lib/fitting-room/calibration'
+import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
 
 /* ─────────────────────────────────────────────
@@ -314,6 +314,36 @@ function removeBg(imgSrc, tolerance = 32) {
   })
 }
 
+// Crop a try-on PNG to its visible pixels (+1%) and upload it. Saved calibration stays valid:
+// waist / seams are stored as fractions of the gown, not of the image.
+async function tightCropUpload(srcUrl) {
+  const safe = await toSafeUrl(srcUrl)
+  try {
+    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Could not load image.')); im.src = safe })
+    const w = img.naturalWidth, h = img.naturalHeight
+    const c = document.createElement('canvas'); c.width = w; c.height = h
+    const cx = c.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0)
+    const d = cx.getImageData(0, 0, w, h).data
+    let x0 = w, y0 = h, x1 = -1, y1 = -1
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] >= 16) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y
+    }
+    if (x1 < 0) throw new Error('No visible gown pixels found. Remove the background first.')
+    const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.01) + 1
+    const sx = Math.max(0, x0 - pad), sy = Math.max(0, y0 - pad)
+    const ex = Math.min(w, x1 + 1 + pad), ey = Math.min(h, y1 + 1 + pad)
+    const out = document.createElement('canvas'); out.width = ex - sx; out.height = ey - sy
+    out.getContext('2d').drawImage(c, sx, sy, out.width, out.height, 0, 0, out.width, out.height)
+    const blob = await new Promise(r => out.toBlob(r, 'image/png'))
+    const fd = new FormData()
+    fd.append('file', new File([blob], `tryon-${Date.now()}.png`, { type: 'image/png' }))
+    const res  = await adminFetch('/api/admin/upload-tryon-image', { method: 'POST', body: fd })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.error || 'Upload failed')
+    return data.url
+  } finally { if (safe !== srcUrl && safe.startsWith('blob:')) URL.revokeObjectURL(safe) }
+}
+
 function BgRemover({ src, onDone, onClose }) {
   const canvasRef=useRef(null)
   const [tol,setTol]=useState(32); const [processing,setProcessing]=useState(false)
@@ -506,7 +536,7 @@ function AutoMatteModal({ displayImage, onDone, onClose }) {
 /* ─────────────────────────────────────────────
    SeamPreview — draggable sleeve-seam lines over the cut-out image
 ───────────────────────────────────────────── */
-function SeamPreview({ src, cal, rc, onSeam }) {
+function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
   const [img, setImg] = useState(null)
   const boxRef  = useRef(null)
   const dragRef = useRef(null)
@@ -546,12 +576,32 @@ function SeamPreview({ src, cal, rc, onSeam }) {
   const pct = x => `${(x / prof.iw) * 100}%`
   const yWaist = ((prof.srcTop + wf * prof.srcH) / prof.ih) * 100
 
+  const geo = rc.enh.geo
+  const yAt = f => ((prof.srcTop + f * prof.srcH) / prof.ih) * 100
   const move = ev => {
     const side = dragRef.current; if (!side || !boxRef.current) return
     const r = boxRef.current.getBoundingClientRect()
+    if (side === 'top' || side === 'waist' || side === 'hem') {
+      const f = (((ev.clientY - r.top) / r.height) * prof.ih - prof.srcTop) / prof.srcH
+      if (side === 'top')   onGeo?.('imgTop', clampN(f, 0, Math.min(0.3, geo.imgHem - 0.4)))
+      if (side === 'hem')   onGeo?.('imgHem', clampN(f, Math.max(0.7, geo.imgTop + 0.4), 1))
+      if (side === 'waist') onWaistRow?.(clampN(f, Math.max(0.1, geo.imgTop + 0.05), Math.min(0.8, geo.imgHem - 0.1)))
+      return
+    }
     const x = ((ev.clientX - r.left) / r.width) * prof.iw
     onSeam(side, side === 'L' ? clampN((x - ex.lo) / ex.W, 0, 0.4) : clampN((ex.hi - x) / ex.W, 0, 0.4))
   }
+  const hline = (kind, y, color, label, dashed) => (
+    <div key={kind} role="slider" aria-label={label}
+      onPointerDown={ev => { dragRef.current = kind; ev.currentTarget.setPointerCapture(ev.pointerId) }}
+      onPointerMove={move}
+      onPointerUp={() => { dragRef.current = null }}
+      onPointerCancel={() => { dragRef.current = null }}
+      style={{ position:'absolute', left:0, right:0, top:`${y}%`, height:16, marginTop:-8, cursor:'ns-resize', touchAction:'none' }}>
+      <div style={{ position:'absolute', left:0, right:0, top:7, borderTop:`2px ${dashed ? 'dashed' : 'solid'} ${color}` }}/>
+      <span style={{ position:'absolute', left:4, top:-4, fontSize:9, color, background:'rgba(0,0,0,.55)', padding:'0 4px', borderRadius:3 }}>{label}</span>
+    </div>
+  )
   const line = (side, x) => (
     <div key={side}
       role="slider" aria-label={side === 'L' ? 'Left sleeve seam' : 'Right sleeve seam'}
@@ -570,7 +620,11 @@ function SeamPreview({ src, cal, rc, onSeam }) {
       <p className="ce-row-label" style={{marginBottom:4}}>Sleeve seams: drag the gold lines to where the bodice ends and the sleeves begin</p>
       <div ref={boxRef} style={{ position:'relative', background:'repeating-conic-gradient(#d9d6d0 0% 25%, #f4f2ee 0% 50%) 50% / 16px 16px', borderRadius:8, overflow:'hidden', userSelect:'none' }}>
         <img src={img.src} alt="Try-on image with sleeve seam lines" draggable={false} style={{ width:'100%', display:'block' }}/>
-        <div style={{ position:'absolute', left:0, right:0, top:`${yWaist}%`, borderTop:'1px dashed rgba(74,127,212,.8)' }} aria-hidden="true"/>
+        <div style={{ position:'absolute', left:0, right:0, top:0, height:`${yAt(geo.imgTop)}%`, background:'rgba(0,0,0,.45)', pointerEvents:'none' }} aria-hidden="true"/>
+        <div style={{ position:'absolute', left:0, right:0, bottom:0, height:`${100 - yAt(geo.imgHem)}%`, background:'rgba(0,0,0,.45)', pointerEvents:'none' }} aria-hidden="true"/>
+        {hline('top',   yAt(geo.imgTop), '#c9a96e', 'Garment top', false)}
+        {hline('waist', yWaist,          '#4a7fd4', 'Skirt start', true)}
+        {hline('hem',   yAt(geo.imgHem), '#7ab8f5', 'Hem',         false)}
         {line('L', xL)}
         {line('R', xR)}
       </div>
@@ -663,12 +717,14 @@ function calLayout(cal, W, H) {
     bottomY      = ankleY + torsoH * 0.10
   }
 
-  return { topY, bottomY, cx: smX, topW, botW, torsoH, smY, hmY, swPx }
+  return { topY, bottomY, cx: smX, topW, botW, torsoH, smY, hmY, swPx,
+           waistY: smY + torsoH * (cal?.enh?.geo?.waistAt ?? 0.65), enh: !!cal?.enh }
 }
 
 function calHandles(lay) {
   const { topY, bottomY, cx, topW, botW, smY } = lay
   return {
+    ...(lay.enh ? { waist: { x: cx + topW/2 + 14, y: lay.waistY, axis:'y', color:'#4a7fd4', label:'Skirt start' } } : {}),
     neckline:  { x: cx,          y: topY,    axis:'y', color:'#c9a96e', label:'Neckline' },
     shoulderL: { x: cx - topW/2, y: smY,     axis:'x', color:'#c9a96e', label:'Shoulder' },
     shoulderR: { x: cx + topW/2, y: smY,     axis:'x', color:'#c9a96e', label:'Shoulder' },
@@ -1025,7 +1081,37 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       const canvas = canvasRef.current
       if (canvas) {
         canvas.style.cursor = hit
-          ? (hit === 'neckline' || hit === 'hem' ? 'ns-resize' : 'ew-resize')
+          ? (hit === 'neckline' || hit === 'hem' || hit === 'waist' ? 'ns-resize' : // Crop a try-on PNG to its visible pixels (+1%) and upload it. Saved calibration stays valid:
+// waist / seams are stored as fractions of the gown, not of the image.
+async function tightCropUpload(srcUrl) {
+  const safe = await toSafeUrl(srcUrl)
+  try {
+    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Could not load image.')); im.src = safe })
+    const w = img.naturalWidth, h = img.naturalHeight
+    const c = document.createElement('canvas'); c.width = w; c.height = h
+    const cx = c.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0)
+    const d = cx.getImageData(0, 0, w, h).data
+    let x0 = w, y0 = h, x1 = -1, y1 = -1
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] >= 16) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y
+    }
+    if (x1 < 0) throw new Error('No visible gown pixels found. Remove the background first.')
+    const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.01) + 1
+    const sx = Math.max(0, x0 - pad), sy = Math.max(0, y0 - pad)
+    const ex = Math.min(w, x1 + 1 + pad), ey = Math.min(h, y1 + 1 + pad)
+    const out = document.createElement('canvas'); out.width = ex - sx; out.height = ey - sy
+    out.getContext('2d').drawImage(c, sx, sy, out.width, out.height, 0, 0, out.width, out.height)
+    const blob = await new Promise(r => out.toBlob(r, 'image/png'))
+    const fd = new FormData()
+    fd.append('file', new File([blob], `tryon-${Date.now()}.png`, { type: 'image/png' }))
+    const res  = await adminFetch('/api/admin/upload-tryon-image', { method: 'POST', body: fd })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.error || 'Upload failed')
+    return data.url
+  } finally { if (safe !== srcUrl && safe.startsWith('blob:')) URL.revokeObjectURL(safe) }
+}
+
+function BgRemover({ src, onDone, onClose }) {'ew-resize')
           : 'grab'
       }
       return
@@ -1051,6 +1137,11 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       case 'shoulderR': {
         const newHalfW = lay0.topW / 2 + dx
         next.shoulderPad = Math.max(0.60, Math.min(2.80, (newHalfW * 2) / lay0.swPx))
+        break
+      }
+      case 'waist': {
+        const nw = lay0.waistY + dy
+        next = { ...snap, enhanced: { ...(snap.enhanced || {}), waistAt: Math.max(0.4, Math.min(0.9, (nw - lay0.smY) / lay0.torsoH)) } }
         break
       }
       case 'hem': {
@@ -1210,9 +1301,27 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                   ))}
                   {tryonImage && (
                     <SeamPreview src={tryonImage} cal={cal} rc={rc}
-                      onSeam={(side, v) => setEnh(side === 'L' ? 'seamL' : 'seamR', v)} />
+                      onSeam={(side, v) => setEnh(side === 'L' ? 'seamL' : 'seamR', v)}
+                      onGeo={setEnh}
+                      onWaistRow={v => onChange({ ...cal, waistRow: v })} />
                   )}
-                                    <p className="ce-group-label" style={{marginTop:6}}>Advanced</p>
+                                    {GEO_GROUPS.map(g => (
+                    <div key={g.id} style={{display:'flex',flexDirection:'column',gap:13}}>
+                      <p className="ce-group-label" style={{marginTop:6}}>{g.title}</p>
+                      {g.fields.map(f => (
+                        <div key={f.k} className="ce-row">
+                          <div className="ce-row-head">
+                            <span className="ce-row-label">{f.label}</span>
+                            <span className="ce-row-val">{Number(rc.enh.geo[f.k]).toFixed(2)}</span>
+                          </div>
+                          <input type="range" min={f.min} max={f.max} step={f.step} value={rc.enh.geo[f.k]}
+                            onChange={e => setEnh(f.k, parseFloat(e.target.value))} className="ce-range"/>
+                          <p className="ce-row-hint">{f.hint}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <p className="ce-group-label" style={{marginTop:6}}>Advanced</p>
                   {ADV_FIELDS.map(f => (
                     <div key={f.k} className="ce-row">
                       <div className="ce-row-head">
@@ -1245,7 +1354,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                 { key:'hemY',        label:'Hem length',       min:0.35, max:1.30, step:0.01,
                   hint:'Override hem position. Drag the blue ↕ handle or use slider.', isHem:true },
               ].map(s => {
-                                if (isEnh && (s.key === 'necklineY' || s.key === 'shoulderPad')) return null
+                                if (isEnh && (s.key === 'necklineY' || s.key === 'shoulderPad' || s.key === 'skirtFlare')) return null
                 const raw = cal[s.key]
                 const val = s.isHem ? (raw ?? 1.0) : raw
                 const display = raw == null && s.isHem ? 'auto' : Number(val).toFixed(2)
@@ -1770,9 +1879,14 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
                   onClick={()=>{ setBgRemoverTarget('front'); setBgRemoverSrc(form.tryonImage) }}>
                   ✂ Remove background…
                 </button>
-                 <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
+                <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
                   onClick={()=>setMatteTarget('front')}>
                   ✨ Auto cut-out…
+                </button>
+                <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
+                  disabled={!form.tryonImage}
+                  onClick={async()=>{ try{ const u=await tightCropUpload(form.tryonImage); setForm(p=>({...p,tryonImage:u})); setTryonImgError(false); showToast('Tight-cropped') }catch(e){ showToast(e.message,'error') } }}>
+                  ⛶ Tight crop
                 </button>
               </div>
               <div>
@@ -1790,9 +1904,14 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
                   onClick={()=>{ setBgRemoverTarget('back'); setBgRemoverSrc(form.tryonImageBack) }}>
                   ✂ Remove background…
                 </button>
-                  <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
+                <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
                   onClick={()=>setMatteTarget('back')}>
                   ✨ Auto cut-out…
+                </button>
+                <button type="button" className="btn-ghost btn-xs" style={{marginTop:5,width:'100%'}}
+                  disabled={!form.tryonImageBack}
+                  onClick={async()=>{ try{ const u=await tightCropUpload(form.tryonImageBack); setForm(p=>({...p,tryonImageBack:u})); setTryonBackImgError(false); showToast('Tight-cropped') }catch(e){ showToast(e.message,'error') } }}>
+                  ⛶ Tight crop
                 </button>
               </div>
             </div>

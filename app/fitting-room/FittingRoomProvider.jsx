@@ -71,7 +71,8 @@ function wrapPoseLandmarker(landmarker) {
       const keypoints = result.landmarks[0].map(lm => ({
         x: lm.x * vw,
         y: lm.y * vh,
-        score: lm.visibility ?? 0,
+                score: lm.visibility ?? 0,
+        z: lm.z * vw,                   // depth, used to decide when an arm is in front of the gown
       }))
       return Promise.resolve([{ keypoints, segmentation }])
     },
