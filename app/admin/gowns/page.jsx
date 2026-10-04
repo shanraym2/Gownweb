@@ -1079,44 +1079,13 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       const hit = hitTest(x, y)
       setHover(hit)
       const canvas = canvasRef.current
-      if (canvas) {
+            if (canvas) {
         canvas.style.cursor = hit
-          ? (hit === 'neckline' || hit === 'hem' || hit === 'waist' ? 'ns-resize' : // Crop a try-on PNG to its visible pixels (+1%) and upload it. Saved calibration stays valid:
-// waist / seams are stored as fractions of the gown, not of the image.
-async function tightCropUpload(srcUrl) {
-  const safe = await toSafeUrl(srcUrl)
-  try {
-    const img = await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Could not load image.')); im.src = safe })
-    const w = img.naturalWidth, h = img.naturalHeight
-    const c = document.createElement('canvas'); c.width = w; c.height = h
-    const cx = c.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0)
-    const d = cx.getImageData(0, 0, w, h).data
-    let x0 = w, y0 = h, x1 = -1, y1 = -1
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] >= 16) {
-      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y
-    }
-    if (x1 < 0) throw new Error('No visible gown pixels found. Remove the background first.')
-    const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.01) + 1
-    const sx = Math.max(0, x0 - pad), sy = Math.max(0, y0 - pad)
-    const ex = Math.min(w, x1 + 1 + pad), ey = Math.min(h, y1 + 1 + pad)
-    const out = document.createElement('canvas'); out.width = ex - sx; out.height = ey - sy
-    out.getContext('2d').drawImage(c, sx, sy, out.width, out.height, 0, 0, out.width, out.height)
-    const blob = await new Promise(r => out.toBlob(r, 'image/png'))
-    const fd = new FormData()
-    fd.append('file', new File([blob], `tryon-${Date.now()}.png`, { type: 'image/png' }))
-    const res  = await adminFetch('/api/admin/upload-tryon-image', { method: 'POST', body: fd })
-    const data = await res.json()
-    if (!data.ok) throw new Error(data.error || 'Upload failed')
-    return data.url
-  } finally { if (safe !== srcUrl && safe.startsWith('blob:')) URL.revokeObjectURL(safe) }
-}
-
-function BgRemover({ src, onDone, onClose }) {'ew-resize')
+          ? (hit === 'neckline' || hit === 'hem' || hit === 'waist' ? 'ns-resize' : 'ew-resize')
           : 'grab'
       }
       return
     }
-
     const dx   = x - dragOrigin.x
     const dy   = y - dragOrigin.y
     const snap = calSnapshot
