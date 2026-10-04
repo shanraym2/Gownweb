@@ -344,6 +344,10 @@ export default function TryOnCamera({
   const [enhanced,   setEnhanced  ] = useState(false)
   const [segLoading, setSegLoading] = useState(false)
   const [segError,   setSegError  ] = useState('')
+  const [revealOn,   setRevealOn  ] = useState(true)    // hide clothing / body that sticks out past the gown edge
+  const [armsOn,     setArmsOn    ] = useState(true)    // draw arms and hands over the gown
+  const revealRef = useRef(true)
+  const armsRef   = useRef(true)
 
   // Capture / timer
   const [captured,   setCaptured  ] = useState(null)
@@ -747,11 +751,11 @@ export default function TryOnCamera({
                     if (!frozen) lastSegRef.current = seg || null
           const plate = plateRef.current
                     layout.noCloth = !!frozen
-          layout.reveal = (enhancedRef.current && seg && plate && plate.width === vw && plate.height === vh)
+          layout.reveal = (enhancedRef.current && revealRef.current && seg && plate && plate.width === vw && plate.height === vh)
             ? { plate, mask: seg, margin: layout.sw * 0.1 }
             : null
           drawGown(ctx, activeImg, layout, opacityRef.current)
-          if (enhancedRef.current && seg) {
+          if (enhancedRef.current && seg && armsRef.current) {
             applySegmentation(poses[0].segmentation, video, ctx, vw, vh, kps, poses[0].keypoints, layout)
           }
         } else {
@@ -1206,6 +1210,36 @@ export default function TryOnCamera({
                 <span className="tc-toggle-thumb" aria-hidden="true"/>
               </button>
             </div>
+            {enhanced && (
+              <>
+                <div className="tc-enhanced-row">
+                  <div>
+                    <span className="tc-enhanced-label">Hide clothing behind gown</span>
+                    <span className="tc-enhanced-sub">Replaces your body or clothes near the gown edge with the background</span>
+                  </div>
+                  <button
+                    className={`tc-toggle${revealOn ? ' on' : ''}`}
+                    onClick={() => { const v = !revealRef.current; revealRef.current = v; setRevealOn(v) }}
+                    aria-pressed={revealOn}
+                    aria-label="Toggle hiding clothing behind the gown">
+                    <span className="tc-toggle-thumb" aria-hidden="true"/>
+                  </button>
+                </div>
+                <div className="tc-enhanced-row">
+                  <div>
+                    <span className="tc-enhanced-label">Arms over gown</span>
+                    <span className="tc-enhanced-sub">Shows your arms and hands in front of the gown</span>
+                  </div>
+                  <button
+                    className={`tc-toggle${armsOn ? ' on' : ''}`}
+                    onClick={() => { const v = !armsRef.current; armsRef.current = v; setArmsOn(v) }}
+                    aria-pressed={armsOn}
+                    aria-label="Toggle showing arms over the gown">
+                    <span className="tc-toggle-thumb" aria-hidden="true"/>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
