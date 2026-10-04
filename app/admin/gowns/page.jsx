@@ -1290,7 +1290,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                       ))}
                     </div>
                   ))}
-                  <p className="ce-group-label" style={{marginTop:6}}>Advanced</p>
+                  <p className="ce-group-label" style={{marginTop:6}}>Appearance</p>
                   {ADV_FIELDS.map(f => (
                     <div key={f.k} className="ce-row">
                       <div className="ce-row-head">
@@ -1343,7 +1343,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                 )
               })}
 
-              <p className="ce-group-label" style={{marginTop:6}}>Position &amp; Scale</p>
+              <p className="ce-group-label" style={{marginTop:6}}>Placement</p>
               {[
                 { key:'offsetX', label:'Shift left / right', min:-80, max:80,  step:1,   hint:'Move dress horizontally over the body.',    unit:'px' },
                 { key:'offsetY', label:'Shift up / down',    min:-80, max:80,  step:1,   hint:'Move dress vertically over the body.',      unit:'px' },
@@ -2036,6 +2036,11 @@ function GownCard({ g, onEdit, onView, onSaveStock, onArchive, onPermanentDelete
           {segmentLabel&&segmentLabel!=='Women'&&<span className="badge badge--blue">{segmentLabel}</span>}
         </div>
         <div className="gown-card-meta">{g.price}{g.silhouette?` · ${g.silhouette}`:''}{g.color?` · ${g.color}`:''}{g.type?` · ${g.type}`:''}</div>
+               {!archived&&g.tryonImage&&(()=>{
+          const c=g.tryonCalibration||{}, e=c.enhanced||{}
+          const steps=[['Cut-out',tryStatus==='ok'],['Waist',c.waistRow!=null||e.waistAt!=null],['Seams',e.seamL!=null||e.seamR!=null],['Hem',c.hemY!=null||e.imgHem!=null]]
+          return <div className="gown-card-steps">{steps.map(([l,ok])=><span key={l} className={`badge ${ok?'badge--green':'badge--neutral'}`}>{ok?'✓':'○'} {l}</span>)}</div>
+        })()}
         <div className="gown-card-stock">
           {inv.length===0
             ?<span className="stock-chip stock-chip--none">No inventory</span>
@@ -2376,6 +2381,7 @@ export default function AdminGownsPage() {
         .gown-card-name{font-weight:600;font-size:13px;margin-bottom:3px;display:flex;align-items:center;flex-wrap:wrap;gap:5px;}
         .gown-card-meta{font-size:11px;color:var(--c-muted);margin-bottom:7px;}
         .gown-card-stock{display:flex;gap:5px;flex-wrap:wrap;}
+        .gown-card-steps{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;}
         .gown-card-actions{display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0;}
         .stock-chip{font-size:10px;background:var(--c-surface2);border:1px solid var(--c-border);border-radius:20px;padding:2px 8px;color:var(--c-muted);}
         .stock-chip--none{color:var(--c-subtle);}
