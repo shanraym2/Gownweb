@@ -682,7 +682,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
         if (Math.random() < 0.1) {
           const p = lockedPxPerCmRef.current
-          console.log('[side depth cm]', { bust: bustMeas?.widthPx / p, waist: waistMeas?.widthPx / p, hip: hipMeas?.widthPx / p })
+          console.log('[side depth cm]', JSON.stringify({ bust: bustMeas && +(bustMeas.widthPx / p).toFixed(1), waist: waistMeas && +(waistMeas.widthPx / p).toFixed(1), hip: hipMeas && +(hipMeas.widthPx / p).toFixed(1) }))
         }
         const sampleCount = bustDepthHistRef.current.length
         setSideSamples(sampleCount)
