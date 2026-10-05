@@ -352,6 +352,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
     try {
       const poses = await detectorRef.current.estimatePoses(video)
+      if (Math.random() < 0.02) console.log('[pose mask]', JSON.stringify({ coverage: detectorRef.current.coverage, hasMask: !!poses?.[0]?.segmentation }))
       if (poses?.length > 0) {
         const rawKps = poses[0].keypoints.map(k => ({ ...k, x: vw - k.x }))
         const dispKps = smoothKpsDisplay(prevKpsDisplayRef.current, rawKps)
@@ -749,6 +750,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
   useEffect(() => {
     if (camState === 'on') {
+      if (scanMode !== 'side') detectorRef.current?.setMask?.(true)
       if (scanMode === 'side') detectSide()
       else detect()
     } else if (animRef.current) cancelAnimationFrame(animRef.current)
@@ -960,12 +962,18 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
         if (refinedForRef.current !== frame.dataUrl) return
         const { pxPerCm, shoulderCm } = frame.lock
         const inRange = (v, lo, hi) => (v && v / pxPerCm >= shoulderCm * lo && v / pxPerCm <= shoulderCm * hi) ? v / pxPerCm : null
+        const chestW = inRange(px?.chestPx, 0.7, 1.6)
         const waistW = inRange(px?.waistPx, 0.5, 1.3)
         const hipW   = inRange(px?.hipPx,   0.55, 1.3)
         console.log('[silhouette]', JSON.stringify({ segment: profile.segment, pxPerCm: +pxPerCm.toFixed(3), shoulderCm: +shoulderCm.toFixed(1), px, waistCm: waistW && +waistW.toFixed(1), hipCm: hipW && +hipW.toFixed(1), joint: frame.est }))
-        if (!waistW && !hipW) { setRefineMsg('Silhouette not usable. Showing the joint-based estimate.'); return }
-        const r = estimateFromSilhouette({ waistW, hipW, fallback: frame.est, bodyShape: detectedShape, segment: profile.segment })
-        if (!adjEditedRef.current) { setAdjWaist(String(r.waist)); setAdjHips(String(r.hips)) }
+        if (!chestW && !waistW && !hipW) { setRefineMsg('Silhouette not usable. Showing the joint-based estimate.'); return }
+        const r = estimateFromSilhouette({ chestW: profile.segment === 'men' ? chestW : null, waistW, hipW, fallback: frame.est, bodyShape: detectedShape, segment: profile.segment })
+               if (!adjEditedRef.current) { setAdjBust(String(r.bust)); setAdjWaist(String(r.waist)); setAdjHips(String(r.hips)) }
+        if (lockedWidthsRef.current) lockedWidthsRef.current = {
+          ...lockedWidthsRef.current,
+          ...(waistW ? { waistCm: waistW } : {}),
+          ...(hipW   ? { hipCm:   hipW   } : {}),
+        }
         setRefineMsg('Waist and hips refined from your silhouette.')
       } catch (e) {
         console.warn('[silhouette]', e)
