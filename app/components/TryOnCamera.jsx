@@ -73,6 +73,8 @@ function loadScript(src) {
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
+import { drawSuit } from '../../lib/fitting-room/suitWarp.js'
+import { getProfile } from '../../lib/fitting-room/gownWarp.js'
 import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '../../lib/fitting-room/calibration.js'
 
 
@@ -182,6 +184,11 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
 function drawGown(ctx, img, layout, opacity) {
   const t = ctx.getTransform()
   const size = { w: ctx.canvas.width / t.a, h: ctx.canvas.height / t.d }   // logical (camera-pixel) size at any render scale
+  // Menswear has its own straight-cut renderer (no waist cinch / skirt flare / sway)
+  if (layout.segment === 'men') {
+    layout.suitProfile = getProfile(img)
+    if (drawSuit(ctx, img, layout, opacity)) return
+  }
   if (drawGownGL(ctx, img, layout, opacity, size)) return
   if (drawGownWarped(ctx, img, layout, opacity, size)) return
   const { topY, bottomY, cx, topW, botW } = layout
@@ -798,6 +805,7 @@ export default function TryOnCamera({
                     if (!frozen) lastSegRef.current = seg || null
           const plate = plateRef.current
                     layout.noCloth = !!frozen
+          layout.segment = String(gownRef.current?.segment || 'women').toLowerCase()
           layout.reveal = (enhancedRef.current && revealRef.current && seg && plate && plate.width === vw && plate.height === vh)
             ? { plate, mask: seg, margin: layout.sw * 0.1 }
             : null
