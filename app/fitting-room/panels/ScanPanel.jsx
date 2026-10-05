@@ -162,6 +162,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   const [scanConf,      setScanConf     ] = useState(0)   // confidence of the locked capture
   const [bestConf,      setBestConf     ] = useState(0)   // live-tracked best confidence this session
   const [menSampleCount, setMenSampleCount] = useState(0)
+  const [menCapturePending, setMenCapturePending] = useState(false)
   const [refineMsg,     setRefineMsg    ] = useState('')
   const refinedForRef = useRef(null)
   const adjEditedRef  = useRef(false)
@@ -206,6 +207,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     if (videoRef.current) videoRef.current.srcObject = null
     swHistRef.current = []; hipHistRef.current = []; pxPerCmHistRef.current = []; menScanSamplesRef.current = []
     setMenSampleCount(0)
+    setMenCapturePending(false)
     prevKpsDisplayRef.current = null; shapeVotesRef.current = {}
     goodFrames.current = 0; liveKpsRef.current = null
     setCamState('off'); setPoseFound(false); setConfidence(0); setPoseIssues([])
@@ -823,7 +825,8 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
   const lockMeasurement = useCallback(() => {
     if (profile.segment === 'men') {
-      const stable = aggregateMenScanSamples(menScanSamplesRef.current)
+      if (menScanSamplesRef.current.length < MEN_SCAN_TARGET_SAMPLES) return
+      const stable = aggregateMenScanSamples(menScanSamplesRef.current.slice(0, MEN_SCAN_TARGET_SAMPLES))
       const best = bestSnapshotRef.current
       const bestLock = best?.lock
       if (!stable && !best?.est) return
@@ -962,6 +965,18 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     if (detectedShape) { patch.bodyShape = detectedShape }
     if (Object.keys(patch).length) updateProfile(patch)
   }, [stopCamera, detectedTone, detectedShape, updateProfile, profile, confidence])
+
+  useEffect(() => {
+    if (
+      profile.segment === 'men' &&
+      menCapturePending &&
+      camState === 'on' &&
+      menSampleCount >= MEN_SCAN_TARGET_SAMPLES
+    ) {
+      setMenCapturePending(false)
+      lockMeasurement()
+    }
+  }, [camState, lockMeasurement, menCapturePending, menSampleCount, profile.segment])
 
   // After Lock: measure waist and hip widths on the best frame's silhouette.
   // Joint spans understate both, so this replaces them when it succeeds.
@@ -1179,7 +1194,9 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                           ? GUIDANCE_MAP[poseIssues.find(i => HIGH_SEVERITY_ISSUES.has(i))]
                           : framingHint ? framingHint
                           : profile.segment === 'men'
-                            ? `${menSampleCount} stable frames collected. Hold still briefly for steadier sizing.`
+                            ? menCapturePending
+                              ? `Capturing measurements: ${menSampleCount}/${MEN_SCAN_TARGET_SAMPLES} stable frames.`
+                              : 'Tap Capture measurements and hold this pose briefly for a consistent result.'
                           : confidence > 0
                             ? (confidence < 65 ? 'Hold still — building confidence…' : 'Good — ready to lock')
                             : 'Detecting pose…'}
@@ -1248,9 +1265,26 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     <div className="scan-btn-pair">
                       <button
                         className="fr-btn fr-btn--primary"
-                        onClick={lockMeasurement}
+                        onClick={() => {
+                          if (profile.segment !== 'men') {
+                            lockMeasurement()
+                            return
+                          }
+                          menScanSamplesRef.current = []
+                          setMenSampleCount(0)
+                          setMenCapturePending(true)
+                          bestSnapshotRef.current = null
+                          setBestConf(0)
+                          goodFrames.current = 0
+                          setConfidence(0)
+                        }}
+                        disabled={profile.segment === 'men' && menCapturePending}
                       >
-                        {bestConf > 0 ? `Lock best capture (${bestConf}%)` : `Lock measurements (${confidence}%)`}
+                        {profile.segment === 'men'
+                          ? menCapturePending
+                            ? `Capturing (${menSampleCount}/${MEN_SCAN_TARGET_SAMPLES})`
+                            : 'Capture measurements'
+                          : bestConf > 0 ? `Lock best capture (${bestConf}%)` : `Lock measurements (${confidence}%)`}
                       </button>
                       <button className="fr-btn fr-btn--ghost" onClick={stopCamera}>Stop</button>
                     </div>
@@ -1460,7 +1494,9 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                   </div>
                   <p className="scan-conf-hint">
                     {profile.segment === 'men'
-                      ? 'You can lock anytime. More stable frames can improve repeatability.'
+                      ? menCapturePending
+                        ? 'Stay in the same pose until capture finishes. Low-quality frames do not count.'
+                        : `Capture collects ${MEN_SCAN_TARGET_SAMPLES} stable frames for consistent sizing.`
                       : 'Lock available at any time. best frame is saved automatically.'}
                   </p>
                 </div>
@@ -1482,7 +1518,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
               {camState === 'on' && scanMode === 'front' && (
                 <div className="scan-buffer-status">
-                  <p className="scan-detects-heading">{profile.segment === 'men' ? 'Stable frames (optional target)' : 'Clean frames'}</p>
+                  <p className="scan-detects-heading">{profile.segment === 'men' ? 'Men scan capture' : 'Clean frames'}</p>
                   <div className="scan-buffer-bar-wrap">
                     <div className="scan-buffer-track">
                       <div
@@ -1496,7 +1532,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     <span className="scan-conf-label">{profile.segment === 'men' ? `${menSampleCount}/${MEN_SCAN_TARGET_SAMPLES}` : `${swHistRef.current.length}/60`}</span>
                   </div>
                   {(profile.segment === 'men' ? menSampleCount < MEN_SCAN_TARGET_SAMPLES : swHistRef.current.length < 60) && (
-                    <p className="scan-conf-hint">{profile.segment === 'men' ? 'You can lock before reaching this target.' : 'Tilted/rotated/dark frames are excluded'}</p>
+                    <p className="scan-conf-hint">{profile.segment === 'men' ? menCapturePending ? 'Only stable, well-lit frames count.' : 'Tap Capture measurements to start.' : 'Tilted/rotated/dark frames are excluded'}</p>
                   )}
                 </div>
               )}

@@ -9,6 +9,16 @@ describe('getFullHeightPxPerCm', () => {
   it('leaves the women scale unchanged', () => {
     expect(getFullHeightPxPerCm(177, 200, 'women')).toBeCloseTo(0.885)
   })
+
+  it.each([100, 152.4, 165.1, 190.5, 248.92])(
+    'uses the entered men height at %s cm rather than a fixed height',
+    (heightCm) => {
+      const expectedPxPerCm = 2.4
+      const noseToAnklePx = heightCm * 0.885 * expectedPxPerCm
+
+      expect(getFullHeightPxPerCm(noseToAnklePx, heightCm, 'men')).toBeCloseTo(expectedPxPerCm)
+    }
+  )
 })
 
 describe('aggregateMenScanSamples', () => {
