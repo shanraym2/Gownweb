@@ -14,7 +14,8 @@ import {
   iqm, dist, mid, KP, CONF, HIGH_SEVERITY_ISSUES,
   HIST_SIZE,
 } from '../../../lib/fitting-room/poseUtils'
-import { aggregateMenScanSamples, estimateMeasurements, estimateMeasurementsWithDepth, getFullHeightPxPerCm, getTorsoAnchor, MEAS_VARIANCE } from '../../../lib/fitting-room/measurementUtils'
+import { aggregateMenScanSamples, estimateFromSilhouette, estimateMeasurements, estimateMeasurementsWithDepth, getFullHeightPxPerCm, getTorsoAnchor, MEAS_VARIANCE } from '../../../lib/fitting-room/measurementUtils'
+import { measureBodyFromSnapshot } from '../../../lib/fitting-room/silhouetteMask'
 import { sampleBackgroundColor, measureSilhouetteWidth } from '../../../lib/fitting-room/silhouetteUtils'
 import { _detectSkinProfileFixed } from '../../utils/skinTone'
 
@@ -79,7 +80,7 @@ function validateField(key, value, unit) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function ScanPanel() {
-  const { updateProfile, detectorRef, modelState, profile } = useFittingRoom()
+  const { updateProfile, detectorRef, segmenterRef, modelState, profile } = useFittingRoom()
 
   const videoRef          = useRef(null)
   const canvasRef         = useRef(null)
@@ -159,6 +160,9 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   const [confidence,    setConfidence   ] = useState(0)
   const [scanConf,      setScanConf     ] = useState(0)   // confidence of the locked capture
   const [bestConf,      setBestConf     ] = useState(0)   // live-tracked best confidence this session
+  const [refineMsg,     setRefineMsg    ] = useState('')
+  const refinedForRef = useRef(null)
+  const adjEditedRef  = useRef(false)
   const [poseIssues,    setPoseIssues   ] = useState([])
   const [poseFound,     setPoseFound    ] = useState(false)
   const [detectedTone,  setDetectedTone ] = useState(null)
@@ -468,6 +472,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
             if (conf > (bestSnapshotRef.current?.confidence ?? 0) && conf >= 50) {
               setBestConf(conf)
+              console.log('[best frame]', JSON.stringify({ conf, segment: profile.segment, height: profile.height, hasFullHeight: !!hasFullHeight, fullHeightPx: hasFullHeight ? Math.round((la.y + ra.y) / 2 - nose.y) : null, pxPerCm: +pxPerCm.toFixed(3), swPx: Math.round(swPx), hwPx: Math.round(hwPx), shoulderCm: +estSwCm.toFixed(1), hipCm: +estHipCm.toFixed(1), est: [estBust, estWaist, estHips], vh }))
               const snap = document.createElement('canvas')
               snap.width = vw; snap.height = vh
               snap.getContext('2d').drawImage(canvas, 0, 0)
@@ -475,6 +480,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                 dataUrl:    snap.toDataURL('image/jpeg', 0.82),
                 lock: {
                   pxPerCm: measurementPxPerCm,
+                  rows: { smY: mid(ls, rs).y, hmY: mid(lh, rh).y, cx: (mid(ls, rs).x + mid(lh, rh).x) / 2 },
                   shoulderCm: estSwCm,
                   waistCm:    estWaistCm,
                   hipCm:      estHipCm,
@@ -611,6 +617,25 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
 
       setPoseFound(true); setPoseIssues([])
 
+      // Draw visible joints before the gates so you can see what the model
+      // detects even while a gate is rejecting the frame.
+      {
+        const gx = a => a.reduce((s, k) => s + k.x, 0) / a.length
+        const gy = a => a.reduce((s, k) => s + k.y, 0) / a.length
+        const sPt = { x: gx(shoulderPt), y: gy(shoulderPt) }
+        const hPt = { x: gx(hipPt),      y: gy(hipPt) }
+        ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+        ctx.fillStyle   = 'rgba(255,255,255,0.8)'
+        ctx.lineWidth   = 2
+        ctx.beginPath(); ctx.moveTo(sPt.x, sPt.y); ctx.lineTo(hPt.x, hPt.y)
+        if (kneePt) { ctx.lineTo(kneePt.x, kneePt.y); if (anklePt) ctx.lineTo(anklePt.x, anklePt.y) }
+        ctx.stroke()
+        ;[...shoulderPt, ...hipPt, kneePt, anklePt].forEach(k => {
+          if (!k) return
+          ctx.beginPath(); ctx.arc(k.x, k.y, 4, 0, Math.PI * 2); ctx.fill()
+        })
+      }
+
       const shoulderPtBest = [...shoulderPt].sort((a, b) => b.score - a.score)[0]
       const hipPtBest      = [...hipPt].sort((a, b) => b.score - a.score)[0]
       const smY = shoulderPt.reduce((s, k) => s + k.y, 0) / shoulderPt.length
@@ -621,7 +646,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
       const shoulderSpan = (ls?.score > CONF && rs?.score > CONF) ? dist(ls, rs) : 0
       const notProfile   = shoulderSpan > torsoH * 0.25            // tune on real data
       const wrongScale   = torsoHRef.current && Math.abs(torsoH / torsoHRef.current - 1) > 0.12
-      if (Math.random() < 0.1) console.log('[side gate]', { spanRatio: shoulderSpan / torsoH, torsoRatio: torsoHRef.current ? torsoH / torsoHRef.current : null, notProfile, wrongScale })
+      if (Math.random() < 0.1) console.log('[side gate]', JSON.stringify({ spanRatio: +(shoulderSpan / torsoH).toFixed(2), torsoRatio: torsoHRef.current ? +(torsoH / torsoHRef.current).toFixed(2) : null, notProfile, wrongScale }))
       if (notProfile || wrongScale) {
         sideBadRef.current += 1
         if (sideBadRef.current <= 15) {
@@ -805,6 +830,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
       })
       lockedPxPerCmRef.current = stable.pxPerCm
       lockedWidthsRef.current = { shoulderCm: stable.shoulderCm, waistCm, hipCm: stable.hipCm }
+      if (bestSnapshotRef.current?.lock?.torsoH) torsoHRef.current = bestSnapshotRef.current.lock.torsoH
       setAdjBust(String(estimated.bust))
       setAdjWaist(String(estimated.waist))
       setAdjHips(String(estimated.hips))
@@ -918,6 +944,35 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     if (Object.keys(patch).length) updateProfile(patch)
   }, [stopCamera, detectedTone, detectedShape, updateProfile, profile, confidence])
 
+  // After Lock: measure waist and hip widths on the best frame's silhouette.
+  // Joint spans understate both, so this replaces them when it succeeds.
+  useEffect(() => {
+    if (!locked || !snapshot?.lock?.rows || !snapshot?.dataUrl) return
+    if (refinedForRef.current === snapshot.dataUrl) return
+    refinedForRef.current = snapshot.dataUrl
+    adjEditedRef.current = false
+    setRefineMsg('Refining waist and hips from your silhouette…')
+    const frame = snapshot
+    ;(async () => {
+      try {
+        const px = await measureBodyFromSnapshot(segmenterRef, frame.dataUrl, frame.lock.rows)
+        if (refinedForRef.current !== frame.dataUrl) return
+        const { pxPerCm, shoulderCm } = frame.lock
+        const inRange = (v, lo, hi) => (v && v / pxPerCm >= shoulderCm * lo && v / pxPerCm <= shoulderCm * hi) ? v / pxPerCm : null
+        const waistW = inRange(px?.waistPx, 0.5, 1.3)
+        const hipW   = inRange(px?.hipPx,   0.55, 1.3)
+        console.log('[silhouette]', JSON.stringify({ segment: profile.segment, pxPerCm: +pxPerCm.toFixed(3), shoulderCm: +shoulderCm.toFixed(1), px, waistCm: waistW && +waistW.toFixed(1), hipCm: hipW && +hipW.toFixed(1), joint: frame.est }))
+        if (!waistW && !hipW) { setRefineMsg('Silhouette not usable. Showing the joint-based estimate.'); return }
+        const r = estimateFromSilhouette({ waistW, hipW, fallback: frame.est, bodyShape: detectedShape, segment: profile.segment })
+        if (!adjEditedRef.current) { setAdjWaist(String(r.waist)); setAdjHips(String(r.hips)) }
+        setRefineMsg('Waist and hips refined from your silhouette.')
+      } catch (e) {
+        console.warn('[silhouette]', e)
+        setRefineMsg('Silhouette refinement unavailable. Showing the joint-based estimate.')
+      }
+    })()
+  }, [locked, snapshot])   // eslint-disable-line react-hooks/exhaustive-deps
+
   const confirmMeasurements = useCallback(() => {
     // adjBust/Waist/Hips are cm strings — parse directly, no unit conversion needed
     updateProfile({
@@ -999,7 +1054,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     return unit === 'in' ? String(cmToIn(cm) ?? '') : cmStr
   }
   const adjOnChange = (setter) => (e) => {
-    setAdjEdited(true)
+    setAdjEdited(true); adjEditedRef.current = true
     const raw = parseFloat(e.target.value)
     if (!Number.isFinite(raw)) { setter(''); return }
     const cm = unit === 'in' ? String(inToCm(raw) ?? '') : String(raw)
@@ -1320,6 +1375,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     ))}
                   </div>
 
+                  {refineMsg && <p className="scan-conf-hint">{refineMsg}</p>}
                   <div className="scan-variance-row">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{flexShrink:0,marginTop:'1px'}}>
                       <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
