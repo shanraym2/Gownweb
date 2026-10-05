@@ -31,7 +31,7 @@ const CM_PER_INCH = 2.54
 // not measured on your users — tune against tape (see below).
 const WAIST_FROM_SHOULDER = { women: 0.80, men: 1.0, children: 0.75 }
 const HIP_SPAN_TO_WIDTH = { women: 1.35, men: 1.8, children: 1.35 }   // joint span -> body width; refit
-const MEN_SCAN_TARGET_SAMPLES = 30
+const MEN_SCAN_TARGET_SAMPLES = 60
 const cmToIn  = cm     => cm     != null ? Math.round((cm     / CM_PER_INCH) * 10) / 10 : null
 const inToCm  = inches => inches != null ? Math.round(inches  * CM_PER_INCH  * 10) / 10 : null
 const dispVal = (cm, unit) =>

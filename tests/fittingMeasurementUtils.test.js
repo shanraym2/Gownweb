@@ -28,15 +28,15 @@ describe('aggregateMenScanSamples', () => {
     expect(aggregateMenScanSamples([])).toBeNull()
   })
 
-  it('uses a fixed recent window so longer scans do not change the sample count', () => {
+  it('uses the full retained sample set to reduce window-to-window drift', () => {
     const samples = Array.from({ length: 40 }, (_, index) => ({
-      shoulderCm: index < 10 ? 200 : 40,
-      hipCm: index < 10 ? 200 : 36,
-      pxPerCm: index < 10 ? 20 : 2,
+      shoulderCm: index < 20 ? 30 : 50,
+      hipCm: index < 20 ? 26 : 46,
+      pxPerCm: index < 20 ? 1.5 : 2.5,
     }))
 
-    expect(aggregateMenScanSamples(samples)).toEqual(
-      aggregateMenScanSamples(samples.slice(-30))
-    )
+    expect(aggregateMenScanSamples(samples).shoulderCm).toBeCloseTo(40)
+    expect(aggregateMenScanSamples(samples).hipCm).toBeCloseTo(36)
+    expect(aggregateMenScanSamples(samples).pxPerCm).toBeCloseTo(2)
   })
 })
