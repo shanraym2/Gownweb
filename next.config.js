@@ -45,7 +45,7 @@ const nextConfig = {
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "img-src 'self' data: blob: https://*.digitaloceanspaces.com https://*.fbcdn.net",
             "font-src 'self' data: https://fonts.gstatic.com",
-            "connect-src 'self' https://*.digitaloceanspaces.com https://api.paymongo.com https://cdn.jsdelivr.net https://storage.googleapis.com https://huggingface.co https://*.huggingface.co https://*.hf.co",
+            "connect-src 'self' https://*.digitaloceanspaces.com https://api.paymongo.com https://cdn.jsdelivr.net https://storage.googleapis.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://tfhub.dev https://www.kaggle.com",
             "media-src 'self' blob:",
             "worker-src 'self' blob:",
             "frame-src https://checkout.paymongo.com",
