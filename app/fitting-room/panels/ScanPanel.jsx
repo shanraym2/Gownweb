@@ -822,6 +822,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     if (profile.segment === 'men') {
       if (menScanSamplesRef.current.length < MIN_MEN_SCAN_SAMPLES) return
       const stable = aggregateMenScanSamples(menScanSamplesRef.current)
+      console.log('[men lock]', JSON.stringify({ n: menScanSamplesRef.current.length, height: profile.height, pxPerCm: +stable.pxPerCm.toFixed(3), shoulderCm: +stable.shoulderCm.toFixed(1), shoulderPerHeight: profile.height ? +(stable.shoulderCm / profile.height).toFixed(3) : null }))
       if (!stable) return
 
       const waistCm = stable.shoulderCm * WAIST_FROM_SHOULDER.men
@@ -968,7 +969,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
         const hipW   = inRange(px?.hipPx,   0.55, 1.3)
         console.log('[silhouette]', JSON.stringify({ segment: profile.segment, pxPerCm: +pxPerCm.toFixed(3), shoulderCm: +shoulderCm.toFixed(1), px, waistCm: waistW && +waistW.toFixed(1), hipCm: hipW && +hipW.toFixed(1), joint: frame.est }))
         if (!chestW && !waistW && !hipW) { setRefineMsg('Silhouette not usable. Showing the joint-based estimate.'); return }
-        const r = estimateFromSilhouette({ chestW: profile.segment === 'men' ? chestW : null, waistW, hipW, fallback: frame.est, bodyShape: detectedShape, segment: profile.segment })
+        const r = estimateFromSilhouette({ chestW: null, waistW, hipW, fallback: frame.est, bodyShape: detectedShape, segment: profile.segment })
                if (!adjEditedRef.current) { setAdjBust(String(r.bust)); setAdjWaist(String(r.waist)); setAdjHips(String(r.hips)) }
         if (lockedWidthsRef.current) lockedWidthsRef.current = {
           ...lockedWidthsRef.current,
