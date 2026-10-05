@@ -477,7 +477,14 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
             setConfidence(conf)
             setLiveEst({ bust: estBust, waist: estWaist, hips: estHips })
 
-            if (conf > (bestSnapshotRef.current?.confidence ?? 0) && conf >= 50) {
+                        const wl = rawKps[15], wr = rawKps[16]            // wrists (BlazePose indices)
+            const el = rawKps[KP.LE], er = rawKps[KP.RE]
+            const bodyCx    = (mid(ls, rs).x + mid(lh, rh).x) / 2
+            const bodyHalfW = Math.max(hwPx, swPx) / 2
+            const wristsOk  = [wl, wr].every(k => k?.score > CONF && Math.abs(k.x - bodyCx) > bodyHalfW * 1.25)
+            const elbowsOk  = [el, er].every(k => k?.score > CONF && Math.abs(k.x - bodyCx) > bodyHalfW * 1.1)
+            const armsClear = profile.segment === 'men' || (wristsOk && elbowsOk)
+            if (armsClear && conf > (bestSnapshotRef.current?.confidence ?? 0) && conf >= 50) {
               setBestConf(conf)
               console.log('[best frame]', JSON.stringify({ conf, segment: profile.segment, height: profile.height, hasFullHeight: !!hasFullHeight, fullHeightPx: hasFullHeight ? Math.round((la.y + ra.y) / 2 - nose.y) : null, pxPerCm: +pxPerCm.toFixed(3), swPx: Math.round(swPx), hwPx: Math.round(hwPx), shoulderCm: +estSwCm.toFixed(1), hipCm: +estHipCm.toFixed(1), est: [estBust, estWaist, estHips], vh }))
               const snap = document.createElement('canvas')
@@ -1021,8 +1028,8 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
         const { pxPerCm, shoulderCm } = frame.lock
         const inRange = (v, lo, hi) => (v && v / pxPerCm >= shoulderCm * lo && v / pxPerCm <= shoulderCm * hi) ? v / pxPerCm : null
         const chestW = inRange(px?.chestPx, 0.7, 1.6)
-        const waistW = inRange(px?.waistPx, 0.5, 1.3)
-        const hipW   = inRange(px?.hipPx,   0.55, 1.3)
+        const waistW = inRange(px?.waistPx, 0.55, 1.0)
+        const hipW   = inRange(px?.hipPx,   0.65, 1.2)
         console.log('[silhouette]', JSON.stringify({ segment: profile.segment, pxPerCm: +pxPerCm.toFixed(3), shoulderCm: +shoulderCm.toFixed(1), px, waistCm: waistW && +waistW.toFixed(1), hipCm: hipW && +hipW.toFixed(1), joint: frame.est }))
         if (!chestW && !waistW && !hipW) { setRefineMsg('Silhouette not usable. Showing the joint-based estimate.'); return }
         const r = estimateFromSilhouette({ chestW: null, waistW, hipW, fallback: frame.est, bodyShape: detectedShape, segment: profile.segment })
