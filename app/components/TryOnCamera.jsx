@@ -380,26 +380,30 @@ export default function TryOnCamera({
   useEffect(() => { measRef.current = bodyMeasures }, [bodyMeasures?.bust, bodyMeasures?.waist, bodyMeasures?.hips])
 
   // ── Load gown image when gown changes ──────────────────────────────────────
+  // The previous gown stays on screen until the new image has loaded, so
+  // swapping while the camera is on does not flash an empty frame.
   useEffect(() => {
-    gownImgRef.current = null; gownBackRef.current = null
-    if (!gown) return
-    const src = gown.tryonImage || gown.image; if (!src) return
+    if (!gown) { gownImgRef.current = null; gownBackRef.current = null; return }
+    const src = gown.tryonImage || gown.image
+    if (!src) { gownImgRef.current = null; gownBackRef.current = null; return }
+
+    let stale = false
 
     const img = new Image(); img.crossOrigin = 'anonymous'
-    img.onload  = () => {
+    img.onload = () => {
+      if (stale) return
       gownImgRef.current = img
       prepareGownGL(img)
       setCaptured(null)
-      goodFrames.current = 0
-      setPoseLocked(false)
       setFacingBack(false)
       facingFrames.current = 0
     }
     img.onerror = () => {
-      // Fallback: try the plain product image without crossOrigin (no CORS needed for display)
+      if (stale) return
+      // Fallback: try the plain product image
       if (src !== gown.image) {
         const fb = new Image(); fb.crossOrigin = 'anonymous'
-        fb.onload = () => { gownImgRef.current = fb }
+        fb.onload = () => { if (!stale) { gownImgRef.current = fb; setCaptured(null) } }
         fb.src = gown.image
       }
     }
@@ -407,12 +411,13 @@ export default function TryOnCamera({
 
     if (gown.tryonImageBack) {
       const bi = new Image(); bi.crossOrigin = 'anonymous'
-      bi.onload = () => { gownBackRef.current = bi }
+      bi.onload = () => { if (!stale) gownBackRef.current = bi }
       bi.src = gown.tryonImageBack
+    } else {
+      gownBackRef.current = null
     }
 
-    // Reset capture state only after image is confirmed loaded — avoids
-    // goodFrames decrement racing against async img.onload
+    return () => { stale = true }
   }, [gown?.id])   // stable dep: only re-runs when gown ID changes, not on object identity churn
 
   // ── Load internal model (skipped when external detector is provided) ───────
@@ -586,6 +591,48 @@ export default function TryOnCamera({
     document.addEventListener('fullscreenchange', onFsChange)
     return () => document.removeEventListener('fullscreenchange', onFsChange)
   }, [])
+
+    // ── Swap gowns while the camera is on ──────────────────────────────────────
+  const stripRef = useRef(null)
+  const swipeRef = useRef(null)
+
+  const stepGown = useCallback((dir) => {
+    if (gowns.length < 2) return
+    const i = gowns.findIndex(g => g.id === gown?.id)
+    const next = i < 0 ? gowns[0] : gowns[(i + dir + gowns.length) % gowns.length]
+    if (next) onGownChange?.(next)
+  }, [gowns, gown?.id, onGownChange])
+
+  const canSwap = camState === 'on' && !captured && countdown === null && !calibrate && gowns.length > 1
+
+  const onSwipeStart = e => {
+    if (e.target.closest('button, input, select, a')) { swipeRef.current = null; return }
+    swipeRef.current = { x: e.clientX, y: e.clientY }
+  }
+  const onSwipeEnd = e => {
+    const s = swipeRef.current; swipeRef.current = null
+    if (!s || !canSwap) return
+    const dx = e.clientX - s.x, dy = e.clientY - s.y
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) stepGown(dx < 0 ? 1 : -1)
+  }
+
+  // Arrow keys on desktop
+  useEffect(() => {
+    if (!canSwap) return
+    const onKey = e => {
+      if (e.target.closest?.('input, select, textarea')) return
+      if (e.key === 'ArrowLeft')  stepGown(-1)
+      if (e.key === 'ArrowRight') stepGown(1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canSwap, stepGown])
+
+  // Keep the selected thumbnail visible in the strip
+  useEffect(() => {
+    stripRef.current?.querySelector('.sel')
+      ?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+  }, [gown?.id])
 
   // ── Enhanced mode ──────────────────────────────────────────────────────────
     const toggleEnhanced = useCallback(() => {
@@ -859,7 +906,7 @@ export default function TryOnCamera({
     <div className="tc-wrap">
       {/* Gown thumbnail strip */}
       {gowns.length > 0 && (
-        <div className="tc-strip" role="listbox" aria-label="Select gown">
+        <div className="tc-strip" ref={stripRef} role="listbox" aria-label="Select gown">
           {gowns.map(g => (
             <button
               key={g.id}
@@ -885,6 +932,9 @@ export default function TryOnCamera({
         ref={tcWrapRef}
         className={`tc-viewport${fullscreen ? ' tc-viewport--fs' : ''}`}
         aria-label="Camera viewport"
+        onPointerDown={onSwipeStart}
+        onPointerUp={onSwipeEnd}
+        onPointerCancel={() => { swipeRef.current = null }}
       >
         <video ref={videoRef} playsInline muted
           style={{ position:'absolute', inset:0, width:'100%', height:'100%',
@@ -902,6 +952,42 @@ export default function TryOnCamera({
           >
             {fullscreen ? '⤢' : '⤡'} <span>{fullscreen ? 'Exit' : 'Fullscreen'}</span>
           </button>
+        )}
+
+        {/* Swap controls (also visible in fullscreen) */}
+        {canSwap && (
+          <>
+            <button className="tc-swap tc-swap--prev" onClick={() => stepGown(-1)}
+              aria-label="Previous gown">‹</button>
+            <button className="tc-swap tc-swap--next" onClick={() => stepGown(1)}
+              aria-label="Next gown">›</button>
+            {gown && (
+              <div className="tc-gown-name" role="status" aria-live="polite">
+                {gown.name}
+                <span className="tc-gown-count">
+                  {gowns.findIndex(g => g.id === gown.id) + 1}/{gowns.length}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Swap arrows (also visible in fullscreen) */}
+        {canSwap && (
+          <>
+            <button className="tc-swap tc-swap--prev" onClick={() => stepGown(-1)}
+              aria-label="Previous gown">‹</button>
+            <button className="tc-swap tc-swap--next" onClick={() => stepGown(1)}
+              aria-label="Next gown">›</button>
+            {gown && (
+              <div className="tc-gown-name" role="status" aria-live="polite">
+                {gown.name}
+                <span className="tc-gown-count">
+                  {gowns.findIndex(g => g.id === gown.id) + 1}/{gowns.length}
+                </span>
+              </div>
+            )}
+          </>
         )}
 
         {/* Off-state placeholder */}
@@ -1266,6 +1352,41 @@ export default function TryOnCamera({
           position:fixed; inset:0; z-index:9999; min-height:100vh;
         }
         .tc-viewport:fullscreen { background:#0d0a07; }
+        .tc-swap {
+          position:absolute; top:50%; transform:translateY(-50%); z-index:6;
+          width:40px; height:40px; border-radius:50%; border:1.5px solid rgba(255,255,255,.8);
+          background:rgba(0,0,0,.5); color:#fff; font-size:24px; line-height:1;
+          display:flex; align-items:center; justify-content:center; cursor:pointer;
+          backdrop-filter:blur(4px);
+        }
+        .tc-swap:hover { background:rgba(0,0,0,.75); }
+        .tc-swap--prev { left:10px; }
+        .tc-swap--next { right:10px; }
+        .tc-gown-name {
+          position:absolute; bottom:48px; left:50%; transform:translateX(-50%); z-index:5;
+          background:rgba(0,0,0,.6); color:#fff; padding:5px 14px; border-radius:20px;
+          font-size:12px; white-space:nowrap; max-width:calc(100% - 110px);
+          overflow:hidden; text-overflow:ellipsis; pointer-events:none;
+        }
+        .tc-gown-count { margin-left:8px; opacity:.6; font-size:10px; }
+        .tc-viewport { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+        .tc-swap {
+          position:absolute; top:50%; transform:translateY(-50%); z-index:6;
+          width:40px; height:40px; border-radius:50%; border:1.5px solid rgba(255,255,255,.8);
+          background:rgba(0,0,0,.5); color:#fff; font-size:24px; line-height:1;
+          display:flex; align-items:center; justify-content:center; cursor:pointer;
+          backdrop-filter:blur(4px);
+        }
+        .tc-swap:hover { background:rgba(0,0,0,.75); }
+        .tc-swap--prev { left:10px; }
+        .tc-swap--next { right:10px; }
+        .tc-gown-name {
+          position:absolute; bottom:48px; left:50%; transform:translateX(-50%); z-index:5;
+          background:rgba(0,0,0,.6); color:#fff; padding:5px 14px; border-radius:20px;
+          font-size:12px; white-space:nowrap; max-width:calc(100% - 110px);
+          overflow:hidden; text-overflow:ellipsis; pointer-events:none;
+        }
+        .tc-gown-count { margin-left:8px; opacity:.6; font-size:10px; }
         .tc-fs-btn {
           position:absolute; top:12px; right:12px; z-index:6;
           display:flex; align-items:center; gap:6px;
