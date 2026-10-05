@@ -73,7 +73,7 @@ function loadScript(src) {
 import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
-import { drawSuit } from '../../lib/fitting-room/suitWarp.js'
+import { drawSuit } from '../../lib/suitWarp.js'
 import { getProfile } from '../../lib/fitting-room/gownWarp.js'
 import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '../../lib/fitting-room/calibration.js'
 
