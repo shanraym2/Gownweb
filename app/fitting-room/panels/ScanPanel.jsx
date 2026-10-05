@@ -29,7 +29,8 @@ const CM_PER_INCH = 2.54
 
 // Waist width as a fraction of shoulder keypoint span. Typical proportions,
 // not measured on your users — tune against tape (see below).
-const WAIST_FROM_SHOULDER = { women: 0.72, men: 0.78, children: 0.75 }
+const WAIST_FROM_SHOULDER = { women: 0.80, men: 1.0, children: 0.75 }
+const HIP_SPAN_TO_WIDTH = { women: 1.35, men: 1.8, children: 1.35 }   // joint span -> body width; refit
 const MIN_MEN_SCAN_SAMPLES = 60
 const cmToIn  = cm     => cm     != null ? Math.round((cm     / CM_PER_INCH) * 10) / 10 : null
 const inToCm  = inches => inches != null ? Math.round(inches  * CM_PER_INCH  * 10) / 10 : null
@@ -433,7 +434,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
               if (profile.segment === 'men') {
                 menScanSamplesRef.current.push({
                   shoulderCm: swPx / pxPerCm,
-                  hipCm: hwPx / pxPerCm,
+                  hipCm: (hwPx / pxPerCm) * 1.8,   // joint span -> body width, men; fit to tape
                   pxPerCm,
                 })
                 if (menScanSamplesRef.current.length > HIST_SIZE) menScanSamplesRef.current.shift()
@@ -448,7 +449,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
               : null
             const measurementPxPerCm = menSamples?.pxPerCm || pxPerCm
             const estSwCm    = menSamples?.shoulderCm || estSwPx / measurementPxPerCm
-            const estHipCm   = menSamples?.hipCm || estHipPx / measurementPxPerCm
+            const estHipCm   = menSamples?.hipCm || (estHipPx / measurementPxPerCm) * (HIP_SPAN_TO_WIDTH[profile.segment] ?? 1)
             const estWaistCm = estSwCm * (WAIST_FROM_SHOULDER[profile.segment] ?? 0.72)
 
             const { bust: estBust, waist: estWaist, hips: estHips } = estimateMeasurements({
@@ -903,7 +904,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     const estHipPx = iqm(hipHistRef.current) || estSwPx * 1.05
 
     const lockSwCm    = estSwPx  / pxPerCm
-    const lockHipCm   = estHipPx / pxPerCm
+    const lockHipCm   = estHipPx / pxPerCm * (HIP_SPAN_TO_WIDTH[profile.segment] ?? 1)
     const lockWaistCm = lockSwCm * (WAIST_FROM_SHOULDER[profile.segment] ?? 0.72)
 
     const { bust: estBust, waist: estWaist, hips: estHips } = estimateMeasurements({
