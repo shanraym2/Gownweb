@@ -27,19 +27,19 @@ export const SIZES_WOMEN = [
   { label: '4XL', bust_min: 122, bust_max: 130, waist_min: 106, waist_max: 115, hip_min: 128, hip_max: 136 },
 ]
 
-// Men — baseline chest/waist/hip ranges in cm, not a universal Philippine
-// national size chart. Prefer a supplier's chart when one is configured.
+// Men — fallback fit guide in cm, calibrated to the provided 112 cm chest /
+// 107 cm waist reference as XL. This is not a universal Philippine size chart.
 export const MEN_FALLBACK_SIZE_CHART_NAME = "Men's baseline guide"
 
 export const SIZES_MEN = [
   { label: 'XS',  bust_min: 78,  bust_max: 83,  waist_min: 68,  waist_max: 73,  hip_min: 76,  hip_max: 81  },
   { label: 'S',   bust_min: 84,  bust_max: 89,  waist_min: 74,  waist_max: 79,  hip_min: 82,  hip_max: 87  },
   { label: 'M',   bust_min: 90,  bust_max: 95,  waist_min: 80,  waist_max: 85,  hip_min: 88,  hip_max: 93  },
-  { label: 'L',   bust_min: 96,  bust_max: 101, waist_min: 86,  waist_max: 91,  hip_min: 94,  hip_max: 99  },
-  { label: 'XL',  bust_min: 102, bust_max: 107, waist_min: 92,  waist_max: 97,  hip_min: 100, hip_max: 105 },
-  { label: '2XL', bust_min: 108, bust_max: 115, waist_min: 98,  waist_max: 105, hip_min: 106, hip_max: 112 },
-  { label: '3XL', bust_min: 116, bust_max: 123, waist_min: 106, waist_max: 113, hip_min: 113, hip_max: 119 },
-  { label: '4XL', bust_min: 124, bust_max: 132, waist_min: 114, waist_max: 122, hip_min: 120, hip_max: 128 },
+  { label: 'L',   bust_min: 96,  bust_max: 103, waist_min: 86,  waist_max: 95,  hip_min: 94,  hip_max: 103 },
+  { label: 'XL',  bust_min: 104, bust_max: 115, waist_min: 96,  waist_max: 110, hip_min: 104, hip_max: 115 },
+  { label: '2XL', bust_min: 116, bust_max: 123, waist_min: 111, waist_max: 119, hip_min: 116, hip_max: 123 },
+  { label: '3XL', bust_min: 124, bust_max: 132, waist_min: 120, waist_max: 129, hip_min: 124, hip_max: 132 },
+  { label: '4XL', bust_min: 133, bust_max: 142, waist_min: 130, waist_max: 140, hip_min: 133, hip_max: 142 },
 ]
 
 // Children — unisex sizing by age group (2–16 y).

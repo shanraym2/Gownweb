@@ -139,7 +139,11 @@ export function FittingRoomProvider({ children, gowns, initialSizes, initialSupp
       let score = 0, hits = 0
       if (bust  && sz.bust_min  != null) { score += Math.abs(bust  - (sz.bust_min  + sz.bust_max)  / 2); hits++ }
       if (waist && sz.waist_min != null) { score += Math.abs(waist - (sz.waist_min + sz.waist_max) / 2); hits++ }
-      if (hips  && sz.hip_min   != null) { score += Math.abs(hips  - (sz.hip_min   + sz.hip_max)   / 2); hits++ }
+      const useCameraMenHips = source === 'camera' && (profile.segment ?? 'women') === 'men'
+      if (hips && !useCameraMenHips && sz.hip_min != null) {
+        score += Math.abs(hips - (sz.hip_min + sz.hip_max) / 2)
+        hits++
+      }
       if (hits === 0) continue
       score /= hits
       if (score < bestScore) { bestScore = score; best = sz }

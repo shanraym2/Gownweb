@@ -1008,7 +1008,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   // After Lock: measure waist and hip widths on the best frame's silhouette.
   // Joint spans understate both, so this replaces them when it succeeds.
   useEffect(() => {
-    if (!locked || !snapshot?.lock?.rows || !snapshot?.dataUrl) return
+    if (profile.segment === 'men' || !locked || !snapshot?.lock?.rows || !snapshot?.dataUrl) return
     if (refinedForRef.current === snapshot.dataUrl) return
     refinedForRef.current = snapshot.dataUrl
     adjEditedRef.current = false
@@ -1038,7 +1038,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
         setRefineMsg('Silhouette refinement unavailable. Showing the joint-based estimate.')
       }
     })()
-  }, [locked, snapshot])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [locked, profile.segment, snapshot])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const confirmMeasurements = useCallback(() => {
     // adjBust/Waist/Hips are cm strings — parse directly, no unit conversion needed

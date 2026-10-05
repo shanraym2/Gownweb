@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateMenScanSamples, estimateMeasurements, getFullHeightPxPerCm, MEN_SCAN_PROPORTIONS } from '../lib/fitting-room/measurementUtils'
-import { SIZES_MEN } from '../app/constants/sizeConstants'
+import { aggregateMenScanSamples, estimateEllipseCircumference, estimateMeasurements, getFullHeightPxPerCm, MEN_SCAN_PROPORTIONS } from '../lib/fitting-room/measurementUtils'
+import { recommendSize, SIZES_MEN } from '../app/constants/sizeConstants'
 
 describe('getFullHeightPxPerCm', () => {
   it('corrects the men scale for nose-to-ankle height', () => {
@@ -53,22 +53,18 @@ describe('aggregateMenScanSamples', () => {
 })
 
 describe('men scan sizing proportions', () => {
-  it('maps a representative medium build to the medium chart range', () => {
-    const shoulderCm = 42
-    const hipJointSpanCm = 31
+  it('calibrates the provided 85/75 scan readings toward 112/107 cm tape values', () => {
+    const previousBustWidthFromShoulder = 0.88
+    const shoulderCm = 85 / (estimateEllipseCircumference(previousBustWidthFromShoulder, 0.76) * 0.92)
     const measurements = estimateMeasurements({
       shoulderCm,
       waistCm: shoulderCm * MEN_SCAN_PROPORTIONS.waistFromShoulder,
-      hipCm: hipJointSpanCm * MEN_SCAN_PROPORTIONS.hipWidthFromJointSpan,
+      hipCm: 65,
       segment: 'men',
     })
-    const medium = SIZES_MEN.find(size => size.label === 'M')
 
-    expect(measurements.bust).toBeGreaterThanOrEqual(medium.bust_min)
-    expect(measurements.bust).toBeLessThanOrEqual(medium.bust_max)
-    expect(measurements.waist).toBeGreaterThanOrEqual(medium.waist_min)
-    expect(measurements.waist).toBeLessThanOrEqual(medium.waist_max)
-    expect(measurements.hips).toBeGreaterThanOrEqual(medium.hip_min)
-    expect(measurements.hips).toBeLessThanOrEqual(medium.hip_max)
+    expect(measurements.bust).toBeCloseTo(85 * (1.16 / 0.88), 0)
+    expect(measurements.waist).toBeCloseTo(75 * (1.01 / 0.71), 0)
+    expect(recommendSize('men', { bust: 112, waist: 107 }).size.label).toBe('XL')
   })
 })
