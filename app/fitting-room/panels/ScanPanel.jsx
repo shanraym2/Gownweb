@@ -1316,7 +1316,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     </div>
                   </div>
 
-                  {sideStage === 'idle' && (
+                  {sideStage === 'idle' && profile.segment !== 'men' && (
                     <div className="fr-alert" style={{ background:'#f5f3ef', border:'1px solid #e0ddd8', color:'#555' }}>
                       <strong>Improve accuracy:</strong> add a side scan to measure your actual body depth
                       instead of estimating it. Takes 10 seconds.
