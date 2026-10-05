@@ -14,7 +14,7 @@ import {
   iqm, dist, mid, KP, CONF, HIGH_SEVERITY_ISSUES,
   HIST_SIZE,
 } from '../../../lib/fitting-room/poseUtils'
-import { aggregateMenScanSamples, estimateFromSilhouette, estimateMeasurements, estimateMeasurementsWithDepth, getFullHeightPxPerCm, getTorsoAnchor, MEAS_VARIANCE } from '../../../lib/fitting-room/measurementUtils'
+import { aggregateMenScanSamples, estimateFromSilhouette, estimateMeasurements, estimateMeasurementsWithDepth, getFullHeightPxPerCm, getTorsoAnchor, MEAS_VARIANCE, MEN_SCAN_PROPORTIONS } from '../../../lib/fitting-room/measurementUtils'
 import { measureBodyFromSnapshot } from '../../../lib/fitting-room/silhouetteMask'
 import { sampleBackgroundColor, measureSilhouetteWidth } from '../../../lib/fitting-room/silhouetteUtils'
 import { _detectSkinProfileFixed } from '../../utils/skinTone'
@@ -29,8 +29,8 @@ const CM_PER_INCH = 2.54
 
 // Waist width as a fraction of shoulder keypoint span. Typical proportions,
 // not measured on your users — tune against tape (see below).
-const WAIST_FROM_SHOULDER = { women: 0.80, men: 1.0, children: 0.75 }
-const HIP_SPAN_TO_WIDTH = { women: 1.35, men: 1.8, children: 1.35 }   // joint span -> body width; refit
+const WAIST_FROM_SHOULDER = { women: 0.80, men: MEN_SCAN_PROPORTIONS.waistFromShoulder, children: 0.75 }
+const HIP_SPAN_TO_WIDTH = { women: 1.35, men: MEN_SCAN_PROPORTIONS.hipWidthFromJointSpan, children: 1.35 }
 const MEN_SCAN_TARGET_SAMPLES = 60
 const cmToIn  = cm     => cm     != null ? Math.round((cm     / CM_PER_INCH) * 10) / 10 : null
 const inToCm  = inches => inches != null ? Math.round(inches  * CM_PER_INCH  * 10) / 10 : null
@@ -438,7 +438,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
               if (profile.segment === 'men') {
                 menScanSamplesRef.current.push({
                   shoulderCm: swPx / pxPerCm,
-                  hipCm: (hwPx / pxPerCm) * 1.8,   // joint span -> body width, men; fit to tape
+                  hipCm: (hwPx / pxPerCm) * HIP_SPAN_TO_WIDTH.men,
                   pxPerCm,
                 })
                 if (menScanSamplesRef.current.length > HIST_SIZE) menScanSamplesRef.current.shift()
@@ -766,6 +766,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
   useEffect(() => () => stopCamera(), [stopCamera])
 
   const startSideScan = useCallback(() => {
+    if (profile.segment === 'men') return
     bgColorRef.current = null
     bustDepthHistRef.current = []; waistDepthHistRef.current = []; hipDepthHistRef.current = []
     bestSideSnapshotRef.current = null
@@ -773,13 +774,39 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
     setScanMode('side')
     setSideStage('capturing')
     startCamera()
-  }, [startCamera])
+  }, [profile.segment, startCamera])
+
+  useEffect(() => {
+    if (profile.segment !== 'men') return
+
+    if (scanMode === 'side') {
+      stopCamera()
+      setScanMode('front')
+    }
+
+    if (sideStage !== 'idle' || sideDepths || sideSnapshot) {
+      setSideStage('idle')
+      setSideDepths(null)
+      setSideSamples(0)
+      setSideConfidence(0)
+      setLiveSideDepth(null)
+      setSideSnapshot(null)
+      lockedPxPerCmRef.current = null
+      lockedWidthsRef.current = null
+      bgColorRef.current = null
+      bestSideSnapshotRef.current = null
+      bustDepthHistRef.current = []
+      waistDepthHistRef.current = []
+      hipDepthHistRef.current = []
+    }
+  }, [profile.segment, scanMode, sideDepths, sideSnapshot, sideStage, stopCamera])
 
   const skipSideScan = useCallback(() => {
     setSideStage('skipped')
   }, [])
 
   const lockSideScan = useCallback(() => {
+    if (profile.segment === 'men') return
     if (!lockedPxPerCmRef.current || !lockedWidthsRef.current) return
     const pxPerCm = lockedPxPerCmRef.current
 
@@ -1174,7 +1201,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                   </div>
                 )}
 
-                {camState === 'on' && scanMode === 'side' && (
+                {camState === 'on' && scanMode === 'side' && profile.segment !== 'men' && (
                   <div className="fr-cam-hud">
                     <span className="fr-hud-dot" style={{ background: sideSamples >= 30 ? '#1D9E75' : '#EF9F27' }}/>
                     <span className="fr-hud-text">
@@ -1290,7 +1317,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     </div>
                   )}
                 </div>
-              ) : scanMode === 'side' ? (
+              ) : scanMode === 'side' && profile.segment !== 'men' ? (
                 <div className="scan-controls side-scan-controls">
                   {camError && <div className="fr-alert fr-alert--err">{camError}</div>}
 
@@ -1372,7 +1399,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     </div>
                   )}
 
-                  {sideStage === 'done' && sideDepths && (
+                  {profile.segment !== 'men' && sideStage === 'done' && sideDepths && (
                     <div className="fr-alert" style={{ background:'#eef9f4', border:'1px solid #bfe6d4', color:'#0F6E56', marginBottom:'10px' }}>
                       ✓ Side scan applied — measurements below now use your actual body depth
                       (bust {sideDepths.bust ?? '—'} cm · waist {sideDepths.waist ?? '—'} cm · hip {sideDepths.hip ?? '—'} cm deep).
@@ -1387,7 +1414,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
                     </div>
                   )}
 
-                  {sideStage === 'skipped' && (
+                  {profile.segment !== 'men' && sideStage === 'skipped' && (
                     <div className="fr-alert" style={{ background:'#f5f3ef', border:'1px solid #e0ddd8', color:'#888' }}>
                       Side scan skipped — measurements use an estimated body depth.
                       <button className="fr-btn fr-btn--ghost" style={{ marginLeft:'8px' }} onClick={startSideScan}>Add it now</button>
@@ -1468,7 +1495,7 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
               <div className="scan-tip-card">
                 <p className="scan-tip-heading">Scanning for {segLabel}</p>
                 <p className="scan-tip-body">
-                  {scanMode === 'side'
+                  {scanMode === 'side' && profile.segment !== 'men'
                     ? 'Turn 90° to the side, put your hands on your head so your arms are out of the way, and stay at the same distance as the front scan. It locks automatically.'
                     : 'Put the laptop on a table with the screen near upright, so the camera sits around hip height. Arms slightly out. Step back until your head and feet touch the dashed marks. Camera up means open the screen further. Camera down means close it a little.'}
                 </p>

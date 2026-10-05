@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateMenScanSamples, getFullHeightPxPerCm } from '../lib/fitting-room/measurementUtils'
+import { aggregateMenScanSamples, estimateMeasurements, getFullHeightPxPerCm, MEN_SCAN_PROPORTIONS } from '../lib/fitting-room/measurementUtils'
+import { SIZES_MEN } from '../app/constants/sizeConstants'
 
 describe('getFullHeightPxPerCm', () => {
   it('corrects the men scale for nose-to-ankle height', () => {
@@ -48,5 +49,26 @@ describe('aggregateMenScanSamples', () => {
     expect(aggregateMenScanSamples(samples).shoulderCm).toBeCloseTo(40)
     expect(aggregateMenScanSamples(samples).hipCm).toBeCloseTo(36)
     expect(aggregateMenScanSamples(samples).pxPerCm).toBeCloseTo(2)
+  })
+})
+
+describe('men scan sizing proportions', () => {
+  it('maps a representative medium build to the medium chart range', () => {
+    const shoulderCm = 42
+    const hipJointSpanCm = 31
+    const measurements = estimateMeasurements({
+      shoulderCm,
+      waistCm: shoulderCm * MEN_SCAN_PROPORTIONS.waistFromShoulder,
+      hipCm: hipJointSpanCm * MEN_SCAN_PROPORTIONS.hipWidthFromJointSpan,
+      segment: 'men',
+    })
+    const medium = SIZES_MEN.find(size => size.label === 'M')
+
+    expect(measurements.bust).toBeGreaterThanOrEqual(medium.bust_min)
+    expect(measurements.bust).toBeLessThanOrEqual(medium.bust_max)
+    expect(measurements.waist).toBeGreaterThanOrEqual(medium.waist_min)
+    expect(measurements.waist).toBeLessThanOrEqual(medium.waist_max)
+    expect(measurements.hips).toBeGreaterThanOrEqual(medium.hip_min)
+    expect(measurements.hips).toBeLessThanOrEqual(medium.hip_max)
   })
 })
