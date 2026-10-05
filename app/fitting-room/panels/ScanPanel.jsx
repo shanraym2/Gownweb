@@ -671,9 +671,10 @@ const bestSideSnapshotRef = useRef(null)   // best-confidence side frame, mirror
         const waistRowY = smY + torsoH * 0.70
         const hipRowY   = hmY
 
-        const bustMeas  = measureSilhouetteWidth(ctx, bustRowY,  vw, bgColorRef.current)
-        const waistMeas = measureSilhouetteWidth(ctx, waistRowY, vw, bgColorRef.current)
-        const hipMeas   = measureSilhouetteWidth(ctx, hipRowY,   vw, bgColorRef.current)
+        const bodyCx    = (smX + hmX) / 2
+        const bustMeas  = measureSilhouetteWidth(ctx, bustRowY,  vw, bgColorRef.current, 45, bodyCx)
+        const waistMeas = measureSilhouetteWidth(ctx, waistRowY, vw, bgColorRef.current, 45, bodyCx)
+        const hipMeas   = measureSilhouetteWidth(ctx, hipRowY,   vw, bgColorRef.current, 45, bodyCx)
 
         if (bustMeas)  { if (bustMeas.widthPx / lockedPxPerCmRef.current >= 12 && bustMeas.widthPx / lockedPxPerCmRef.current <= 32) bustDepthHistRef.current.push(bustMeas.widthPx);   if (bustDepthHistRef.current.length  > HIST_SIZE) bustDepthHistRef.current.shift() }
         if (waistMeas) { if (waistMeas.widthPx / lockedPxPerCmRef.current >= 10 && waistMeas.widthPx / lockedPxPerCmRef.current <= 30) waistDepthHistRef.current.push(waistMeas.widthPx); if (waistDepthHistRef.current.length > HIST_SIZE) waistDepthHistRef.current.shift() }
