@@ -560,8 +560,8 @@ function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
 
   const prof = useMemo(() => {
     if (!img) return null
-    try { const p = getProfile(img); if (p) ensureProfile(p); return p } catch { return null }
-  }, [img])
+        try { const p = getProfile(img, rc.enh?.adv?.silCut); if (p) ensureProfile(p); return p } catch { return null }
+ }, [img, rc.enh?.adv?.silCut])
 
   if (!img) return null
   if (!prof) return <p className="ce-row-hint">Seam lines need a try-on image with a transparent background. Use Auto cut-out first.</p>
@@ -1514,6 +1514,11 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                     <p className="ce-row-hint">Off: the skirt uses the hip / skirt / hem width sliders. Turning it on starts from the current shape, and turning it off keeps your points.</p>
                   )}
                   <p className="ce-group-label" style={{marginTop:6}}>Advanced</p>
+                                    <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                    <input type="checkbox" checked={rc.enh.adv.silCut > 24}
+                      onChange={e => setEnh('silCut', e.target.checked ? 140 : 24)} style={{accentColor:'#c9a96e'}}/>
+                    Ignore faint veil / lace when measuring the gown
+                  </label>
                   {ADV_FIELDS.map(f => (
                     <div key={f.k} className="ce-row">
                       <div className="ce-row-head">
