@@ -6,8 +6,8 @@ import { useRoleGuard } from '../../utils/useRoleGuard'
 import { adminFetch }   from '../adminFetch'
 import { PRESET_SIZES_BY_SEGMENT, SEGMENTS } from '@/app/constants/sizeConstants'
 import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
-import { drawGownGL, ensureProfile } from '@/lib/fitting-room/glGownRenderer'
-import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '@/lib/fitting-room/calibration'
+import { drawGownGL, ensureProfile, makeWidthFn, sampleSkirt } from '@/lib/fitting-room/glGownRenderer'
+import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS, CURVE_MIN, CURVE_MAX, CURVE_OVERRIDES } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
 import { createPortal } from 'react-dom'
 
@@ -719,7 +719,7 @@ function calLayout(cal, W, H) {
   }
 
   return { topY, bottomY, cx: smX, topW, botW, torsoH, smY, hmY, swPx,
-           waistY: smY + torsoH * (cal?.enh?.geo?.waistAt ?? 0.65), enh: !!cal?.enh }
+           waistY: smY + torsoH * (cal?.enh?.geo?.waistAt ?? 0.65), enh: !!cal?.enh, curve: !!cal?.enh?.curve?.on }
 }
 
 function calHandles(lay) {
@@ -730,8 +730,10 @@ function calHandles(lay) {
     shoulderL: { x: cx - topW/2, y: smY,     axis:'x', color:'#c9a96e', label:'Shoulder' },
     shoulderR: { x: cx + topW/2, y: smY,     axis:'x', color:'#c9a96e', label:'Shoulder' },
     hem:       { x: cx,          y: bottomY, axis:'y', color:'#7ab8f5', label:'Hem'      },
-    flareL:    { x: cx - botW/2, y: bottomY, axis:'x', color:'#7ab8f5', label:'Flare'    },
-    flareR:    { x: cx + botW/2, y: bottomY, axis:'x', color:'#7ab8f5', label:'Flare'    },
+    ...(lay.curve ? {} : {
+      flareL:  { x: cx - botW/2, y: bottomY, axis:'x', color:'#7ab8f5', label:'Flare'    },
+      flareR:  { x: cx + botW/2, y: bottomY, axis:'x', color:'#7ab8f5', label:'Flare'    },
+    }),
   }
 }
 
@@ -872,6 +874,43 @@ function drawCalHandles(ctx, hmap, active, hover) {
     ctx.restore()
   }
 }
+/* ── Skirt curves: geometry, drawing, insert ── */
+function curveGeom(lay, c) {
+  const top = lay.topY + (c.offsetY || 0)
+  return { cx: lay.cx + (c.offsetX || 0), sw: lay.swPx, hipY: lay.hmY + (c.offsetY || 0), bottomY: top + (lay.bottomY - lay.topY) * (c.scaleY ?? 1) }
+}
+const curvePt = (g, p) => ({ x: g.cx + p.x * g.sw, y: g.hipY + p.y * (g.bottomY - g.hipY) })
+function curveInsert(pts, t) {
+  if (pts.length >= CURVE_MAX) return pts
+  return [...pts, { y: t, x: makeWidthFn(pts.map(p => [p.y, p.x]))(t) }].sort((a, b) => a.y - b.y)   // sits on the existing curve
+}
+function drawCalCurves(ctx, cv, g, active, hover, sel) {
+  const span = g.bottomY - g.hipY
+  for (const side of ['L', 'R']) {
+    const pts = side === 'L' ? cv.L : cv.R
+    const fn = makeWidthFn(pts.map(p => [p.y, p.x]))
+    ctx.save()
+    ctx.strokeStyle = '#5fd0b0'; ctx.lineWidth = 1.6; ctx.setLineDash([])
+    ctx.beginPath()
+    for (let i = 0; i <= 48; i++) {
+      const t = i / 48, px = g.cx + fn(t) * g.sw, py = g.hipY + t * span
+      if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py)
+    }
+    ctx.stroke()
+    pts.forEach((p, i) => {
+      const key = `c${side}:${i}`, q = curvePt(g, p)
+      const on = key === active, hv = key === hover, sl = key === sel
+      const r = on ? 6.5 : (hv || sl) ? 5.5 : 4.5
+      ctx.beginPath()
+      if (i === 0 || i === pts.length - 1) ctx.rect(q.x - r, q.y - r, r * 2, r * 2)   // squares = Y locked (hip / hem)
+      else ctx.arc(q.x, q.y, r, 0, Math.PI * 2)
+      ctx.fillStyle = (on || sl) ? '#5fd0b0' : '#100a04'
+      ctx.strokeStyle = '#5fd0b0'; ctx.lineWidth = (on || sl) ? 2.5 : 1.8
+      ctx.fill(); ctx.stroke()
+    })
+    ctx.restore()
+  }
+}
 
 function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalibration }) {
   const [open,        setOpen      ] = useState(false)
@@ -883,6 +922,8 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const [expanded,    setExpanded  ] = useState(false)   // full-screen view
   const [showRef,     setShowRef   ] = useState(false)   // display picture beside the canvas
   const [skelTop,     setSkelTop   ] = useState(false)   // draw the skeleton over the dress
+  const [selPt,       setSelPt     ] = useState(null)    // selected curve point, e.g. 'cL:2'
+  const insTime = useRef(0)
 
   // View state: zoom + pan of the canvas viewport
   const [zoom,    setZoom   ] = useState(1)
@@ -920,6 +961,49 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const rc       = resolveCal(viewCal, gown)     // geometry only, never saved
   const setMode = m => onChange({ ...cal, mode: m })
   const setEnh  = (k, v) => onChange({ ...cal, enhanced: { ...(cal.enhanced || {}), [k]: v } })
+    const setCurve = patch => onChange({ ...cal, enhanced: { ...(cal.enhanced || {}), ...patch } })
+  const toggleCurve = on => {
+    const c = rc.enh.curve
+    if (!on || (c.L && c.R)) return setCurve({ curveOn: on })
+    const s = sampleSkirt(4) || [0, 1/3, 2/3, 1].map((y, i) => ({ y, l: -[.45, .5, .6, .75][i], r: [.45, .5, .6, .75][i] }))
+    setCurve({
+      curveOn: true, curveLink: true,
+      curveL: s.map(p => ({ y: p.y, x: -(p.r - p.l) / 2 })),
+      curveR: s.map(p => ({ y: p.y, x:  (p.r - p.l) / 2 })),
+    })
+  }
+  const insertAt = (side, t) => {
+    const c = rc.enh.curve
+    insTime.current = Date.now()
+    if (c.link) setCurve({ curveL: curveInsert(c.L, t), curveR: curveInsert(c.R, t) })
+    else if (side === 'L') setCurve({ curveL: curveInsert(c.L, t) })
+    else setCurve({ curveR: curveInsert(c.R, t) })
+  }
+  const addPointAuto = () => {
+    const c = rc.enh.curve
+    const mid = pts => { let bi = 0, bg = -1; for (let i = 0; i < pts.length - 1; i++) { const d = pts[i + 1].y - pts[i].y; if (d > bg) { bg = d; bi = i } } return (pts[bi].y + pts[bi + 1].y) / 2 }
+    setCurve({ curveL: curveInsert(c.L, mid(c.L)), curveR: curveInsert(c.R, mid(c.R)) })
+  }
+  const removePoint = key => {
+    const side = key[1], i = +key.slice(3), c = rc.enh.curve
+    const drop = pts => (pts.length <= CURVE_MIN || i <= 0 || i >= pts.length - 1) ? pts : pts.filter((_, j) => j !== i)
+    if (c.link) setCurve({ curveL: drop(c.L), curveR: drop(c.R) })
+    else if (side === 'L') setCurve({ curveL: drop(c.L) })
+    else setCurve({ curveR: drop(c.R) })
+    setSelPt(null)
+  }
+  const setLink = v => setCurve(v ? { curveLink: true, curveR: rc.enh.curve.L.map(p => ({ y: p.y, x: -p.x })) } : { curveLink: false })
+  const resetCurves = () => onChange({ ...cal, enhanced: Object.fromEntries(Object.entries(cal.enhanced || {}).filter(([k]) => !['curveOn', 'curveL', 'curveR', 'curveLink'].includes(k))) })
+
+  useEffect(() => {                                   // Delete key removes the selected point
+    if (!open) return
+    const fn = e => {
+      if (e.key !== 'Delete' || !selPt || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '')) return
+      removePoint(selPt)
+    }
+    window.addEventListener('keydown', fn)
+    return () => window.removeEventListener('keydown', fn)
+  })
 
   // Load dress image
   useEffect(() => {
@@ -992,6 +1076,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     }
 
     if (skelTop) drawCalSkeleton(ctx, CW, CH, 0.9)
+          if (rc.enh?.curve?.on) drawCalCurves(ctx, rc.enh.curve, curveGeom(lay, cal), active, hover, selPt)
     drawCalHandles(ctx, hmap, active, hover)
 
     ctx.restore()
@@ -1002,7 +1087,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY, fs, skelTop])
+    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY, fs, skelTop, selPt])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -1029,13 +1114,47 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   function hitTest(x, y) {
     const lay  = calLayout(rc, CW, CH)
     const hmap = calHandles(lay)
+    const cv = rc.enh?.curve
+    if (cv?.on) {
+      const g = curveGeom(lay, cal)
+      for (const side of ['L', 'R']) {
+        const pts = side === 'L' ? cv.L : cv.R
+        for (let i = 0; i < pts.length; i++) {
+          const q = curvePt(g, pts[i])
+          if (Math.hypot(x - q.x, y - q.y) < 11 / zoom) return `c${side}:${i}`
+        }
+      }
+    }
     for (const [key, h] of Object.entries(hmap)) {
       if (Math.hypot(x - h.x, y - h.y) < 11 / zoom) return key
     }
     return null
   }
 
-  // Scroll → zoom
+    // nearest point on a curve line (for click-to-add)
+  function curveNear(x, y) {
+    const c = rc.enh?.curve
+    if (!c?.on) return null
+    const g = curveGeom(calLayout(rc, CW, CH), cal)
+    let best = null, bd = 8 / zoom
+    for (const side of ['L', 'R']) {
+      const pts = side === 'L' ? c.L : c.R
+      if (pts.length >= CURVE_MAX) continue
+      const fn = makeWidthFn(pts.map(p => [p.y, p.x]))
+      for (let i = 1; i < 40; i++) {
+        const t = i / 40
+        const d = Math.hypot(x - (g.cx + fn(t) * g.sw), y - (g.hipY + t * (g.bottomY - g.hipY)))
+        if (d < bd) { bd = d; best = { side, t } }
+      }
+    }
+    return best
+  }
+  const onDbl = e => {
+    if (showSaved || Date.now() - insTime.current < 500) return
+    const { x, y } = canvasXY(e)
+    const hit = hitTest(x, y)
+    if (hit && hit.startsWith('c')) removePoint(hit)
+  }
   const onWheel = useCallback(e => {
     e.preventDefault()
     const delta = e.deltaY < 0 ? 0.12 : -0.12
@@ -1070,10 +1189,14 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     const hit = hitTest(x, y)
     if (hit) {
       dragging.current = true
-      setActive(hit)
+            setActive(hit)
+      setSelPt(hit.startsWith('c') ? hit : null)
       setDragOrigin({ x, y })
       setCalSnap({ ...cal })
     } else {
+      const cn = curveNear(x, y)
+      if (cn) { insertAt(cn.side, cn.t); return }
+      setSelPt(null)
       // Start panning background
       setPanning(true)
       panOrigin.current = rawCanvasXY(e)
@@ -1100,7 +1223,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       const canvas = canvasRef.current
             if (canvas) {
         canvas.style.cursor = hit
-          ? (hit === 'neckline' || hit === 'hem' || hit === 'waist' ? 'ns-resize' : 'ew-resize')
+          ? (hit.startsWith('c') ? 'move' : hit === 'neckline' || hit === 'hem' || hit === 'waist' ? 'ns-resize' : 'ew-resize')
           : 'grab'
       }
       return
@@ -1108,6 +1231,24 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     const dx   = x - dragOrigin.x
     const dy   = y - dragOrigin.y
     const snap = calSnapshot
+        if (active && (active.startsWith('cL:') || active.startsWith('cR:'))) {
+      const side = active[1], idx = +active.slice(3)
+      const cv = resolveCal(snap, gown).enh.curve
+      const g1 = curveGeom(calLayout(resolveCal(snap, gown), CW, CH), snap)
+      const pts = side === 'L' ? cv.L : cv.R
+      const nx = (x - g1.cx) / g1.sw
+      let ny = (y - g1.hipY) / (g1.bottomY - g1.hipY)
+      if (idx === 0) ny = 0
+      else if (idx === pts.length - 1) ny = 1
+      else ny = Math.max(pts[idx - 1].y + 0.03, Math.min(pts[idx + 1].y - 0.03, ny))
+      const px = side === 'L' ? Math.max(-2.5, Math.min(-0.05, nx)) : Math.max(0.05, Math.min(2.5, nx))
+      const upd = (arr, i, ax, ay) => arr.map((p, j) => j === i ? { y: ay, x: ax } : p)
+      let L = cv.L, R = cv.R
+      if (side === 'L') { L = upd(L, idx, px, ny); if (cv.link && R.length === L.length) R = upd(R, idx, -px, ny) }
+      else              { R = upd(R, idx, px, ny); if (cv.link && L.length === R.length) L = upd(L, idx, -px, ny) }
+      onChange({ ...snap, enhanced: { ...(snap.enhanced || {}), curveL: L, curveR: R } })
+      return
+    }
         const lay0 = calLayout(resolveCal(snap, gown), CW, CH)
     let next   = { ...snap }
 
@@ -1157,7 +1298,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       next = { ...snap, enhanced: { ...(snap.enhanced || {}), ...patch } }
     }
     onChange(next)
-  }, [active, dragOrigin, calSnapshot, onChange, panning, zoom, isEnh, gown])
+  }, [active, dragOrigin, calSnapshot, onChange, panning, zoom, isEnh, gown, cal])
 
   const onUp = useCallback(() => {
     dragging.current = false
@@ -1244,6 +1385,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                 onMouseMove={onMove}
                 onMouseUp={onUp}
                 onMouseLeave={onUp}
+                onDoubleClick={onDbl}
                 onTouchStart={onDown}
                 onTouchMove={onMove}
                 onTouchEnd={onUp}
@@ -1332,19 +1474,45 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                                     {GEO_GROUPS.map(g => (
                     <div key={g.id} style={{display:'flex',flexDirection:'column',gap:13}}>
                       <p className="ce-group-label" style={{marginTop:6}}>{g.title}</p>
-                      {g.fields.map(f => (
-                        <div key={f.k} className="ce-row">
-                          <div className="ce-row-head">
-                            <span className="ce-row-label">{f.label}</span>
-                            <span className="ce-row-val">{Number(rc.enh.geo[f.k]).toFixed(2)}</span>
+                      {g.fields.map(f => {
+                        const byCurve = rc.enh.curve.on && CURVE_OVERRIDES.includes(f.k)
+                        return (
+                          <div key={f.k} className="ce-row" style={byCurve ? { opacity: .4 } : undefined}>
+                            <div className="ce-row-head">
+                              <span className="ce-row-label">{f.label}</span>
+                              <span className="ce-row-val">{Number(rc.enh.geo[f.k]).toFixed(2)}</span>
+                            </div>
+                            <input type="range" min={f.min} max={f.max} step={f.step} value={rc.enh.geo[f.k]} disabled={byCurve}
+                              onChange={e => setEnh(f.k, parseFloat(e.target.value))} className="ce-range"/>
+                            <p className="ce-row-hint">{byCurve ? 'Controlled by the skirt curves.' : f.hint}</p>
                           </div>
-                          <input type="range" min={f.min} max={f.max} step={f.step} value={rc.enh.geo[f.k]}
-                            onChange={e => setEnh(f.k, parseFloat(e.target.value))} className="ce-range"/>
-                          <p className="ce-row-hint">{f.hint}</p>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   ))}
+                                    <p className="ce-group-label" style={{marginTop:6}}>Skirt curves</p>
+                  <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                    <input type="checkbox" checked={rc.enh.curve.on} disabled={showSaved}
+                      onChange={e => toggleCurve(e.target.checked)} style={{accentColor:'#c9a96e'}}/>
+                    Use custom skirt curves
+                  </label>
+                  {rc.enh.curve.on ? (
+                    <>
+                      <p className="ce-row-hint">Drag the teal points. Squares (hip / hem) move sideways only. Click a curve to add a point, double-click a point or press Delete to remove it. Hip, hem and skirt width sliders are replaced by the curves.</p>
+                      <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                        <input type="checkbox" checked={rc.enh.curve.link} onChange={e => setLink(e.target.checked)} style={{accentColor:'#c9a96e'}}/>
+                        Link both sides (mirror)
+                      </label>
+                      <div className="ce-btns">
+                        <button type="button" className="ce-ghost" onClick={addPointAuto}
+                          disabled={rc.enh.curve.L.length >= CURVE_MAX || rc.enh.curve.R.length >= CURVE_MAX}>Add point</button>
+                        <button type="button" className="ce-ghost" onClick={resetCurves}>Reset curves</button>
+                      </div>
+                      <p className="ce-row-hint">{rc.enh.curve.L.length} left · {rc.enh.curve.R.length} right (min {CURVE_MIN}, max {CURVE_MAX})</p>
+                    </>
+                  ) : (
+                    <p className="ce-row-hint">Off: the skirt uses the hip / skirt / hem width sliders. Turning it on starts from the current shape, and turning it off keeps your points.</p>
+                  )}
                   <p className="ce-group-label" style={{marginTop:6}}>Advanced</p>
                   {ADV_FIELDS.map(f => (
                     <div key={f.k} className="ce-row">
