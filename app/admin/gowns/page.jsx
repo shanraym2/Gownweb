@@ -585,6 +585,7 @@ function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
     if (side === 'top' || side === 'waist' || side === 'hem') {
       const f = (((ev.clientY - r.top) / r.height) * prof.ih - prof.srcTop) / prof.srcH
       if (side === 'top')   onGeo?.('imgTop', clampN(f, 0, Math.min(0.6, geo.imgHem - 0.25)))
+      if (side === 'hem')   onGeo?.('imgHem', clampN(f, Math.max(0.7, geo.imgTop + 0.25), 1))
       if (side === 'waist') onWaistRow?.(clampN(f, Math.max(0.02, geo.imgTop + 0.05), Math.min(0.9, geo.imgHem - 0.1)))
       return
     }
