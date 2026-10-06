@@ -9,6 +9,7 @@ import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile } from '@/lib/fitting-room/glGownRenderer'
 import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
+import { createPortal } from 'react-dom'
 
 /* ─────────────────────────────────────────────
    Constants & helpers
@@ -879,6 +880,8 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const [hover,       setHover     ] = useState(null)
   const [dragOrigin,  setDragOrigin] = useState(null)
   const [calSnapshot, setCalSnap   ] = useState(null)
+  const [expanded,    setExpanded  ] = useState(false)   // full-screen view
+  const [showRef,     setShowRef   ] = useState(false)   // display picture beside the canvas
 
   // View state: zoom + pan of the canvas viewport
   const [zoom,    setZoom   ] = useState(1)
@@ -891,6 +894,20 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const dragging  = useRef(false)
   const CW = 220, CH = 400
   const EDPR = () => (typeof window !== 'undefined' ? Math.min(2, window.devicePixelRatio || 1) : 1)
+
+  // Full screen renders into #ce-fs-root (outside the sidebar, which has a transform)
+  const fsTarget = expanded && typeof document !== 'undefined' ? document.getElementById('ce-fs-root') : null
+  const fs = !!fsTarget
+  const RS = () => Math.min(3, EDPR() * (fs ? 2 : 1))   // canvas pixels per logical pixel
+
+  useEffect(() => {
+    if (!fs) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = e => { if (e.key === 'Escape') setExpanded(false) }
+    window.addEventListener('keydown', onKey)
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
+  }, [fs])
 
   const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
     const isEnh   = cal.mode === 'enhanced'
@@ -927,7 +944,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     if (!canvas) return
     const ctx = canvas.getContext('2d')
         const cal = viewCal      // shadows the outer `cal` inside this effect: offsets and scale follow the viewed calibration
-    ctx.setTransform(EDPR(), 0, 0, EDPR(), 0, 0)
+    ctx.setTransform(RS(), 0, 0, RS(), 0, 0)
     ctx.clearRect(0, 0, CW, CH)
 
     ctx.fillStyle = '#0c0804'
@@ -983,7 +1000,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY])
+    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY, fs])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -1028,7 +1045,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     if (!c || !open) return
     c.addEventListener('wheel', onWheel, { passive: false })
     return () => c.removeEventListener('wheel', onWheel)
-  }, [open, onWheel])
+  }, [open, onWheel, fs])
 
   // Keyboard pan (arrow keys)
   useEffect(() => {
@@ -1154,6 +1171,34 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const hasCustom = !!calibration
   const hasImg    = !!tryonImage
 
+  // Full screen: same editor, rendered into #ce-fs-root under a top bar
+  const hasDisplay = !!gown?.image && gown.image !== '/images/'
+  const wrapFs = node => fsTarget ? createPortal(
+    <div className="ce-fs" role="dialog" aria-modal="true" aria-label="Try-on calibration, full screen">
+      <div className="ce-fs-bar">
+        <span className="ce-fs-title">Try-on calibration{gown?.name ? ` · ${gown.name}` : ''}</span>
+        <div className="ce-fs-btns">
+          {hasDisplay && (
+            <button type="button" className="ce-ghost" aria-pressed={showRef}
+              style={showRef ? CE_ACTIVE : undefined} onClick={() => setShowRef(v => !v)}>
+              {showRef ? 'Hide display picture' : 'Show display picture'}
+            </button>
+          )}
+          <button type="button" className="ce-ghost" onClick={() => setExpanded(false)}>✕ Close (Esc)</button>
+        </div>
+      </div>
+      <div className="ce-fs-body">
+        {showRef && hasDisplay && (
+          <div className="ce-fs-ref">
+            <img src={gown.image} alt={`Display photo of ${gown.name || 'gown'}`} />
+          </div>
+        )}
+        {node}
+      </div>
+    </div>,
+    fsTarget
+  ) : node
+
   return (
     <div className="ce-root">
       <button type="button" className="ce-toggle" onClick={() => setOpen(v => !v)}>
@@ -1167,7 +1212,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
         <span className="ce-chev">{open ? '▲' : '▼'}</span>
       </button>
 
-      {open && (
+      {open && wrapFs(
         <div className="ce-panel">
           <div className="ce-layout">
 
@@ -1183,11 +1228,15 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                 <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanX(p => p - 20)} title="Pan right">▸</button>
                 <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanY(p => p + 20)} title="Pan up">▴</button>
                 <button type="button" className="ce-vbtn ce-vbtn--sm" onClick={() => setPanY(p => p - 20)} title="Pan down">▾</button>
+                {!fs && (
+                  <button type="button" className="ce-vbtn ce-vbtn--sm" style={{ marginLeft: 'auto' }}
+                    onClick={() => setExpanded(true)} title="Open the calibration full screen">⤢ Expand</button>
+                )}
               </div>
 
               <canvas
                 ref={canvasRef}
-                width={Math.round(CW * EDPR())} height={Math.round(CH * EDPR())}
+                width={Math.round(CW * RS())} height={Math.round(CH * RS())}
                 className="ce-canvas"
                 onMouseDown={onDown}
                 onMouseMove={onMove}
@@ -1759,6 +1808,7 @@ function GownFormSidebar({ open, editingGown, onClose, onSaved, showToast }) {
         />
       )}
 
+      <div id="ce-fs-root"/>
       <aside className={`sidebar${open?' sidebar--open':''}`}>
         <div className="sidebar-header">
           <div>
@@ -2311,7 +2361,30 @@ export default function AdminGownsPage() {
         .ce-zoom-label{font-size:10px;color:rgba(200,169,110,.55);min-width:32px;text-align:center;font-variant-numeric:tabular-nums;}
         .ce-group-label{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:rgba(200,169,110,.45);margin:4px 0 2px;padding-bottom:4px;border-bottom:1px solid var(--c-border);}
 
-        /* ── Inventory / Stock ── */
+        /* ── CalibrationEditor: full screen ── */
+.ce-fs{position:fixed;inset:0;z-index:9100;background:var(--c-surface);display:flex;flex-direction:column;}
+.ce-fs-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--c-border);flex-shrink:0;}
+.ce-fs-title{font-size:14px;font-weight:600;color:var(--c-text);}
+.ce-fs-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.ce-fs-body{flex:1;min-height:0;display:flex;}
+.ce-fs-ref{flex:0 0 min(34vw,420px);display:flex;align-items:center;justify-content:center;padding:12px;background:#0c0804;border-right:1px solid rgba(200,169,110,.12);min-height:0;}
+.ce-fs-ref img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;}
+@media(max-width:900px){
+  .ce-fs-ref{flex:0 0 28vh;width:100%;border-right:none;border-bottom:1px solid rgba(200,169,110,.12);}
+}
+.ce-fs .ce-panel{flex:1;min-width:0;min-height:0;margin:0;border:none;border-radius:0;display:flex;}
+.ce-fs .ce-layout{flex:1;min-width:0;min-height:0;grid-template-columns:minmax(0,1fr) 440px;grid-template-rows:minmax(0,1fr);}
+.ce-fs .ce-canvas-col{min-height:0;overflow:auto;align-items:center;}
+.ce-fs .ce-view-bar{align-self:stretch;}
+.ce-fs .ce-canvas{width:auto;height:calc(100vh - 190px);aspect-ratio:220/400;}
+.ce-fs .ce-sliders{max-height:none;min-height:0;}
+@media(max-width:900px){
+  .ce-fs-body{flex-direction:column;}
+  .ce-fs .ce-layout{grid-template-columns:1fr;grid-template-rows:auto;overflow:auto;}
+  .ce-fs .ce-canvas{height:60vh;}
+}
+
+/* ── Inventory / Stock ── */
         .inv-editor{display:flex;flex-direction:column;gap:10px;}
         .stock-table{border:1px solid var(--c-border);border-radius:var(--radius);overflow:hidden;}
         .stock-header{display:grid;grid-template-columns:70px 80px 70px 60px 32px;gap:8px;padding:7px 12px;background:var(--c-surface2);font-size:10px;font-weight:700;color:var(--c-subtle);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--c-border);}
