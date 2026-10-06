@@ -567,7 +567,7 @@ function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
   if (!prof) return <p className="ce-row-hint">Seam lines need a try-on image with a transparent background. Use Auto cut-out first.</p>
 
   const clampN = (v, a, b) => Math.min(Math.max(v, a), b)
-  const wf  = clampN(cal.waistRow ?? prof.waistFrac, 0.1, 0.8)
+  const wf  = clampN(cal.waistRow ?? prof.waistFrac, 0.02, 0.9)
   const ex  = bodiceExtent(prof.glL, prof.glR, wf)
   if (!ex) return null
   const e   = rc.enh
@@ -584,9 +584,8 @@ function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
     const r = boxRef.current.getBoundingClientRect()
     if (side === 'top' || side === 'waist' || side === 'hem') {
       const f = (((ev.clientY - r.top) / r.height) * prof.ih - prof.srcTop) / prof.srcH
-      if (side === 'top')   onGeo?.('imgTop', clampN(f, 0, Math.min(0.3, geo.imgHem - 0.4)))
-      if (side === 'hem')   onGeo?.('imgHem', clampN(f, Math.max(0.7, geo.imgTop + 0.4), 1))
-      if (side === 'waist') onWaistRow?.(clampN(f, Math.max(0.1, geo.imgTop + 0.05), Math.min(0.8, geo.imgHem - 0.1)))
+      if (side === 'top')   onGeo?.('imgTop', clampN(f, 0, Math.min(0.6, geo.imgHem - 0.25)))
+      if (side === 'waist') onWaistRow?.(clampN(f, Math.max(0.02, geo.imgTop + 0.05), Math.min(0.9, geo.imgHem - 0.1)))
       return
     }
     const x = ((ev.clientX - r.left) / r.width) * prof.iw
@@ -882,6 +881,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const [calSnapshot, setCalSnap   ] = useState(null)
   const [expanded,    setExpanded  ] = useState(false)   // full-screen view
   const [showRef,     setShowRef   ] = useState(false)   // display picture beside the canvas
+  const [skelTop,     setSkelTop   ] = useState(false)   // draw the skeleton over the dress
 
   // View state: zoom + pan of the canvas viewport
   const [zoom,    setZoom   ] = useState(1)
@@ -971,7 +971,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     const hmap = calHandles(lay)
 
     drawCalGuides(ctx, lay, CW)
-    drawCalSkeleton(ctx, CW, CH, dressImg ? 0.5 : 0.85)
+    if (!skelTop) drawCalSkeleton(ctx, CW, CH, dressImg ? 0.5 : 0.85)
 
     // Draw dress with offset + scale overrides applied
     if (dressImg) {
@@ -990,6 +990,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       drawCalDressTrapezoidEx(ctx, lay, dox, doy, cal.scaleX ?? 1, cal.scaleY ?? 1)
     }
 
+    if (skelTop) drawCalSkeleton(ctx, CW, CH, 0.9)
     drawCalHandles(ctx, hmap, active, hover)
 
     ctx.restore()
@@ -1000,7 +1001,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY, fs])
+    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY, fs, skelTop])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -1278,7 +1279,11 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                   {!savedCalibration ? 'No saved calibration to compare' : showSaved ? 'Showing saved (editing paused)' : 'Compare with saved'}
                 </button>
               </div>
-                            <p className="ce-group-label">Mode</p>
+                            <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                <input type="checkbox" checked={skelTop} onChange={e => setSkelTop(e.target.checked)} style={{accentColor:'#c9a96e'}}/>
+                Show skeleton over dress
+              </label>
+              <p className="ce-group-label">Mode</p>
               <div className="ce-btns">
                 {['simple', 'enhanced'].map(m => {
                   const on = (isEnh ? 'enhanced' : 'simple') === m
@@ -1419,7 +1424,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
 
               <p className="ce-group-label" style={{marginTop:6}}>Body fit (warp)</p>
               {[
-                { key:'waistRow',  label:'Waist position', min:0.10, max:0.80, step:0.01, def:0.30, auto:true,
+                { key:'waistRow',  label:'Waist position', min:0.02, max:0.90, step:0.01, def:0.30, auto:true,
                   hint:'Where the bodice pinches, as a fraction of the dress image height. Auto finds the narrowest point; set it by hand for A-line gowns.' },
                 { key:'waistEase', label:'Waist ease', min:0.80, max:1.40, step:0.01, def:1.05,
                   hint:'Bodice width at the waist. Raise it if the bodice looks too tight.' },
