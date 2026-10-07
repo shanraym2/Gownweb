@@ -373,6 +373,14 @@ export default function TryOnCamera({
   useEffect(() => { opacityRef.current = opacity },   [opacity])
   useEffect(() => { enhancedRef.current = enhanced }, [enhanced])
   useEffect(() => { gownRef.current = gown },         [gown])
+  useEffect(() => {
+    const c = gown?.tryonCalibration
+    console.log('[TryOnCamera] gown cal', gown?.id, {
+      mode: c?.mode, curveOn: c?.enhanced?.curveOn,
+      curveL: c?.enhanced?.curveL?.length, curveR: c?.enhanced?.curveR?.length,
+      keys: c ? Object.keys(c) : null,
+    })
+  }, [gown])
 
   // Calibrate mode: start from the gown's saved calibration, edit live
   useEffect(() => {
