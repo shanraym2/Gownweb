@@ -798,7 +798,8 @@ export default function TryOnCamera({
           layout.brightness = lightRef.current
           layout.lightSlope = lightSlopeRef.current
           layout.tint = lightTintRef.current
-          dbgRef.current = { kps, sw: layout.sw, torsoH: layout.torsoH, bright: layout.brightness, bad: badLayoutRef.current }
+          dbgRef.current = { kps, sw: layout.sw, torsoH: layout.torsoH, bright: layout.brightness, bad: badLayoutRef.current,
+            mode: layout.cal?.mode, curveOn: !!layout.cal?.enh?.curve?.on, rawCurve: !!gownRef.current?.tryonCalibration?.enhanced?.curveL }
           goodFrames.current = Math.min(goodFrames.current + 1, 8)
           if (goodFrames.current >= 8) setPoseLocked(true)
 
@@ -846,6 +847,7 @@ export default function TryOnCamera({
       ctx.font = '12px monospace'; ctx.fillStyle = '#fff'; ctx.shadowColor = '#000'; ctx.shadowBlur = 3
       ;[`pts ${d.kps?.length}  sw ${d.sw | 0}  torso ${d.torsoH | 0}  ratio ${(d.torsoH / d.sw).toFixed(2)}`,
         `light ${d.bright?.toFixed(2)}  heldFrames ${d.bad}`,
+        `mode ${d.mode}  savedCurve ${d.rawCurve}  curveActive ${d.curveOn}`,
         `video ${vw}x${vh}  canvas ${canvas.width}x${canvas.height}  scale ${S}  shown ${rect.width | 0}x${rect.height | 0} css px`
       ].forEach((t, i) => ctx.fillText(t, 8, vh - 42 + i * 14))
       ctx.restore()
