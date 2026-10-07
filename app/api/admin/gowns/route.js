@@ -7,6 +7,12 @@ import { logAudit }       from '@/lib/audit'
 const USE_DB   = process.env.USE_DB === 'true'
 const dataFile = path.join(process.cwd(), 'data', 'gowns.json')
 
+const SEGMENTS = ['women', 'men', 'children']
+const normSegment = s => {
+  const v = String(s || '').trim().toLowerCase()
+  return SEGMENTS.includes(v) ? v : 'women'
+}
+
 function loadJson() {
   if (!fs.existsSync(dataFile)) return []
   return JSON.parse(fs.readFileSync(dataFile, 'utf8'))
@@ -43,6 +49,7 @@ function rowToGown(row) {
     neckline:         row.neckline    || '',
     description:      row.description || '',
     type:             row.type        || '',
+    segment:          normSegment(row.segment),
     isActive:         row.is_active   ?? true,
   }
 }
@@ -136,7 +143,7 @@ export async function POST(request) {
     name, price, image, alt,
     tryonImage, tryonImageBack, tryonCalibration,
     color, silhouette, fabric, neckline,
-    description, type, inventory,
+    description, type, segment, inventory,
   } = body
 
   if (!name || !price || !image) {
@@ -154,7 +161,7 @@ export async function POST(request) {
       tryonImage:       (tryonImage || image).trim(),
       tryonImageBack:   (tryonImageBack || '').trim() || null,
       tryonCalibration: tryonCalibration || null,
-      type: (type||'').trim(), color: (color||'').trim(),
+      type: (type||'').trim(), segment: normSegment(segment), color: (color||'').trim(),
       silhouette: (silhouette||'').trim(), fabric: (fabric||'').trim(),
       neckline: (neckline||'').trim(), description: (description||'').trim(),
       inventory: inventory || [], is_active: true,
@@ -183,13 +190,14 @@ export async function POST(request) {
       const { rows: [gownRow] } = await conn.query(
         `INSERT INTO gowns
            (sku, name, sale_price, color, silhouette, fabric, neckline,
-            description, type, tryon_calibration)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+            description, type, tryon_calibration, segment)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
         [sku, name.trim(), salePrice,
          (color||'').trim(), (silhouette||'').trim(),
          (fabric||'').trim(), (neckline||'').trim(),
          (description||'').trim(), (type||'').trim(),
-         tryonCalibration ? JSON.stringify(tryonCalibration) : null]
+         tryonCalibration ? JSON.stringify(tryonCalibration) : null,
+         normSegment(segment)]
       )
 
       await conn.query(
@@ -396,7 +404,7 @@ export async function PUT(request) {
     name, price, image, alt,
     tryonImage, tryonImageBack, tryonCalibration,
     color, silhouette, fabric, neckline,
-    description, type, inventory,
+    description, type, segment, inventory,
   } = body
 
   if (!id || !name || !price || !image) {
@@ -416,7 +424,7 @@ export async function PUT(request) {
       tryonImage:       (tryonImage || image).trim(),
       tryonImageBack:   (tryonImageBack || '').trim() || null,
       tryonCalibration: tryonCalibration || null,
-      type: (type||'').trim(), color: (color||'').trim(),
+      type: (type||'').trim(), segment: normSegment(segment), color: (color||'').trim(),
       silhouette: (silhouette||'').trim(), fabric: (fabric||'').trim(),
       neckline: (neckline||'').trim(), description: (description||'').trim(),
       inventory: inventory || gowns[idx].inventory || [],
@@ -445,13 +453,14 @@ export async function PUT(request) {
         `UPDATE gowns
          SET name=$1, sale_price=$2, color=$3, silhouette=$4,
              fabric=$5, neckline=$6, description=$7, type=$8,
-             tryon_calibration=$9
-         WHERE id=$10 RETURNING *`,
+             tryon_calibration=$9, segment=$10
+         WHERE id=$11 RETURNING *`,
         [name.trim(), salePrice,
          (color||'').trim(), (silhouette||'').trim(),
          (fabric||'').trim(), (neckline||'').trim(),
          (description||'').trim(), (type||'').trim(),
          tryonCalibration ? JSON.stringify(tryonCalibration) : null,
+         normSegment(segment),
          id]
       )
 

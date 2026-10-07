@@ -74,6 +74,7 @@ import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
 import { drawSuit } from '../../lib/suitWarp.js'
+import { drawSuitModel } from '../../lib/fitting-room/suitModel.js'
 import { getProfile } from '../../lib/fitting-room/gownWarp.js'
 import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '../../lib/fitting-room/calibration.js'
 
@@ -182,7 +183,28 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
            dx: dxPx, dy: dyPx, scaleX: calSX, arms, legX, legSpan }
 }
 
+// Body points for the fitted suit, in the same logical (camera-pixel) space as the canvas.
+// Knees and ankles are estimated from the torso when they are out of frame.
+function buildSuitPts(kps) {
+  const g = i => { const k = kps[i]; return k && k.score > CONF ? { x: k.x, y: k.y } : null }
+  const ls = g(KP.LS), rs = g(KP.RS), lh = g(KP.LH), rh = g(KP.RH)
+  if (!ls || !rs || !lh || !rh) return null
+  const torso = Math.max(((lh.y + rh.y) - (ls.y + rs.y)) / 2, 1)
+  const leg = (hip, i, f) => g(i) || { x: hip.x, y: hip.y + torso * f }
+  return {
+    ls, rs, lh, rh,
+    lk: leg(lh, KP.LK, 0.8),  rk: leg(rh, KP.RK, 0.8),
+    la: leg(lh, KP.LA, 1.59), ra: leg(rh, KP.RA, 1.59),
+    le: g(KP.LE ?? 13), re: g(KP.RE ?? 14), lw: g(KP.LW ?? 15), rw: g(KP.RW ?? 16),
+  }
+}
+
 function drawGown(ctx, img, layout, opacity) {
+  // Fitted suit model (set per gown in the admin calibration editor)
+  if (layout.cal?.suitMode === 'model' && layout.suitPts) {
+    if (drawSuitModel(ctx, layout.suitPts, layout.cal.suitModel,
+        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImg: layout.swatchImg })) return
+  }
   const t = ctx.getTransform()
   const size = { w: ctx.canvas.width / t.a, h: ctx.canvas.height / t.d }   // logical (camera-pixel) size at any render scale
   // Menswear has its own straight-cut renderer (no waist cinch / skirt flare / sway)
@@ -312,6 +334,7 @@ export default function TryOnCamera({
   const measRef       = useRef(bodyMeasures)
   const gownImgRef    = useRef(null)
   const gownBackRef   = useRef(null)
+  const swatchImgRef  = useRef(null)
 
   const goodFrames    = useRef(0)
   const facingFrames  = useRef(0)
@@ -381,6 +404,21 @@ export default function TryOnCamera({
       keys: c ? Object.keys(c) : null,
     })
   }, [gown])
+
+  // Fabric swatch for the fitted suit (only loaded when the gown uses it)
+  const swatchUrl = (gown?.tryonCalibration?.suitMode === 'model'
+    && typeof gown?.tryonCalibration?.suitModel?.swatch === 'string')
+    ? gown.tryonCalibration.suitModel.swatch : ''
+  useEffect(() => {
+    swatchImgRef.current = null
+    if (!swatchUrl) return
+    let stale = false
+    const im = new Image(); im.crossOrigin = 'anonymous'   // keeps photo capture (toDataURL) working
+    im.onload  = () => { if (!stale) swatchImgRef.current = im }
+    im.onerror = () => { if (!stale) swatchImgRef.current = null }
+    im.src = swatchUrl
+    return () => { stale = true }
+  }, [swatchUrl])
 
   // Calibrate mode: start from the gown's saved calibration, edit live
   useEffect(() => {
@@ -816,6 +854,9 @@ export default function TryOnCamera({
           const plate = plateRef.current
                     layout.noCloth = !!frozen
           layout.segment = String(gownRef.current?.segment || 'women').toLowerCase()
+          layout.suitPts  = buildSuitPts(kps)
+          layout.suitBack = isBack
+          layout.swatchImg = swatchImgRef.current
           layout.reveal = (enhancedRef.current && revealRef.current && seg && plate && plate.width === vw && plate.height === vh)
             ? { plate, mask: seg, margin: layout.sw * 0.1 }
             : null

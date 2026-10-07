@@ -9,6 +9,7 @@ import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile, makeWidthFn, sampleSkirt } from '@/lib/fitting-room/glGownRenderer'
 import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS, CURVE_MIN, CURVE_MAX, CURVE_OVERRIDES } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
+import { drawSuitModel, resolveSuitModel, jacketFrame, SUIT_FIELDS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
 import { createPortal } from 'react-dom'
 
 /* ─────────────────────────────────────────────
@@ -633,6 +634,89 @@ function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
     </div>
   )
 }
+
+/* ─────────────────────────────────────────────
+   SwatchPicker — drag a rectangle over the product photo; the crop is
+   uploaded as a small PNG and tiled over the fitted suit
+───────────────────────────────────────────── */
+function SwatchPicker({ src, onPick }) {
+  const [img,  setImg ] = useState(null)
+  const [rect, setRect] = useState(null)   // { x, y, w, h } as fractions of the photo
+  const [busy, setBusy] = useState(false)
+  const [err,  setErr ] = useState('')
+  const boxRef   = useRef(null)
+  const startRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false, objectUrl = null
+    setImg(null); setRect(null); setErr('')
+    toSafeUrl(src)
+      .then(safe => {
+        if (cancelled) return
+        if (safe !== src) objectUrl = safe
+        const im = new Image()
+        im.onload  = () => { if (!cancelled) setImg(im) }
+        im.onerror = () => { if (!cancelled) setErr('Could not load the photo.') }
+        im.src = safe
+      })
+      .catch(() => { if (!cancelled) setErr('Could not load the photo.') })
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [src])
+
+  const c01  = v => Math.min(Math.max(v, 0), 1)
+  const frac = ev => {
+    const r = boxRef.current.getBoundingClientRect()
+    return { x: c01((ev.clientX - r.left) / r.width), y: c01((ev.clientY - r.top) / r.height) }
+  }
+  const down = ev => { ev.currentTarget.setPointerCapture(ev.pointerId); startRef.current = frac(ev); setRect(null); setErr('') }
+  const move = ev => {
+    const s = startRef.current; if (!s) return
+    const p = frac(ev)
+    setRect({ x: Math.min(s.x, p.x), y: Math.min(s.y, p.y), w: Math.abs(p.x - s.x), h: Math.abs(p.y - s.y) })
+  }
+  const up = () => { startRef.current = null }
+
+  const use = async () => {
+    if (!img || !rect) return
+    const sx = Math.round(rect.x * img.naturalWidth),  sy = Math.round(rect.y * img.naturalHeight)
+    const sw = Math.round(rect.w * img.naturalWidth),  sh = Math.round(rect.h * img.naturalHeight)
+    if (sw < 8 || sh < 8) { setErr('Drag a larger area.'); return }
+    setBusy(true); setErr('')
+    try {
+      const k = Math.min(1, 256 / Math.max(sw, sh))          // keep the swatch small
+      const c = document.createElement('canvas')
+      c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k))
+      c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height)
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'))
+      if (!blob) throw new Error('Could not crop the image.')
+      const fd = new FormData()
+      fd.append('file', new File([blob], `swatch-${Date.now()}.png`, { type: 'image/png' }))
+      const res  = await adminFetch('/api/admin/upload-tryon-image', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || 'Upload failed')
+      onPick(data.url)
+    } catch (e) { setErr(e.message) }
+    finally { setBusy(false) }
+  }
+
+  if (err && !img) return <p className="field-error">{err}</p>
+  if (!img) return <p className="ce-row-hint">Loading photo…</p>
+  return (
+    <div>
+      <div ref={boxRef} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        style={{ position:'relative', borderRadius:8, overflow:'hidden', cursor:'crosshair', userSelect:'none', touchAction:'none' }}>
+        <img src={img.src} alt="Product photo: drag to select a fabric area" draggable={false} style={{ width:'100%', display:'block' }}/>
+        {rect && (
+          <div aria-hidden="true" style={{ position:'absolute', left:`${rect.x*100}%`, top:`${rect.y*100}%`, width:`${rect.w*100}%`, height:`${rect.h*100}%`, border:'2px solid #c9a96e', background:'rgba(201,169,110,.18)', pointerEvents:'none' }}/>
+        )}
+      </div>
+      <div className="ce-btns">
+        <button type="button" className="ce-ghost" disabled={!rect || busy} onClick={use}>{busy ? 'Uploading…' : 'Use selection'}</button>
+      </div>
+      {err && <p className="field-error">{err}</p>}
+    </div>
+  )
+}
 /* ─────────────────────────────────────────────
    CalibrationEditor  v2
    Skeleton-anchored interactive canvas editor.
@@ -695,6 +779,7 @@ const setBody = k => { B = BODIES[k] || B_AVG }
 const CE_ACTIVE = { background: 'rgba(200,169,110,.18)', color: '#c9a96e', borderColor: 'rgba(200,169,110,.45)' }
 
 const bpx = (key, W, H) => ({ x: B[key][0] * W, y: B[key][1] * H })
+const suitPts = (W, H) => Object.fromEntries(['ls','rs','lh','rh','lk','rk','la','ra','le','re','lw','rw'].map(k => [k, bpx(k, W, H)]))
 
 function calLayout(cal, W, H) {
   const c      = { ...DEFAULT_CAL, ...(cal || {}) }
@@ -953,6 +1038,24 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
 
   const cal = { ...DEFAULT_CAL, ...(calibration || {}) }
     const isEnh   = cal.mode === 'enhanced'
+  const isSuitGown = gown?.type === 'Suit' || gown?.segment === 'men'
+  const suitOn  = isSuitGown && cal.suitMode === 'model'
+  const [placing, setPlacing] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const swatchSrc = gown?.image && gown.image !== '/images/' ? gown.image : (tryonImage || '')
+  const setSuit = patch => onChange({ ...cal, suitModel: { ...(cal.suitModel || {}), ...patch } })
+  const placePocket = e => {
+    if (!placing || !suitOn || showSaved) return false
+    e.preventDefault()
+    const { x, y } = canvasXY(e)
+    const f = jacketFrame(suitPts(CW, CH), cal.suitModel)
+    if (!f) return true
+    const u = (x - f.x0) / (f.x1 - f.x0), v = (y - f.y0) / (f.y1 - f.y0)
+    const cur = resolveSuitModel(cal.suitModel).pockets
+    if (u < 0 || u > 1 || v < 0 || v > 1 || cur.length >= POCKET_MAX) return true
+    setSuit({ pockets: [...cur, { u, v }] })
+    return true
+  }
   const [showSaved, setShowSaved] = useState(false)
   const [bodyKey,   setBodyKey  ] = useState('average')
   setBody(bodyKey)                               // preview body for the draw helpers
@@ -1022,6 +1125,25 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     return () => { cancelled = true; if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000) }
   }, [tryonImage])
 
+    // Load the fabric swatch used by the fitted suit
+  const swatchUrl = resolveSuitModel(viewCal.suitModel).swatch
+  const [swatchImg, setSwatchImg] = useState(null)
+  useEffect(() => {
+    if (!swatchUrl) { setSwatchImg(null); return }
+    let cancelled = false, objectUrl = null
+    toSafeUrl(swatchUrl)
+      .then(safe => {
+        if (cancelled) return
+        if (safe !== swatchUrl) objectUrl = safe
+        const im = new Image()
+        im.onload  = () => { if (!cancelled) setSwatchImg(im) }
+        im.onerror = () => { if (!cancelled) setSwatchImg(null) }
+        im.src = safe
+      })
+      .catch(() => { if (!cancelled) setSwatchImg(null) })
+    return () => { cancelled = true; if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000) }
+  }, [swatchUrl])
+
   // Redraw canvas
   useEffect(() => {
     if (!open) return
@@ -1059,7 +1181,10 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     if (!skelTop) drawCalSkeleton(ctx, CW, CH, dressImg ? 0.5 : 0.85)
 
     // Draw dress with offset + scale overrides applied
-    if (dressImg) {
+    const suitView = isSuitGown && cal.suitMode === 'model'
+    if (suitView) {
+      drawSuitModel(ctx, suitPts(CW, CH), cal.suitModel, { view: 'front', opacity: 0.93, swatchImg })
+    } else if (dressImg) {
       const sy2  = cal.scaleY ?? 1
       const top2 = lay.topY + doy
       const L = {
@@ -1087,7 +1212,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-    }, [open, cal, viewCal, bodyKey, dressImg, active, hover, zoom, panX, panY, fs, skelTop, selPt])
+    }, [open, cal, viewCal, bodyKey, dressImg, swatchImg, active, hover, zoom, panX, panY, fs, skelTop, selPt])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -1183,6 +1308,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   }, [open])
 
   const onDown = useCallback(e => {
+    if (placePocket(e)) return
         if (showSaved) return
     e.preventDefault()
     const { x, y } = canvasXY(e)
@@ -1201,7 +1327,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
       setPanning(true)
       panOrigin.current = rawCanvasXY(e)
     }
-    }, [cal, zoom, panX, panY, showSaved])
+    }, [cal, zoom, panX, panY, showSaved, placing])
 
   const onMove = useCallback(e => {
     e.preventDefault()
@@ -1426,6 +1552,90 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                 <input type="checkbox" checked={skelTop} onChange={e => setSkelTop(e.target.checked)} style={{accentColor:'#c9a96e'}}/>
                 Show skeleton over dress
               </label>
+              {isSuitGown && (
+                <>
+                  <p className="ce-group-label">Suit preview</p>
+                  <div className="ce-btns">
+                    {[['photo', 'Photo'], ['model', 'Fitted model']].map(([m, label]) => {
+                      const on = (cal.suitMode || 'photo') === m
+                      return (
+                        <button key={m} type="button" className="ce-ghost" aria-pressed={on}
+                          style={on ? CE_ACTIVE : undefined} onClick={() => onChange({ ...cal, suitMode: m })}>
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="ce-row-hint">Photo uses the cut-out image. Fitted draws a simple jacket, shirt and trousers on the body. It is a fit preview only: the fabric does not drape and there are no real lapels or buttons.</p>
+                  {suitOn && (() => {
+                    const sm = resolveSuitModel(cal.suitModel)
+                    const colorRow = (label, value, onPick) => (
+                      <div className="ce-row-head">
+                        <span className="ce-row-label">{label}</span>
+                        <input type="color" value={value} onChange={e => onPick(e.target.value)} style={{ width: 36, height: 22, padding: 0, border: 'none', background: 'none' }}/>
+                      </div>
+                    )
+                    return (
+                      <>
+                        {colorRow('Suit color', sm.color, v => setSuit({ color: v }))}
+                        {colorRow('Shirt color', sm.shirtColor, v => setSuit({ shirtColor: v }))}
+                        <div className="ce-row">
+                          <div className="ce-row-head">
+                            <span className="ce-row-label">Fabric swatch</span>
+                            {sm.swatch && <img src={sm.swatch} alt="Current swatch" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--c-border)' }}/>}
+                          </div>
+                          <div className="ce-btns">
+                            <button type="button" className="ce-ghost" aria-pressed={picking} disabled={!swatchSrc}
+                              style={picking ? CE_ACTIVE : undefined} onClick={() => setPicking(v => !v)}>
+                              {picking ? 'Close picker' : sm.swatch ? 'Pick a new swatch…' : 'Pick from photo…'}
+                            </button>
+                            {sm.swatch && (
+                              <button type="button" className="ce-ghost" onClick={() => setSuit({ swatch: '' })}>Remove swatch</button>
+                            )}
+                          </div>
+                          {picking && swatchSrc && (
+                            <SwatchPicker src={swatchSrc} onPick={url => { setSuit({ swatch: url }); setPicking(false) }}/>
+                          )}
+                          <p className="ce-row-hint">Drag over a plain, flat patch of the display photo (chest or sleeve). It tiles over the jacket and trousers and replaces Suit color while set. Bold stripes and plaids will show visible seams, since the fabric does not drape.</p>
+                        </div>
+                        {SUIT_FIELDS.filter(f => f.k !== 'swatchScale' || sm.swatch).map(f => (
+                          <div key={f.k} className="ce-row">
+                            <div className="ce-row-head">
+                              <span className="ce-row-label">{f.label}</span>
+                              <span className="ce-row-val">{Number(sm[f.k]).toFixed(2)}</span>
+                            </div>
+                            <input type="range" min={f.min} max={f.max} step={f.step} value={sm[f.k]}
+                              onChange={e => setSuit({ [f.k]: parseFloat(e.target.value) })} className="ce-range"/>
+                            <p className="ce-row-hint">{f.hint}</p>
+                          </div>
+                        ))}
+                        <div className="form-grid-2">
+                          <select aria-label="Tie" className="field-input" value={sm.tie.type}
+                            onChange={e => setSuit({ tie: { ...sm.tie, type: e.target.value } })}>
+                            {TIE_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                          </select>
+                          <input type="color" aria-label="Tie color" value={sm.tie.color} disabled={sm.tie.type === 'none'}
+                            onChange={e => setSuit({ tie: { ...sm.tie, color: e.target.value } })}
+                            style={{ width: 36, height: 30, padding: 0, border: 'none', background: 'none' }}/>
+                        </div>
+                        <div className="ce-btns">
+                          <button type="button" className="ce-ghost" aria-pressed={placing}
+                            style={placing ? CE_ACTIVE : undefined}
+                            disabled={sm.pockets.length >= POCKET_MAX && !placing}
+                            onClick={() => setPlacing(v => !v)}>
+                            {placing ? 'Click the jacket to place… (tap to stop)' : 'Place pockets'}
+                          </button>
+                          <button type="button" className="ce-ghost" disabled={!sm.pockets.length}
+                            onClick={() => setSuit({ pockets: sm.pockets.slice(0, -1) })}>Undo pocket</button>
+                          <button type="button" className="ce-ghost" disabled={!sm.pockets.length}
+                            onClick={() => setSuit({ pockets: [] })}>Clear pockets</button>
+                        </div>
+                        <p className="ce-row-hint">{sm.pockets.length} / {POCKET_MAX} pockets. Positions are saved as a share of the jacket width and length, so they follow any body.</p>
+                      </>
+                    )
+                  })()}
+                </>
+              )}
               <p className="ce-group-label">Mode</p>
               <div className="ce-btns">
                 {['simple', 'enhanced'].map(m => {
@@ -1625,7 +1835,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
               )}
 
               <div className="ce-btns">
-                <button type="button" className="ce-ghost" onClick={() => onChange(null)}>
+                <button type="button" className="ce-ghost" onClick={() => onChange(cal.suitMode || cal.suitModel ? { suitMode: cal.suitMode, suitModel: cal.suitModel } : null)}>
                   Reset defaults
                 </button>
                 {cal.hemY != null && (
