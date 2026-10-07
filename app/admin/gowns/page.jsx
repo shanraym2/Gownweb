@@ -9,7 +9,7 @@ import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile, makeWidthFn, sampleSkirt } from '@/lib/fitting-room/glGownRenderer'
 import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS, CURVE_MIN, CURVE_MAX, CURVE_OVERRIDES } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
-import { drawSuitModel, resolveSuitModel, jacketFrame, suitImageUrls, SUIT_FIELDS, SUIT_PARTS, SUIT_OPTIONS, SUIT_TOGGLES, SUIT_COLORS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
+import { drawSuitModel, resolveSuitModel, jacketFrame, suitImageUrls, SUIT_FIELDS, SUIT_PARTS, SUIT_PRESETS, SUIT_OPTIONS, SUIT_TOGGLES, SUIT_COLORS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
 import { createPortal } from 'react-dom'
 
 /* ─────────────────────────────────────────────
@@ -1691,8 +1691,16 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                           )}
                           <p className="ce-row-hint">Drag over a plain, flat patch of the display photo (chest or sleeve). It tiles over the jacket and trousers and replaces Suit color while set. Bold stripes and plaids will show visible seams, since the fabric does not drape.</p>
                         </div>
-                        {SUIT_FIELDS.filter(f => f.k !== 'swatchScale').map(f => (
+                        <p className="ce-group-label">Garment preset</p>
+                        <div className="ce-btns">
+                          {SUIT_PRESETS.map(p => (
+                            <button key={p.id} type="button" className="ce-ghost" onClick={() => setSuit(p.patch)}>{p.label}</button>
+                          ))}
+                        </div>
+                        <p className="ce-row-hint">A preset sets the shape options in one click. Colors and fabrics are kept, and you can change everything afterward.</p>
+                        {SUIT_FIELDS.filter(f => f.k !== 'swatchScale').map((f, i, arr) => (
                           <div key={f.k} className="ce-row">
+                            {f.group && f.group !== arr[i - 1]?.group && <p className="ce-group-label" style={{ margin: '0 0 6px' }}>{f.group}</p>}
                             <div className="ce-row-head">
                               <span className="ce-row-label">{f.label}</span>
                               <span className="ce-row-val">{f.step >= 1 ? sm[f.k] : Number(sm[f.k]).toFixed(2)}</span>

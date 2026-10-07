@@ -204,7 +204,8 @@ function drawGown(ctx, img, layout, opacity) {
   // Fitted suit model (set per gown in the admin calibration editor)
   if (layout.cal?.suitMode === 'model' && layout.suitPts) {
     if (drawSuitModel(ctx, layout.suitPts, layout.cal.suitModel,
-        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImgs: layout.swatchImgs, skeleton: layout.suitSkeleton })) return
+        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImgs: layout.swatchImgs, skeleton: layout.suitSkeleton,
+          light: { brightness: layout.brightness, tint: layout.tint, slope: layout.lightSlope } })) return
   }
   const t = ctx.getTransform()
   const size = { w: ctx.canvas.width / t.a, h: ctx.canvas.height / t.d }   // logical (camera-pixel) size at any render scale
