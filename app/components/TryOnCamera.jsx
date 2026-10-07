@@ -196,6 +196,7 @@ function buildSuitPts(kps) {
     lk: leg(lh, KP.LK, 0.8),  rk: leg(rh, KP.RK, 0.8),
     la: leg(lh, KP.LA, 1.59), ra: leg(rh, KP.RA, 1.59),
     le: g(KP.LE ?? 13), re: g(KP.RE ?? 14), lw: g(KP.LW ?? 15), rw: g(KP.RW ?? 16),
+    hd: g(0),                                    // nose, only used to place the skeleton's head
   }
 }
 
@@ -203,7 +204,7 @@ function drawGown(ctx, img, layout, opacity) {
   // Fitted suit model (set per gown in the admin calibration editor)
   if (layout.cal?.suitMode === 'model' && layout.suitPts) {
     if (drawSuitModel(ctx, layout.suitPts, layout.cal.suitModel,
-        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImgs: layout.swatchImgs })) return
+        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImgs: layout.swatchImgs, skeleton: layout.suitSkeleton })) return
   }
   const t = ctx.getTransform()
   const size = { w: ctx.canvas.width / t.a, h: ctx.canvas.height / t.d }   // logical (camera-pixel) size at any render scale
@@ -379,6 +380,8 @@ export default function TryOnCamera({
   const [armsOn,     setArmsOn    ] = useState(true)    // draw arms and hands over the gown
   const revealRef = useRef(true)
   const armsRef   = useRef(true)
+  const [skelOn, setSkelOn] = useState(false)   // fit skeleton over a see-through suit
+  const skelRef = useRef(false)
 
   // Capture / timer
   const [captured,   setCaptured  ] = useState(null)
@@ -857,6 +860,7 @@ export default function TryOnCamera({
           layout.segment = String(gownRef.current?.segment || 'women').toLowerCase()
           layout.suitPts  = buildSuitPts(kps)
           layout.suitBack = isBack
+          layout.suitSkeleton = skelRef.current ? 'ghost' : false
           layout.swatchImgs = swatchImgsRef.current
           layout.reveal = (enhancedRef.current && revealRef.current && seg && plate && plate.width === vw && plate.height === vh)
             ? { plate, mask: seg, margin: layout.sw * 0.1 }
@@ -1341,6 +1345,21 @@ export default function TryOnCamera({
                 aria-valuetext={`${Math.round(opacity * 100)}%`}/>
               <span className="tc-opacity-val" aria-hidden="true">{Math.round(opacity * 100)}%</span>
             </div>
+            {gown?.tryonCalibration?.suitMode === 'model' && (
+              <div className="tc-enhanced-row">
+                <div>
+                  <span className="tc-enhanced-label">Fit skeleton</span>
+                  <span className="tc-enhanced-sub">Shows your body through the suit to check the fit</span>
+                </div>
+                <button
+                  className={`tc-toggle${skelOn ? ' on' : ''}`}
+                  onClick={() => { const v = !skelRef.current; skelRef.current = v; setSkelOn(v) }}
+                  aria-pressed={skelOn}
+                  aria-label="Toggle the fit skeleton">
+                  <span className="tc-toggle-thumb" aria-hidden="true"/>
+                </button>
+              </div>
+            )}
             <div className="tc-enhanced-row">
               <div>
                 <span className="tc-enhanced-label">Enhanced mode</span>

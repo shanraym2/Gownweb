@@ -9,7 +9,7 @@ import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile, makeWidthFn, sampleSkirt } from '@/lib/fitting-room/glGownRenderer'
 import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS, CURVE_MIN, CURVE_MAX, CURVE_OVERRIDES } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
-import { drawSuitModel, resolveSuitModel, jacketFrame, suitImageUrls, SUIT_FIELDS, SUIT_PARTS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
+import { drawSuitModel, resolveSuitModel, jacketFrame, suitImageUrls, SUIT_FIELDS, SUIT_PARTS, SUIT_OPTIONS, SUIT_TOGGLES, SUIT_COLORS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
 import { createPortal } from 'react-dom'
 
 /* ─────────────────────────────────────────────
@@ -779,7 +779,7 @@ const setBody = k => { B = BODIES[k] || B_AVG }
 const CE_ACTIVE = { background: 'rgba(200,169,110,.18)', color: '#c9a96e', borderColor: 'rgba(200,169,110,.45)' }
 
 const bpx = (key, W, H) => ({ x: B[key][0] * W, y: B[key][1] * H })
-const suitPts = (W, H) => Object.fromEntries(['ls','rs','lh','rh','lk','rk','la','ra','le','re','lw','rw'].map(k => [k, bpx(k, W, H)]))
+const suitPts = (W, H) => ({ ...Object.fromEntries(['ls','rs','lh','rh','lk','rk','la','ra','le','re','lw','rw'].map(k => [k, bpx(k, W, H)])), hd: bpx('head', W, H) })
 
 function calLayout(cal, W, H) {
   const c      = { ...DEFAULT_CAL, ...(cal || {}) }
@@ -1041,6 +1041,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const isSuitGown = gown?.type === 'Suit' || gown?.segment === 'men'
   const suitOn  = isSuitGown && cal.suitMode === 'model'
   const [placing, setPlacing] = useState(false)
+  const [suitSkel, setSuitSkel] = useState(false)    // fit skeleton over a see-through suit (view only, not saved)
   const [picking, setPicking] = useState(null)      // null | 'tile' | 'mask'
   const [partSel, setPartSel] = useState('all')     // 'all' | 'torso' | 'lArm' | 'rArm' | 'lLeg' | 'rLeg'
   const [linkLR,  setLinkLR ] = useState(true)      // edit left and right together
@@ -1184,7 +1185,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     // Draw dress with offset + scale overrides applied
     const suitView = isSuitGown && cal.suitMode === 'model'
     if (suitView) {
-      drawSuitModel(ctx, suitPts(CW, CH), cal.suitModel, { view: 'front', opacity: 0.93, swatchImgs })
+      drawSuitModel(ctx, suitPts(CW, CH), cal.suitModel, { view: 'front', opacity: 0.93, swatchImgs, skeleton: suitSkel ? 'ghost' : false })
     } else if (dressImg) {
       const sy2  = cal.scaleY ?? 1
       const top2 = lay.topY + doy
@@ -1213,7 +1214,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-    }, [open, cal, viewCal, bodyKey, dressImg, swatchImgs, active, hover, zoom, panX, panY, fs, skelTop, selPt])
+    }, [open, cal, viewCal, bodyKey, dressImg, swatchImgs, active, hover, zoom, panX, panY, fs, skelTop, selPt, suitSkel])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -1568,6 +1569,12 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                     })}
                   </div>
                   <p className="ce-row-hint">Photo uses the cut-out image. Fitted draws a simple jacket, shirt and trousers on the body. It is a fit preview only: the fabric does not drape and there are no real lapels or buttons.</p>
+                  {suitOn && (
+                    <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                      <input type="checkbox" checked={suitSkel} onChange={e => setSuitSkel(e.target.checked)} style={{accentColor:'#c9a96e'}}/>
+                      Fit skeleton (see the body through the suit)
+                    </label>
+                  )}
                   {suitOn && (() => {
                     const sm = resolveSuitModel(cal.suitModel)
                     const colorRow = (label, value, onPick) => (
@@ -1579,7 +1586,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                     return (
                       <>
 
-                        {colorRow('Shirt color', sm.shirtColor, v => setSuit({ shirtColor: v }))}
+                        
                         <div className="ce-row">
                                                   {(() => {
                           const PART_BTNS = [['all', 'Whole suit'], ...SUIT_PARTS.map(p => [p.id, p.label])]
@@ -1588,7 +1595,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                           const ids = partSel === 'all' ? null
                             : isArm ? (linkLR ? ['lArm', 'rArm'] : [partSel])
                             : isLeg ? (linkLR ? ['lLeg', 'rLeg'] : [partSel])
-                            : ['torso']
+                            : [partSel]                       // torso, collar or shirt
                           const cur = partSel === 'all'
                             ? { color: sm.color, swatch: sm.swatch, swatchScale: sm.swatchScale, fit: false }
                             : sm.parts[partSel]
@@ -1647,7 +1654,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                                     onClick={() => setPart(partSel === 'all' ? { swatch: '' } : { swatch: '', fit: false })}>Remove swatch</button>
                                 )}
                                 {hasOwn && (
-                                  <button type="button" className="ce-ghost" onClick={inherit}>Use {partSel === 'lLeg' || partSel === 'rLeg' ? 'suit' : 'torso'} fabric</button>
+                                  <button type="button" className="ce-ghost" onClick={inherit}>Use {partSel === 'shirt' ? 'shirt color' : partSel === 'collar' ? 'shirt fabric' : partSel === 'lLeg' || partSel === 'rLeg' ? 'suit' : 'torso'}{partSel === 'shirt' ? '' : ' fabric'}</button>
                                 )}
                               </div>
                               {picking && swatchSrc && (
@@ -1665,7 +1672,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                                 </>
                               )}
                               <p className="ce-row-hint">
-                                Tile: drag over a plain, flat patch of the display photo and it repeats. Mask: drag over the whole part in the photo (the jacket for Torso, one sleeve for an arm, one leg for a leg) and it is stretched to fit that part. Arms follow the torso and legs follow the whole suit until you set them. Choosing a color on a part clears its swatch.
+                                Tile: drag over a plain, flat patch of the display photo and it repeats. Mask: drag over the whole part in the photo (the jacket for Torso, one sleeve for an arm, one leg for a leg) and it is stretched to fit that part. Arms follow the torso, legs follow the whole suit, and the collar follows the undershirt until you set them. Choosing a color on a part clears its swatch.
                               </p>
                             </div>
                           )
@@ -1688,13 +1695,39 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                           <div key={f.k} className="ce-row">
                             <div className="ce-row-head">
                               <span className="ce-row-label">{f.label}</span>
-                              <span className="ce-row-val">{Number(sm[f.k]).toFixed(2)}</span>
+                              <span className="ce-row-val">{f.step >= 1 ? sm[f.k] : Number(sm[f.k]).toFixed(2)}</span>
                             </div>
                             <input type="range" min={f.min} max={f.max} step={f.step} value={sm[f.k]}
                               onChange={e => setSuit({ [f.k]: parseFloat(e.target.value) })} className="ce-range"/>
                             <p className="ce-row-hint">{f.hint}</p>
                           </div>
                         ))}
+                        {SUIT_OPTIONS.map(o => (
+                          <div key={o.k} className="ce-row-head">
+                            <span className="ce-row-label">{o.label}</span>
+                            <select aria-label={o.label} className="field-input" style={{ maxWidth: 170 }} value={sm[o.k]}
+                              onChange={e => setSuit({ [o.k]: e.target.value })}>
+                              {o.options.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+                            </select>
+                          </div>
+                        ))}
+                        {SUIT_TOGGLES.map(t => (
+                          <label key={t.k} style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                            <input type="checkbox" checked={!!sm[t.k]} onChange={e => setSuit({ [t.k]: e.target.checked })} style={{accentColor:'#c9a96e'}}/>
+                            {t.label}
+                          </label>
+                        ))}
+                        {SUIT_COLORS.map(c => colorRow(c.label, sm[c.k], v => setSuit({ [c.k]: v })))}
+                        <div className="ce-row-head">
+                          <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                            <input type="checkbox" checked={sm.pocketSquare.on} style={{accentColor:'#c9a96e'}}
+                              onChange={e => setSuit({ pocketSquare: { ...sm.pocketSquare, on: e.target.checked } })}/>
+                            Breast pocket square
+                          </label>
+                          <input type="color" aria-label="Pocket square color" value={sm.pocketSquare.color} disabled={!sm.pocketSquare.on}
+                            onChange={e => setSuit({ pocketSquare: { ...sm.pocketSquare, color: e.target.value } })}
+                            style={{ width: 36, height: 22, padding: 0, border: 'none', background: 'none' }}/>
+                        </div>
                         <div className="form-grid-2">
                           <select aria-label="Tie" className="field-input" value={sm.tie.type}
                             onChange={e => setSuit({ tie: { ...sm.tie, type: e.target.value } })}>
