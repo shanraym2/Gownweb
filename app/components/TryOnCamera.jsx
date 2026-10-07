@@ -74,7 +74,7 @@ import { KP, CONF } from '../../lib/fitting-room/poseUtils.js'
 import { drawGownWarped, createKpFilter, autoCalibration } from '../../lib/fitting-room/gownWarp.js'
 import { drawGownGL, prepareGownGL } from '../../lib/fitting-room/glGownRenderer.js'
 import { drawSuit } from '../../lib/suitWarp.js'
-import { drawSuitModel } from '../../lib/fitting-room/suitModel.js'
+import { drawSuitModel, suitImageUrls } from '../../lib/fitting-room/suitModel.js'
 import { getProfile } from '../../lib/fitting-room/gownWarp.js'
 import { resolveCal, guessTags, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS } from '../../lib/fitting-room/calibration.js'
 
@@ -203,7 +203,7 @@ function drawGown(ctx, img, layout, opacity) {
   // Fitted suit model (set per gown in the admin calibration editor)
   if (layout.cal?.suitMode === 'model' && layout.suitPts) {
     if (drawSuitModel(ctx, layout.suitPts, layout.cal.suitModel,
-        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImg: layout.swatchImg })) return
+        { view: layout.suitBack ? 'back' : 'front', opacity, swatchImgs: layout.swatchImgs })) return
   }
   const t = ctx.getTransform()
   const size = { w: ctx.canvas.width / t.a, h: ctx.canvas.height / t.d }   // logical (camera-pixel) size at any render scale
@@ -334,7 +334,7 @@ export default function TryOnCamera({
   const measRef       = useRef(bodyMeasures)
   const gownImgRef    = useRef(null)
   const gownBackRef   = useRef(null)
-  const swatchImgRef  = useRef(null)
+  const swatchImgsRef = useRef({})
 
   const goodFrames    = useRef(0)
   const facingFrames  = useRef(0)
@@ -405,20 +405,21 @@ export default function TryOnCamera({
     })
   }, [gown])
 
-  // Fabric swatch for the fitted suit (only loaded when the gown uses it)
-  const swatchUrl = (gown?.tryonCalibration?.suitMode === 'model'
-    && typeof gown?.tryonCalibration?.suitModel?.swatch === 'string')
-    ? gown.tryonCalibration.suitModel.swatch : ''
+    // Fabric images for the fitted suit (one per part that has one)
+  const swatchKey = gown?.tryonCalibration?.suitMode === 'model'
+    ? JSON.stringify(suitImageUrls(gown.tryonCalibration.suitModel)) : '{}'
   useEffect(() => {
-    swatchImgRef.current = null
-    if (!swatchUrl) return
+    swatchImgsRef.current = {}
+    const urls = JSON.parse(swatchKey), ids = Object.keys(urls)
+    if (!ids.length) return
     let stale = false
-    const im = new Image(); im.crossOrigin = 'anonymous'   // keeps photo capture (toDataURL) working
-    im.onload  = () => { if (!stale) swatchImgRef.current = im }
-    im.onerror = () => { if (!stale) swatchImgRef.current = null }
-    im.src = swatchUrl
+    ids.forEach(id => {
+      const im = new Image(); im.crossOrigin = 'anonymous'   // keeps photo capture working
+      im.onload = () => { if (!stale) swatchImgsRef.current = { ...swatchImgsRef.current, [id]: im } }
+      im.src = urls[id]
+    })
     return () => { stale = true }
-  }, [swatchUrl])
+  }, [swatchKey])
 
   // Calibrate mode: start from the gown's saved calibration, edit live
   useEffect(() => {
@@ -856,7 +857,7 @@ export default function TryOnCamera({
           layout.segment = String(gownRef.current?.segment || 'women').toLowerCase()
           layout.suitPts  = buildSuitPts(kps)
           layout.suitBack = isBack
-          layout.swatchImg = swatchImgRef.current
+          layout.swatchImgs = swatchImgsRef.current
           layout.reveal = (enhancedRef.current && revealRef.current && seg && plate && plate.width === vw && plate.height === vh)
             ? { plate, mask: seg, margin: layout.sw * 0.1 }
             : null

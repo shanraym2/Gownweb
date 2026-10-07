@@ -9,7 +9,7 @@ import { drawGownWarped, getProfile } from '@/lib/fitting-room/gownWarp'
 import { drawGownGL, ensureProfile, makeWidthFn, sampleSkirt } from '@/lib/fitting-room/glGownRenderer'
 import { resolveCal, seamsFor, bodiceExtent, NECKLINES, SLEEVES, ADV_FIELDS, GEO_GROUPS, CURVE_MIN, CURVE_MAX, CURVE_OVERRIDES } from '@/lib/fitting-room/calibration'
 import { matteGown } from '@/lib/fitting-room/matte'
-import { drawSuitModel, resolveSuitModel, jacketFrame, SUIT_FIELDS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
+import { drawSuitModel, resolveSuitModel, jacketFrame, suitImageUrls, SUIT_FIELDS, SUIT_PARTS, TIE_TYPES, POCKET_MAX } from '@/lib/fitting-room/suitModel'
 import { createPortal } from 'react-dom'
 
 /* ─────────────────────────────────────────────
@@ -639,7 +639,7 @@ function SeamPreview({ src, cal, rc, onSeam, onGeo, onWaistRow }) {
    SwatchPicker — drag a rectangle over the product photo; the crop is
    uploaded as a small PNG and tiled over the fitted suit
 ───────────────────────────────────────────── */
-function SwatchPicker({ src, onPick }) {
+function SwatchPicker({ src, onPick, maxSize = 256 }) {
   const [img,  setImg ] = useState(null)
   const [rect, setRect] = useState(null)   // { x, y, w, h } as fractions of the photo
   const [busy, setBusy] = useState(false)
@@ -683,7 +683,7 @@ function SwatchPicker({ src, onPick }) {
     if (sw < 8 || sh < 8) { setErr('Drag a larger area.'); return }
     setBusy(true); setErr('')
     try {
-      const k = Math.min(1, 256 / Math.max(sw, sh))          // keep the swatch small
+      const k = Math.min(1, maxSize / Math.max(sw, sh))          // keep the swatch small
       const c = document.createElement('canvas')
       c.width = Math.max(1, Math.round(sw * k)); c.height = Math.max(1, Math.round(sh * k))
       c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height)
@@ -1041,7 +1041,9 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
   const isSuitGown = gown?.type === 'Suit' || gown?.segment === 'men'
   const suitOn  = isSuitGown && cal.suitMode === 'model'
   const [placing, setPlacing] = useState(false)
-  const [picking, setPicking] = useState(false)
+  const [picking, setPicking] = useState(null)      // null | 'tile' | 'mask'
+  const [partSel, setPartSel] = useState('all')     // 'all' | 'torso' | 'lArm' | 'rArm' | 'lLeg' | 'rLeg'
+  const [linkLR,  setLinkLR ] = useState(true)      // edit left and right together
   const swatchSrc = gown?.image && gown.image !== '/images/' ? gown.image : (tryonImage || '')
   const setSuit = patch => onChange({ ...cal, suitModel: { ...(cal.suitModel || {}), ...patch } })
   const placePocket = e => {
@@ -1125,24 +1127,23 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     return () => { cancelled = true; if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000) }
   }, [tryonImage])
 
-    // Load the fabric swatch used by the fitted suit
-  const swatchUrl = resolveSuitModel(viewCal.suitModel).swatch
-  const [swatchImg, setSwatchImg] = useState(null)
+      // Fabric images for the fitted suit, one per part that has one
+  const swatchKey = JSON.stringify(suitImageUrls(viewCal.suitModel))
+  const [swatchImgs, setSwatchImgs] = useState({})
   useEffect(() => {
-    if (!swatchUrl) { setSwatchImg(null); return }
-    let cancelled = false, objectUrl = null
-    toSafeUrl(swatchUrl)
-      .then(safe => {
-        if (cancelled) return
-        if (safe !== swatchUrl) objectUrl = safe
-        const im = new Image()
-        im.onload  = () => { if (!cancelled) setSwatchImg(im) }
-        im.onerror = () => { if (!cancelled) setSwatchImg(null) }
-        im.src = safe
-      })
-      .catch(() => { if (!cancelled) setSwatchImg(null) })
-    return () => { cancelled = true; if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000) }
-  }, [swatchUrl])
+    const urls = JSON.parse(swatchKey), ids = Object.keys(urls)
+    if (!ids.length) { setSwatchImgs({}); return }
+    let cancelled = false
+    const objs = []
+    Promise.all(ids.map(async id => {
+      try {
+        const safe = await toSafeUrl(urls[id])
+        if (safe !== urls[id]) objs.push(safe)
+        return await new Promise(res => { const im = new Image(); im.onload = () => res([id, im]); im.onerror = () => res(null); im.src = safe })
+      } catch { return null }
+    })).then(r => { if (!cancelled) setSwatchImgs(Object.fromEntries(r.filter(Boolean))) })
+    return () => { cancelled = true; setTimeout(() => objs.forEach(u => URL.revokeObjectURL(u)), 1000) }
+  }, [swatchKey])
 
   // Redraw canvas
   useEffect(() => {
@@ -1183,7 +1184,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     // Draw dress with offset + scale overrides applied
     const suitView = isSuitGown && cal.suitMode === 'model'
     if (suitView) {
-      drawSuitModel(ctx, suitPts(CW, CH), cal.suitModel, { view: 'front', opacity: 0.93, swatchImg })
+      drawSuitModel(ctx, suitPts(CW, CH), cal.suitModel, { view: 'front', opacity: 0.93, swatchImgs })
     } else if (dressImg) {
       const sy2  = cal.scaleY ?? 1
       const top2 = lay.topY + doy
@@ -1212,7 +1213,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
     ctx.font = '9px system-ui'; ctx.textAlign = 'center'
     ctx.fillStyle = 'rgba(200,169,110,0.4)'
     ctx.fillText(`drag handles · scroll=zoom · drag bg=pan  [${Math.round(zoom*100)}%]`, CW/2, CH - 6)
-    }, [open, cal, viewCal, bodyKey, dressImg, swatchImg, active, hover, zoom, panX, panY, fs, skelTop, selPt])
+    }, [open, cal, viewCal, bodyKey, dressImg, swatchImgs, active, hover, zoom, panX, panY, fs, skelTop, selPt])
 
   // Pointer helpers — account for zoom+pan
   function canvasXY(e) {
@@ -1577,13 +1578,98 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                     )
                     return (
                       <>
-                        {colorRow('Suit color', sm.color, v => setSuit({ color: v }))}
+
                         {colorRow('Shirt color', sm.shirtColor, v => setSuit({ shirtColor: v }))}
                         <div className="ce-row">
-                          <div className="ce-row-head">
-                            <span className="ce-row-label">Fabric swatch</span>
-                            {sm.swatch && <img src={sm.swatch} alt="Current swatch" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--c-border)' }}/>}
-                          </div>
+                                                  {(() => {
+                          const PART_BTNS = [['all', 'Whole suit'], ...SUIT_PARTS.map(p => [p.id, p.label])]
+                          const isArm = partSel === 'lArm' || partSel === 'rArm'
+                          const isLeg = partSel === 'lLeg' || partSel === 'rLeg'
+                          const ids = partSel === 'all' ? null
+                            : isArm ? (linkLR ? ['lArm', 'rArm'] : [partSel])
+                            : isLeg ? (linkLR ? ['lLeg', 'rLeg'] : [partSel])
+                            : ['torso']
+                          const cur = partSel === 'all'
+                            ? { color: sm.color, swatch: sm.swatch, swatchScale: sm.swatchScale, fit: false }
+                            : sm.parts[partSel]
+                          const setPart = patch => {
+                            if (!ids) return setSuit(patch)
+                            const parts = { ...sm.own }
+                            ids.forEach(id => { parts[id] = { ...(parts[id] || {}), ...patch } })
+                            setSuit({ parts })
+                          }
+                          const inherit = () => {
+                            const parts = { ...sm.own }
+                            ids.forEach(id => { delete parts[id] })
+                            setSuit({ parts })
+                          }
+                          const hasOwn = ids && ids.some(id => sm.own[id])
+                          const pickTo = (mode) => setPicking(p => p === mode ? null : mode)
+                          return (
+                            <div className="ce-row">
+                              <span className="ce-row-label">Fabric by part</span>
+                              <div className="ce-btns">
+                                {PART_BTNS.map(([id, label]) => (
+                                  <button key={id} type="button" className="ce-ghost" aria-pressed={partSel === id}
+                                    style={partSel === id ? CE_ACTIVE : undefined}
+                                    onClick={() => { setPartSel(id); setPicking(null) }}>{label}</button>
+                                ))}
+                              </div>
+                              {(isArm || isLeg) && (
+                                <label style={{display:'flex',alignItems:'center',gap:7,fontSize:11,color:'var(--c-muted)',cursor:'pointer'}}>
+                                  <input type="checkbox" checked={linkLR} onChange={e => setLinkLR(e.target.checked)} style={{accentColor:'#c9a96e'}}/>
+                                  Edit both {isArm ? 'arms' : 'legs'} together
+                                </label>
+                              )}
+                              <div className="ce-row-head">
+                                <span className="ce-row-label">Color</span>
+                                <input type="color" aria-label="Part color" value={cur.color}
+                                  onChange={e => setPart(partSel === 'all' ? { color: e.target.value } : { color: e.target.value, swatch: '', fit: false })}
+                                  style={{ width: 36, height: 22, padding: 0, border: 'none', background: 'none' }}/>
+                              </div>
+                              <div className="ce-row-head">
+                                <span className="ce-row-label">{cur.swatch ? (cur.fit ? 'Masked photo' : 'Tiled swatch') : 'No swatch (plain color)'}</span>
+                                {cur.swatch && <img src={cur.swatch} alt="Current fabric image" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--c-border)' }}/>}
+                              </div>
+                              <div className="ce-btns">
+                                <button type="button" className="ce-ghost" aria-pressed={picking === 'tile'} disabled={!swatchSrc}
+                                  style={picking === 'tile' ? CE_ACTIVE : undefined} onClick={() => pickTo('tile')}>
+                                  {picking === 'tile' ? 'Close picker' : 'Tile a patch…'}
+                                </button>
+                                {partSel !== 'all' && (
+                                  <button type="button" className="ce-ghost" aria-pressed={picking === 'mask'} disabled={!swatchSrc}
+                                    style={picking === 'mask' ? CE_ACTIVE : undefined} onClick={() => pickTo('mask')}>
+                                    {picking === 'mask' ? 'Close picker' : 'Mask a photo area…'}
+                                  </button>
+                                )}
+                                {cur.swatch && (
+                                  <button type="button" className="ce-ghost"
+                                    onClick={() => setPart(partSel === 'all' ? { swatch: '' } : { swatch: '', fit: false })}>Remove swatch</button>
+                                )}
+                                {hasOwn && (
+                                  <button type="button" className="ce-ghost" onClick={inherit}>Use {partSel === 'lLeg' || partSel === 'rLeg' ? 'suit' : 'torso'} fabric</button>
+                                )}
+                              </div>
+                              {picking && swatchSrc && (
+                                <SwatchPicker src={swatchSrc} maxSize={picking === 'mask' ? 768 : 256}
+                                  onPick={url => { setPart(picking === 'mask' ? { swatch: url, fit: true } : { swatch: url, fit: false }); setPicking(null) }}/>
+                              )}
+                              {cur.swatch && !cur.fit && (
+                                <>
+                                  <div className="ce-row-head">
+                                    <span className="ce-row-label">Pattern size</span>
+                                    <span className="ce-row-val">{Number(cur.swatchScale).toFixed(2)}</span>
+                                  </div>
+                                  <input type="range" min={0.3} max={3} step={0.05} value={cur.swatchScale} className="ce-range"
+                                    onChange={e => setPart({ swatchScale: parseFloat(e.target.value) })}/>
+                                </>
+                              )}
+                              <p className="ce-row-hint">
+                                Tile: drag over a plain, flat patch of the display photo and it repeats. Mask: drag over the whole part in the photo (the jacket for Torso, one sleeve for an arm, one leg for a leg) and it is stretched to fit that part. Arms follow the torso and legs follow the whole suit until you set them. Choosing a color on a part clears its swatch.
+                              </p>
+                            </div>
+                          )
+                        })()}
                           <div className="ce-btns">
                             <button type="button" className="ce-ghost" aria-pressed={picking} disabled={!swatchSrc}
                               style={picking ? CE_ACTIVE : undefined} onClick={() => setPicking(v => !v)}>
@@ -1598,7 +1684,7 @@ function CalibrationEditor({ calibration, onChange, tryonImage, gown, savedCalib
                           )}
                           <p className="ce-row-hint">Drag over a plain, flat patch of the display photo (chest or sleeve). It tiles over the jacket and trousers and replaces Suit color while set. Bold stripes and plaids will show visible seams, since the fabric does not drape.</p>
                         </div>
-                        {SUIT_FIELDS.filter(f => f.k !== 'swatchScale' || sm.swatch).map(f => (
+                        {SUIT_FIELDS.filter(f => f.k !== 'swatchScale').map(f => (
                           <div key={f.k} className="ce-row">
                             <div className="ce-row-head">
                               <span className="ce-row-label">{f.label}</span>
