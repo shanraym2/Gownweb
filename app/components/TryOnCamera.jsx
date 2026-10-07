@@ -176,9 +176,10 @@ function getGownLayout(kps, cal = {}, vw = 640, vh = 480) {
   const reach = (s, wr, dir) => (wr && wr.score > CONF) ? Math.min(1, Math.max(-0.5, dir * (wr.x - s.x) / Math.max(sw, 1))) : 0.1
   const arms = { l: reach(A[0][0], A[0][1], -1), r: reach(A[1][0], A[1][1], 1) }
   const legX = (la?.score > CONF && ra?.score > CONF) ? (la.x + ra.x) / 2 : null
+  const legSpan = (la?.score > CONF && ra?.score > CONF) ? Math.abs(la.x - ra.x) : null
   return { topY: top2, bottomY: bot2, cx: cx + dxPx, topW: topW * calSX, botW: botW * calSX,
            torsoH, widthScale: cal.widthScale ?? 1, sm, hm, sw, hw, rawHw, cal,
-           dx: dxPx, dy: dyPx, scaleX: calSX, arms, legX }
+           dx: dxPx, dy: dyPx, scaleX: calSX, arms, legX, legSpan }
 }
 
 function drawGown(ctx, img, layout, opacity) {
@@ -759,7 +760,7 @@ export default function TryOnCamera({
           const sp = gap < 500 ? smoothLayoutRef.current : null   // reset after a pose dropout
           const a  = 1 - Math.exp(-Math.min(gap, 100) / 1000 / 0.12)   // frame-rate independent, ~120ms
           const out = { ...layout }
-          if (sp) for (const k of ['topY', 'bottomY', 'cx', 'sw', 'hw', 'rawHw', 'torsoH', 'topW', 'botW']) {
+          if (sp) for (const k of ['topY', 'bottomY', 'cx', 'sw', 'hw', 'rawHw', 'torsoH', 'topW', 'botW', 'legSpan']) {
             if (typeof layout[k] === 'number' && typeof sp[k] === 'number') out[k] = sp[k] + (layout[k] - sp[k]) * a
           }
           smoothLayoutRef.current = out
