@@ -823,9 +823,14 @@ export default function TryOnCamera({
             // Sample the ROOM, not the person: the two outer edge strips of the frame.
             const lc = lightCanvas.current || (lightCanvas.current = Object.assign(document.createElement('canvas'), { width: 16, height: 8 }))
             const lg = lc.getContext('2d', { willReadFrequently: true })
-            const cw = canvas.width, ch = canvas.height, sx = Math.max(8, Math.round(cw * 0.1))
-            lg.drawImage(canvas, 0, 0, sx, ch, 0, 0, 8, 8)
-            lg.drawImage(canvas, cw - sx, 0, sx, ch, 8, 0, 8, 8)
+            const cw = canvas.width, ch = canvas.height
+            const edgeW = Math.max(8, Math.round(cw * 0.1))
+            let sxw = Math.max(8, Math.round(layout.sw * S * 0.5))
+            let sxL = Math.round((layout.sm.x - layout.sw * 1.35) * S), sxR = Math.round((layout.sm.x + layout.sw * 0.85) * S)
+            let sy = Math.max(0, Math.round(layout.sm.y * S)), sh = Math.max(8, Math.round((layout.hm.y - layout.sm.y) * S))
+            if (sxL < 0 || sxR + sxw > cw || sy + sh > ch) { sxw = edgeW; sxL = 0; sxR = cw - edgeW; sy = 0; sh = ch }
+            lg.drawImage(canvas, sxL, sy, sxw, sh, 0, 0, 8, 8)
+            lg.drawImage(canvas, sxR, sy, sxw, sh, 8, 0, 8, 8)
             const px = lg.getImageData(0, 0, 16, 8).data
             let R = 0, Gc = 0, B = 0
             for (let i = 0; i < px.length; i += 4) { R += px[i]; Gc += px[i + 1]; B += px[i + 2] }
